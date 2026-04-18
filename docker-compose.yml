@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: grantchina-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: grantchina
+      POSTGRES_USER: grantchina
+      POSTGRES_PASSWORD: grantchina
+    ports:
+      - "5432:5432"
+    volumes:
+      - grantchina_pgdata:/var/lib/postgresql/data
+
+volumes:
+  grantchina_pgdata:

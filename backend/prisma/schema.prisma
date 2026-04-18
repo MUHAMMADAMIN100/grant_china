@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum Direction {
+  BACHELOR
+  MASTER
+  LANGUAGE
+}
+
+enum ApplicationStatus {
+  NEW
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum StudentStatus {
+  ACTIVE
+  PAUSED
+  GRADUATED
+  ARCHIVED
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String
+  fullName   String
+  role       Role     @default(EMPLOYEE)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  notifications Notification[]
+}
+
+model Application {
+  id         String            @id @default(uuid())
+  fullName   String
+  phone      String
+  email      String?
+  direction  Direction
+  comment    String?
+  status     ApplicationStatus @default(NEW)
+  studentId  String?
+  student    Student?          @relation(fields: [studentId], references: [id])
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([status])
+  @@index([direction])
+}
+
+model Student {
+  id           String        @id @default(uuid())
+  fullName     String
+  phones       String[]      @default([])
+  email        String?
+  photoUrl     String?
+  direction    Direction
+  cabinet      Int
+  status       StudentStatus @default(ACTIVE)
+  comment      String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  documents    Document[]
+  applications Application[]
+
+  @@index([direction])
+  @@index([cabinet])
+  @@index([status])
+}
+
+model Document {
+  id         String   @id @default(uuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  filename   String
+  originalName String
+  mimeType   String
+  size       Int
+  url        String
+  createdAt  DateTime @default(now())
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String   // "APPLICATION_NEW", "APPLICATION_DELAY", etc.
+  title      String
+  message    String
+  payload    Json?
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
