@@ -1,39 +1,48 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter: nodemailer.Transporter | null = null;
-  private from: string;
+  private apiKey: string | null;
+  private fromEmail: string;
+  private fromName: string;
   private adminEmail: string | null;
 
   constructor(private config: ConfigService) {
-    const host = config.get<string>('SMTP_HOST');
-    const port = parseInt(config.get<string>('SMTP_PORT') || '587', 10);
-    const user = config.get<string>('SMTP_USER');
-    const pass = config.get<string>('SMTP_PASSWORD');
-    this.from = config.get<string>('SMTP_FROM') || 'GrantChina <noreply@grantchina.local>';
+    this.apiKey = config.get<string>('BREVO_API_KEY') || null;
+    this.fromEmail = config.get<string>('MAIL_FROM_EMAIL') || '';
+    this.fromName = config.get<string>('MAIL_FROM_NAME') || 'GrantChina';
     this.adminEmail = config.get<string>('ADMIN_EMAIL') || null;
 
-    if (host && user && pass) {
-      this.transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-      });
-      this.logger.log(`Mail enabled (${host}:${port})`);
+    if (this.apiKey && this.fromEmail) {
+      this.logger.log(`Mail enabled (Brevo API, from ${this.fromEmail})`);
     } else {
-      this.logger.warn('Mail disabled (SMTP credentials not configured)');
+      this.logger.warn('Mail disabled (BREVO_API_KEY or MAIL_FROM_EMAIL not set)');
     }
   }
 
   async send(to: string, subject: string, html: string) {
-    if (!this.transporter) return;
+    if (!this.apiKey || !this.fromEmail) return;
     try {
-      await this.transporter.sendMail({ from: this.from, to, subject, html });
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': this.apiKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: this.fromName, email: this.fromEmail },
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        this.logger.error(`Mail send failed: ${res.status} ${body}`);
+      }
     } catch (err) {
       this.logger.error('Mail send failed', err as Error);
     }
