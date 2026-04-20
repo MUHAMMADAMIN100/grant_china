@@ -6,6 +6,7 @@ import {
 } from '../api/students';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
+import { useUI } from '../ui/Dialogs';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
 
@@ -18,6 +19,7 @@ const fmtBytes = (b: number) => {
 export default function StudentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { confirm, toast } = useUI();
   const [student, setStudent] = useState<Student | null>(null);
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState<any>(null);
@@ -73,15 +75,29 @@ export default function StudentDetail() {
   };
 
   const onRemoveDoc = async (docId: string) => {
-    if (!confirm('Удалить документ?')) return;
+    const ok = await confirm({
+      title: 'Удалить документ',
+      message: 'Документ будет удалён безвозвратно.',
+      confirmText: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     await deleteDocument(docId);
+    toast('Документ удалён', 'success');
     await reload();
   };
 
   const onDeleteStudent = async () => {
     if (!id) return;
-    if (!confirm('Удалить студента? Все документы будут удалены.')) return;
+    const ok = await confirm({
+      title: 'Удалить студента',
+      message: 'Все документы будут удалены. Действие нельзя отменить.',
+      confirmText: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     await deleteStudent(id);
+    toast('Студент удалён', 'success');
     navigate('/students');
   };
 

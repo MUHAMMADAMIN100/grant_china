@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { createUser, deleteUser, listUsers, updateUser } from '../api/users';
 import type { Role, User } from '../api/types';
 import { useAuth } from '../store/auth';
+import { useUI } from '../ui/Dialogs';
 
 export default function Users() {
   const me = useAuth((s) => s.user);
+  const { confirm, toast } = useUI();
   const [items, setItems] = useState<User[]>([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ email: '', fullName: '', password: '', role: 'EMPLOYEE' as Role });
@@ -32,9 +34,19 @@ export default function Users() {
   };
 
   const onDelete = async (u: User) => {
-    if (u.id === me?.id) { alert('Нельзя удалить себя'); return; }
-    if (!confirm(`Удалить пользователя ${u.fullName}?`)) return;
+    if (u.id === me?.id) {
+      toast('Нельзя удалить самого себя', 'error');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Удалить пользователя',
+      message: `Пользователь «${u.fullName}» будет удалён. Действие нельзя отменить.`,
+      confirmText: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     await deleteUser(u.id);
+    toast('Пользователь удалён', 'success');
     load();
   };
 

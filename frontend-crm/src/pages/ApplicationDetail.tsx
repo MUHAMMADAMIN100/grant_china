@@ -3,10 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { convertApplication, deleteApplication, getApplication, updateApplication } from '../api/applications';
 import type { Application, ApplicationStatus } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
+import { useUI } from '../ui/Dialogs';
 
 export default function ApplicationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { confirm, toast } = useUI();
   const [app, setApp] = useState<Application | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,19 +24,32 @@ export default function ApplicationDetail() {
 
   const onConvert = async () => {
     if (!id) return;
-    if (!confirm('Сконвертировать заявку в студента? Заявка будет помечена как завершённая.')) return;
+    const ok = await confirm({
+      title: 'Конвертация заявки',
+      message: 'Сконвертировать заявку в студента? Заявка будет помечена как завершённая.',
+      confirmText: 'Конвертировать',
+    });
+    if (!ok) return;
     try {
       const student = await convertApplication(id);
+      toast('Студент создан', 'success');
       navigate(`/students/${student.id}`);
     } catch (e: any) {
-      alert(e.response?.data?.message || 'Ошибка конвертации');
+      toast(e.response?.data?.message || 'Ошибка конвертации', 'error');
     }
   };
 
   const onDelete = async () => {
     if (!id) return;
-    if (!confirm('Удалить заявку?')) return;
+    const ok = await confirm({
+      title: 'Удалить заявку',
+      message: 'Действие нельзя отменить. Вы уверены?',
+      confirmText: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     await deleteApplication(id);
+    toast('Заявка удалена', 'success');
     navigate('/applications');
   };
 
