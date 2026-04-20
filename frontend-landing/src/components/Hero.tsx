@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { fadeUp, staggerContainer, scaleIn } from '../motion';
+import Icon from '../Icon';
 
 export default function Hero() {
   return (
@@ -13,7 +14,8 @@ export default function Hero() {
         >
           <div>
             <motion.span className="hero-eyebrow" variants={fadeUp}>
-              🏯 Образование в Китае с 2015 года
+              <Icon name="school" size={18} style={{ marginRight: 6 }} />
+              Образование в Китае с 2015 года
             </motion.span>
             <motion.h1 variants={fadeUp}>
               Обучение в <span className="accent">лучших вузах Китая</span> — без посредников
@@ -50,7 +52,7 @@ export default function Hero() {
               transition: { y: { duration: 4, repeat: Infinity, ease: 'easeInOut' } },
             }}
           >
-            🏯
+            <Icon name="castle" size={180} style={{ color: 'var(--primary)' }} />
           </motion.div>
         </motion.div>
 

@@ -1,10 +1,11 @@
 import { motion } from 'framer-motion';
 import { fadeUp, staggerContainer, viewportOnce } from '../motion';
+import Icon from '../Icon';
 
 const contacts = [
-  { icon: '📞', title: 'Телефон', content: <a href="tel:+992900000000">+992 900 00 00 00</a> },
-  { icon: '✉️', title: 'Email', content: <a href="mailto:info@grantchina.tj">info@grantchina.tj</a> },
-  { icon: '📍', title: 'Адрес', content: <span>г. Душанбе, ул. Рудаки, 137</span> },
+  { icon: 'call', title: 'Телефон', content: <a href="tel:+992900000000">+992 900 00 00 00</a> },
+  { icon: 'mail', title: 'Email', content: <a href="mailto:info@grantchina.tj">info@grantchina.tj</a> },
+  { icon: 'location_on', title: 'Адрес', content: <span>г. Душанбе, ул. Рудаки, 137</span> },
 ];
 
 export default function Contacts() {
@@ -43,7 +44,7 @@ export default function Contacts() {
                 whileHover={{ scale: 1.2, rotate: 10 }}
                 transition={{ type: 'spring', stiffness: 300 }}
               >
-                {c.icon}
+                <Icon name={c.icon} size={40} />
               </motion.div>
               <h3>{c.title}</h3>
               {c.content}

@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../store/auth';
+import Icon from '../Icon';
 
 export default function Sidebar() {
   const user = useAuth((s) => s.user);
@@ -8,10 +9,10 @@ export default function Sidebar() {
   const initials = user?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
 
   const links = [
-    { to: '/dashboard', icon: '📊', label: 'Дашборд' },
-    { to: '/applications', icon: '📝', label: 'Заявки' },
-    { to: '/students', icon: '🎓', label: 'Студенты' },
-    ...(user?.role === 'ADMIN' ? [{ to: '/users', icon: '👥', label: 'Пользователи' }] : []),
+    { to: '/dashboard', icon: 'dashboard', label: 'Дашборд' },
+    { to: '/applications', icon: 'assignment', label: 'Заявки' },
+    { to: '/students', icon: 'school', label: 'Студенты' },
+    ...(user?.role === 'ADMIN' ? [{ to: '/users', icon: 'group', label: 'Пользователи' }] : []),
   ];
 
   return (
@@ -52,7 +53,7 @@ export default function Sidebar() {
                 whileHover={{ scale: 1.2, rotate: 8 }}
                 transition={{ type: 'spring', stiffness: 400 }}
               >
-                {l.icon}
+                <Icon name={l.icon} size={22} />
               </motion.span>
               <span>{l.label}</span>
             </NavLink>
@@ -83,7 +84,7 @@ export default function Sidebar() {
           whileHover={{ scale: 1.15, rotate: 15 }}
           whileTap={{ scale: 0.9 }}
         >
-          ⏻
+          <Icon name="logout" size={20} />
         </motion.button>
       </motion.div>
     </motion.aside>

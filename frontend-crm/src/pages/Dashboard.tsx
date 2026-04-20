@@ -4,6 +4,7 @@ import { applicationStats } from '../api/applications';
 import { studentStats } from '../api/students';
 import { DIRECTION_LABEL, STATUS_LABEL } from '../api/types';
 import { fadeUp, staggerContainer, listItem } from '../motion';
+import Icon from '../Icon';
 
 export default function Dashboard() {
   const [appStats, setAppStats] = useState<any>(null);
@@ -19,11 +20,11 @@ export default function Dashboard() {
   const completed = appStats?.byStatus?.find((s: any) => s.status === 'COMPLETED')?._count || 0;
 
   const statCards = [
-    { label: 'Всего заявок', value: appStats?.total ?? '—', color: undefined, bg: '#eff6ff', icon: '📝' },
-    { label: 'Новые', value: newCount, color: '#3b82f6', bg: '#eff6ff', icon: '🆕' },
-    { label: 'В работе', value: inProgress, color: '#f59e0b', bg: '#fffbeb', icon: '⚙️' },
-    { label: 'Завершено', value: completed, color: '#10b981', bg: '#ecfdf5', icon: '✅' },
-    { label: 'Всего студентов', value: stuStats?.total ?? '—', color: undefined, bg: '#fff0f0', icon: '🎓' },
+    { label: 'Всего заявок', value: appStats?.total ?? '—', color: '#3b82f6', bg: '#eff6ff', icon: 'assignment' },
+    { label: 'Новые', value: newCount, color: '#3b82f6', bg: '#eff6ff', icon: 'fiber_new' },
+    { label: 'В работе', value: inProgress, color: '#f59e0b', bg: '#fffbeb', icon: 'pending_actions' },
+    { label: 'Завершено', value: completed, color: '#10b981', bg: '#ecfdf5', icon: 'task_alt' },
+    { label: 'Всего студентов', value: stuStats?.total ?? '—', color: '#d52b2b', bg: '#fff0f0', icon: 'school' },
   ];
 
   return (
@@ -50,11 +51,11 @@ export default function Dashboard() {
               </div>
               <motion.div
                 className="stat-icon"
-                style={{ background: c.bg }}
+                style={{ background: c.bg, color: c.color }}
                 whileHover={{ scale: 1.15, rotate: 8 }}
                 transition={{ type: 'spring', stiffness: 300 }}
               >
-                {c.icon}
+                <Icon name={c.icon} size={24} />
               </motion.div>
             </div>
           </motion.div>

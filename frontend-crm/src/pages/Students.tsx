@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
+import Icon from '../Icon';
 
 export default function Students() {
   const navigate = useNavigate();
@@ -80,7 +81,7 @@ export default function Students() {
             </motion.div>
           ) : items.length === 0 ? (
             <motion.div key="empty" className="empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <div className="empty-icon">🎓</div>Студентов не найдено
+              <div className="empty-icon"><Icon name="school" size={48} /></div>Студентов не найдено
             </motion.div>
           ) : (
             <motion.div key="table" className="table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

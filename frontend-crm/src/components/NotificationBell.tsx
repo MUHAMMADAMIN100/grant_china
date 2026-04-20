@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listNotifications, markAllRead, markRead, unreadCount } from '../api/notifications';
 import type { Notification } from '../api/types';
+import Icon from '../Icon';
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
@@ -49,7 +50,7 @@ export default function NotificationBell() {
         animate={count > 0 ? { rotate: [0, -12, 12, -8, 8, 0] } : {}}
         transition={count > 0 ? { duration: 0.6, repeat: Infinity, repeatDelay: 3 } : {}}
       >
-        🔔
+        <Icon name="notifications" size={22} />
         <AnimatePresence>
           {count > 0 && (
             <motion.span

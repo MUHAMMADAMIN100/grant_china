@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listApplications } from '../api/applications';
 import type { Application, ApplicationStatus, Direction } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
+import Icon from '../Icon';
 
 export default function Applications() {
   const navigate = useNavigate();
@@ -75,7 +76,7 @@ export default function Applications() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
             >
-              <div className="empty-icon">📭</div>Заявок не найдено
+              <div className="empty-icon"><Icon name="inbox" size={48} /></div>Заявок не найдено
             </motion.div>
           ) : (
             <motion.div

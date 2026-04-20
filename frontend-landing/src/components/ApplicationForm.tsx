@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { submitApplication, type Direction } from '../api';
 import { fadeUp, staggerContainer, viewportOnce } from '../motion';
+import Icon from '../Icon';
 
 export default function ApplicationForm() {
   const [fullName, setFullName] = useState('');
@@ -80,7 +81,8 @@ export default function ApplicationForm() {
                 exit={{ opacity: 0, scale: 0.9 }}
                 transition={{ duration: 0.3 }}
               >
-                ✓ Заявка отправлена! Мы свяжемся с вами в ближайшее время.
+                <Icon name="check_circle" size={20} style={{ marginRight: 8, color: 'var(--success)' }} />
+                Заявка отправлена! Мы свяжемся с вами в ближайшее время.
               </motion.div>
             )}
             {serverError && (
@@ -91,7 +93,8 @@ export default function ApplicationForm() {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.4 }}
               >
-                ⚠ {serverError}
+                <Icon name="warning" size={20} style={{ marginRight: 8 }} />
+                {serverError}
               </motion.div>
             )}
           </AnimatePresence>

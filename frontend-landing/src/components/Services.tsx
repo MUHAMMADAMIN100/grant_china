@@ -1,10 +1,11 @@
 import { motion } from 'framer-motion';
 import { fadeUp, staggerContainer, viewportOnce } from '../motion';
+import Icon from '../Icon';
 
 const services = [
   {
     iconClass: 'bachelor',
-    icon: '🎓',
+    icon: 'school',
     title: 'Бакалавриат',
     text: 'Высшее образование в престижных вузах Китая на английском или китайском языке.',
     items: [
@@ -16,7 +17,7 @@ const services = [
   },
   {
     iconClass: 'master',
-    icon: '🎯',
+    icon: 'workspace_premium',
     title: 'Магистратура',
     text: 'Получите магистерскую степень в одном из топ-200 университетов мира.',
     items: [
@@ -28,7 +29,7 @@ const services = [
   },
   {
     iconClass: 'language',
-    icon: '💬',
+    icon: 'translate',
     title: 'Языковые курсы',
     text: 'Интенсивное изучение китайского языка с погружением в культуру.',
     items: [
@@ -77,7 +78,7 @@ export default function Services() {
                 className={`service-icon ${s.iconClass}`}
                 whileHover={{ rotate: [0, -8, 8, 0], transition: { duration: 0.5 } }}
               >
-                {s.icon}
+                <Icon name={s.icon} size={32} />
               </motion.div>
               <h3>{s.title}</h3>
               <p>{s.text}</p>
