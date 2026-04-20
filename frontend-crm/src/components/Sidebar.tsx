@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { useAuth } from '../store/auth';
 
 export default function Sidebar() {
@@ -6,28 +7,85 @@ export default function Sidebar() {
   const logout = useAuth((s) => s.logout);
   const initials = user?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
 
+  const links = [
+    { to: '/dashboard', icon: '📊', label: 'Дашборд' },
+    { to: '/applications', icon: '📝', label: 'Заявки' },
+    { to: '/students', icon: '🎓', label: 'Студенты' },
+    ...(user?.role === 'ADMIN' ? [{ to: '/users', icon: '👥', label: 'Пользователи' }] : []),
+  ];
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
+    <motion.aside
+      className="sidebar"
+      initial={{ x: -80, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <motion.div
+        className="sidebar-logo"
+        whileHover={{ scale: 1.03 }}
+        transition={{ type: 'spring', stiffness: 300 }}
+      >
         <span className="sidebar-logo-mark">G</span>
         <span>GrantChina</span>
-      </div>
-      <nav className="sidebar-nav">
-        <NavLink to="/dashboard"><span className="sidebar-nav-icon">📊</span><span>Дашборд</span></NavLink>
-        <NavLink to="/applications"><span className="sidebar-nav-icon">📝</span><span>Заявки</span></NavLink>
-        <NavLink to="/students"><span className="sidebar-nav-icon">🎓</span><span>Студенты</span></NavLink>
-        {user?.role === 'ADMIN' && (
-          <NavLink to="/users"><span className="sidebar-nav-icon">👥</span><span>Пользователи</span></NavLink>
-        )}
-      </nav>
-      <div className="sidebar-user">
-        <div className="user-avatar">{initials}</div>
+      </motion.div>
+      <motion.nav
+        className="sidebar-nav"
+        initial="hidden"
+        animate="show"
+        variants={{
+          hidden: {},
+          show: { transition: { staggerChildren: 0.07, delayChildren: 0.15 } },
+        }}
+      >
+        {links.map((l) => (
+          <motion.div
+            key={l.to}
+            variants={{
+              hidden: { opacity: 0, x: -15 },
+              show: { opacity: 1, x: 0, transition: { duration: 0.3 } },
+            }}
+          >
+            <NavLink to={l.to}>
+              <motion.span
+                className="sidebar-nav-icon"
+                whileHover={{ scale: 1.2, rotate: 8 }}
+                transition={{ type: 'spring', stiffness: 400 }}
+              >
+                {l.icon}
+              </motion.span>
+              <span>{l.label}</span>
+            </NavLink>
+          </motion.div>
+        ))}
+      </motion.nav>
+      <motion.div
+        className="sidebar-user"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4, duration: 0.3 }}
+      >
+        <motion.div
+          className="user-avatar"
+          whileHover={{ scale: 1.1 }}
+          transition={{ type: 'spring', stiffness: 300 }}
+        >
+          {initials}
+        </motion.div>
         <div className="user-info">
           <div className="user-name">{user?.fullName}</div>
           <div className="user-role">{user?.role === 'ADMIN' ? 'Администратор' : 'Сотрудник'}</div>
         </div>
-        <button className="logout-btn" onClick={logout} title="Выйти">⏻</button>
-      </div>
-    </aside>
+        <motion.button
+          className="logout-btn"
+          onClick={logout}
+          title="Выйти"
+          whileHover={{ scale: 1.15, rotate: 15 }}
+          whileTap={{ scale: 0.9 }}
+        >
+          ⏻
+        </motion.button>
+      </motion.div>
+    </motion.aside>
   );
 }

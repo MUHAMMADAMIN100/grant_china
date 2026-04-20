@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { submitApplication, type Direction } from '../api';
+import { fadeUp, staggerContainer, viewportOnce } from '../motion';
 
 export default function ApplicationForm() {
   const [fullName, setFullName] = useState('');
@@ -47,19 +49,52 @@ export default function ApplicationForm() {
   return (
     <section id="apply" className="form-section">
       <div className="container">
-        <div className="section-eyebrow">Заявка</div>
-        <h2>Получите бесплатную консультацию</h2>
-        <p className="section-sub">
-          Оставьте заявку — менеджер свяжется в течение часа и подберёт программу под вас
-        </p>
+        <motion.div
+          variants={staggerContainer}
+          initial="hidden"
+          whileInView="show"
+          viewport={viewportOnce}
+        >
+          <motion.div className="section-eyebrow" variants={fadeUp}>Заявка</motion.div>
+          <motion.h2 variants={fadeUp}>Получите бесплатную консультацию</motion.h2>
+          <motion.p className="section-sub" variants={fadeUp}>
+            Оставьте заявку — менеджер свяжется в течение часа и подберёт программу под вас
+          </motion.p>
+        </motion.div>
 
-        <form className="form-card" onSubmit={handleSubmit} noValidate>
-          {success && (
-            <div className="form-success">
-              ✓ Заявка отправлена! Мы свяжемся с вами в ближайшее время.
-            </div>
-          )}
-          {serverError && <div className="form-fail">⚠ {serverError}</div>}
+        <motion.form
+          className="form-card"
+          onSubmit={handleSubmit}
+          noValidate
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={viewportOnce}
+          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <AnimatePresence>
+            {success && (
+              <motion.div
+                className="form-success"
+                initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.3 }}
+              >
+                ✓ Заявка отправлена! Мы свяжемся с вами в ближайшее время.
+              </motion.div>
+            )}
+            {serverError && (
+              <motion.div
+                className="form-fail"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: [0, -8, 8, -6, 6, 0] }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.4 }}
+              >
+                ⚠ {serverError}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div className="form-row">
             <label>ФИО *</label>
@@ -68,7 +103,18 @@ export default function ApplicationForm() {
               onChange={(e) => setFullName(e.target.value)}
               placeholder="Иванов Иван Иванович"
             />
-            {errors.fullName && <div className="form-error">{errors.fullName}</div>}
+            <AnimatePresence>
+              {errors.fullName && (
+                <motion.div
+                  className="form-error"
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                >
+                  {errors.fullName}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="form-row">
@@ -78,7 +124,18 @@ export default function ApplicationForm() {
               onChange={(e) => setPhone(e.target.value)}
               placeholder="+992 900 00 00 00"
             />
-            {errors.phone && <div className="form-error">{errors.phone}</div>}
+            <AnimatePresence>
+              {errors.phone && (
+                <motion.div
+                  className="form-error"
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                >
+                  {errors.phone}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="form-row">
@@ -88,7 +145,18 @@ export default function ApplicationForm() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
             />
-            {errors.email && <div className="form-error">{errors.email}</div>}
+            <AnimatePresence>
+              {errors.email && (
+                <motion.div
+                  className="form-error"
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                >
+                  {errors.email}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="form-row">
@@ -109,15 +177,17 @@ export default function ApplicationForm() {
             />
           </div>
 
-          <button
+          <motion.button
             type="submit"
             className="btn btn-primary btn-large"
             style={{ width: '100%' }}
             disabled={submitting}
+            whileHover={!submitting ? { scale: 1.02, y: -2 } : {}}
+            whileTap={!submitting ? { scale: 0.98 } : {}}
           >
             {submitting ? 'Отправляем...' : 'Отправить заявку'}
-          </button>
-        </form>
+          </motion.button>
+        </motion.form>
       </div>
     </section>
   );

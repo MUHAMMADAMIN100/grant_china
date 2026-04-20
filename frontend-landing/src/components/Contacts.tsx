@@ -1,27 +1,55 @@
+import { motion } from 'framer-motion';
+import { fadeUp, staggerContainer, viewportOnce } from '../motion';
+
+const contacts = [
+  { icon: '📞', title: 'Телефон', content: <a href="tel:+992900000000">+992 900 00 00 00</a> },
+  { icon: '✉️', title: 'Email', content: <a href="mailto:info@grantchina.tj">info@grantchina.tj</a> },
+  { icon: '📍', title: 'Адрес', content: <span>г. Душанбе, ул. Рудаки, 137</span> },
+];
+
 export default function Contacts() {
   return (
     <section id="contacts" className="section section-soft">
       <div className="container">
-        <div className="section-eyebrow">Контакты</div>
-        <h2>Свяжитесь с нами</h2>
-        <p className="section-sub">Ответим на любые вопросы о поступлении в Китай</p>
-        <div className="contacts-grid">
-          <div className="contact-item">
-            <div className="contact-icon">📞</div>
-            <h3>Телефон</h3>
-            <a href="tel:+992900000000">+992 900 00 00 00</a>
-          </div>
-          <div className="contact-item">
-            <div className="contact-icon">✉️</div>
-            <h3>Email</h3>
-            <a href="mailto:info@grantchina.tj">info@grantchina.tj</a>
-          </div>
-          <div className="contact-item">
-            <div className="contact-icon">📍</div>
-            <h3>Адрес</h3>
-            <span>г. Душанбе, ул. Рудаки, 137</span>
-          </div>
-        </div>
+        <motion.div
+          variants={staggerContainer}
+          initial="hidden"
+          whileInView="show"
+          viewport={viewportOnce}
+        >
+          <motion.div className="section-eyebrow" variants={fadeUp}>Контакты</motion.div>
+          <motion.h2 variants={fadeUp}>Свяжитесь с нами</motion.h2>
+          <motion.p className="section-sub" variants={fadeUp}>
+            Ответим на любые вопросы о поступлении в Китай
+          </motion.p>
+        </motion.div>
+
+        <motion.div
+          className="contacts-grid"
+          variants={staggerContainer}
+          initial="hidden"
+          whileInView="show"
+          viewport={viewportOnce}
+        >
+          {contacts.map((c) => (
+            <motion.div
+              key={c.title}
+              className="contact-item"
+              variants={fadeUp}
+              whileHover={{ y: -6, transition: { duration: 0.25 } }}
+            >
+              <motion.div
+                className="contact-icon"
+                whileHover={{ scale: 1.2, rotate: 10 }}
+                transition={{ type: 'spring', stiffness: 300 }}
+              >
+                {c.icon}
+              </motion.div>
+              <h3>{c.title}</h3>
+              {c.content}
+            </motion.div>
+          ))}
+        </motion.div>
       </div>
     </section>
   );

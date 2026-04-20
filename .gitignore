@@ -38,3 +38,6 @@ backend/node_modules/.prisma/
 # Vite
 frontend-landing/dist/
 frontend-crm/dist/
+
+# TS build info
+*.tsbuildinfo

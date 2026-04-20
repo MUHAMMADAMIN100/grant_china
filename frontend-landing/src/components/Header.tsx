@@ -1,18 +1,37 @@
+import { motion } from 'framer-motion';
+
 export default function Header() {
   return (
-    <header className="header">
+    <motion.header
+      className="header"
+      initial={{ y: -60, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div className="container header-inner">
-        <a href="#" className="logo">
+        <motion.a
+          href="#"
+          className="logo"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
           <span className="logo-mark">G</span>
           <span>GrantChina</span>
-        </a>
+        </motion.a>
         <nav className="nav">
-          <a href="#services">Программы</a>
-          <a href="#advantages">Преимущества</a>
-          <a href="#contacts">Контакты</a>
+          <motion.a href="#services" whileHover={{ y: -2 }}>Программы</motion.a>
+          <motion.a href="#advantages" whileHover={{ y: -2 }}>Преимущества</motion.a>
+          <motion.a href="#contacts" whileHover={{ y: -2 }}>Контакты</motion.a>
         </nav>
-        <a href="#apply" className="btn btn-primary">Оставить заявку</a>
+        <motion.a
+          href="#apply"
+          className="btn btn-primary"
+          whileHover={{ scale: 1.05, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          Оставить заявку
+        </motion.a>
       </div>
-    </header>
+    </motion.header>
   );
 }

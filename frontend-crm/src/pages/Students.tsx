@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
@@ -31,10 +32,22 @@ export default function Students() {
   }, [search, direction, status, cabinet]);
 
   return (
-    <div className="card">
+    <motion.div
+      className="card"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
       <div className="card-header">
         <h2 className="card-title">База студентов</h2>
-        <button className="btn btn-primary" onClick={() => navigate('/students/new')}>+ Новый студент</button>
+        <motion.button
+          className="btn btn-primary"
+          onClick={() => navigate('/students/new')}
+          whileHover={{ scale: 1.05, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          + Новый студент
+        </motion.button>
       </div>
       <div className="card-body">
         <div className="filters">
@@ -60,33 +73,52 @@ export default function Students() {
           </select>
         </div>
 
-        {loading ? (
-          <div className="empty">Загрузка...</div>
-        ) : items.length === 0 ? (
-          <div className="empty"><div className="empty-icon">🎓</div>Студентов не найдено</div>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ФИО</th><th>Телефоны</th><th>Направление</th><th>Кабинет</th><th>Статус</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((s) => (
-                  <tr key={s.id} onClick={() => navigate(`/students/${s.id}`)}>
-                    <td><strong>{s.fullName}</strong></td>
-                    <td>{s.phones.join(', ') || '—'}</td>
-                    <td>{DIRECTION_LABEL[s.direction]}</td>
-                    <td>№{s.cabinet}</td>
-                    <td><span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span></td>
+        <AnimatePresence mode="wait">
+          {loading ? (
+            <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              Загрузка...
+            </motion.div>
+          ) : items.length === 0 ? (
+            <motion.div key="empty" className="empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+              <div className="empty-icon">🎓</div>Студентов не найдено
+            </motion.div>
+          ) : (
+            <motion.div key="table" className="table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>ФИО</th><th>Телефоны</th><th>Направление</th><th>Кабинет</th><th>Статус</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <motion.tbody
+                  initial="hidden"
+                  animate="show"
+                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04 } } }}
+                >
+                  {items.map((s) => (
+                    <motion.tr
+                      key={s.id}
+                      onClick={() => navigate(`/students/${s.id}`)}
+                      variants={{
+                        hidden: { opacity: 0, x: -10 },
+                        show: { opacity: 1, x: 0, transition: { duration: 0.25 } },
+                      }}
+                      whileHover={{ backgroundColor: 'rgba(0,0,0,0.02)', x: 2 }}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td><strong>{s.fullName}</strong></td>
+                      <td>{s.phones.join(', ') || '—'}</td>
+                      <td>{DIRECTION_LABEL[s.direction]}</td>
+                      <td>№{s.cabinet}</td>
+                      <td><span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span></td>
+                    </motion.tr>
+                  ))}
+                </motion.tbody>
+              </table>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
+    </motion.div>
   );
 }

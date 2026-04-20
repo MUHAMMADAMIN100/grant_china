@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { listApplications } from '../api/applications';
 import type { Application, ApplicationStatus, Direction } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
@@ -29,7 +30,12 @@ export default function Applications() {
   }, [search, status, direction]);
 
   return (
-    <div className="card">
+    <motion.div
+      className="card"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
       <div className="card-header">
         <h2 className="card-title">Все заявки</h2>
       </div>
@@ -50,33 +56,70 @@ export default function Applications() {
           </select>
         </div>
 
-        {loading ? (
-          <div className="empty">Загрузка...</div>
-        ) : items.length === 0 ? (
-          <div className="empty"><div className="empty-icon">📭</div>Заявок не найдено</div>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ФИО</th><th>Телефон</th><th>Направление</th><th>Статус</th><th>Дата</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((a) => (
-                  <tr key={a.id} onClick={() => navigate(`/applications/${a.id}`)}>
-                    <td><strong>{a.fullName}</strong></td>
-                    <td>{a.phone}</td>
-                    <td>{DIRECTION_LABEL[a.direction]}</td>
-                    <td><span className={`badge ${STATUS_BADGE[a.status]}`}>{STATUS_LABEL[a.status]}</span></td>
-                    <td>{new Date(a.createdAt).toLocaleDateString('ru-RU')}</td>
+        <AnimatePresence mode="wait">
+          {loading ? (
+            <motion.div
+              key="loading"
+              className="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              Загрузка...
+            </motion.div>
+          ) : items.length === 0 ? (
+            <motion.div
+              key="empty"
+              className="empty"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="empty-icon">📭</div>Заявок не найдено
+            </motion.div>
+          ) : (
+            <motion.div
+              key="table"
+              className="table-wrap"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>ФИО</th><th>Телефон</th><th>Направление</th><th>Статус</th><th>Дата</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <motion.tbody
+                  initial="hidden"
+                  animate="show"
+                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04 } } }}
+                >
+                  {items.map((a) => (
+                    <motion.tr
+                      key={a.id}
+                      onClick={() => navigate(`/applications/${a.id}`)}
+                      variants={{
+                        hidden: { opacity: 0, x: -10 },
+                        show: { opacity: 1, x: 0, transition: { duration: 0.25 } },
+                      }}
+                      whileHover={{ backgroundColor: 'rgba(0,0,0,0.02)', x: 2 }}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td><strong>{a.fullName}</strong></td>
+                      <td>{a.phone}</td>
+                      <td>{DIRECTION_LABEL[a.direction]}</td>
+                      <td><span className={`badge ${STATUS_BADGE[a.status]}`}>{STATUS_LABEL[a.status]}</span></td>
+                      <td>{new Date(a.createdAt).toLocaleDateString('ru-RU')}</td>
+                    </motion.tr>
+                  ))}
+                </motion.tbody>
+              </table>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
+    </motion.div>
   );
 }

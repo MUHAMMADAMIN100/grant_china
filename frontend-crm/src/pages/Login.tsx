@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../store/auth';
 
 export default function Login() {
@@ -26,27 +27,75 @@ export default function Login() {
 
   return (
     <div className="login-page">
-      <form className="login-card" onSubmit={onSubmit}>
-        <div className="login-logo">
+      <motion.form
+        className="login-card"
+        onSubmit={onSubmit}
+        initial={{ opacity: 0, y: 30, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <motion.div
+          className="login-logo"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.4 }}
+        >
           <span className="sidebar-logo-mark" style={{ background: 'linear-gradient(135deg, #d52b2b, #ff6b6b)' }}>G</span>
           <span>GrantChina CRM</span>
-        </div>
-        {error && <div className="error-banner">{error}</div>}
-        <div className="form-group">
+        </motion.div>
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              className="error-banner"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto', x: [0, -6, 6, -4, 4, 0] }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.35 }}
+            >
+              {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <motion.div
+          className="form-group"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, duration: 0.3 }}
+        >
           <label>Email</label>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </div>
-        <div className="form-group">
+        </motion.div>
+        <motion.div
+          className="form-group"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4, duration: 0.3 }}
+        >
           <label>Пароль</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        </div>
-        <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} disabled={submitting}>
+        </motion.div>
+        <motion.button
+          type="submit"
+          className="btn btn-primary"
+          style={{ width: '100%', justifyContent: 'center' }}
+          disabled={submitting}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 0.3 }}
+          whileHover={!submitting ? { scale: 1.02, y: -2 } : {}}
+          whileTap={!submitting ? { scale: 0.98 } : {}}
+        >
           {submitting ? 'Вход...' : 'Войти'}
-        </button>
-        <p style={{ textAlign: 'center', marginTop: 18, fontSize: 13, color: '#5b6478' }}>
+        </motion.button>
+        <motion.p
+          style={{ textAlign: 'center', marginTop: 18, fontSize: 13, color: '#5b6478' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6 }}
+        >
           По умолчанию: admin@grantchina.local / admin123
-        </p>
-      </form>
+        </motion.p>
+      </motion.form>
     </div>
   );
 }
