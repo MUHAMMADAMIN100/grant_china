@@ -40,8 +40,8 @@ export default function Login() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.4 }}
         >
-          <span className="sidebar-logo-mark" style={{ background: 'linear-gradient(135deg, #d52b2b, #ff6b6b)' }}>G</span>
-          <span>GrantChina CRM</span>
+          <img src="/logo.png" alt="Grant China" className="login-logo-image" />
+          <span className="login-logo-label">CRM</span>
         </motion.div>
         <AnimatePresence>
           {error && (

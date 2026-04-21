@@ -60,9 +60,12 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   position: sticky; top: 0; height: 100vh;
 }
 .sidebar-logo {
-  padding: 24px; display: flex; align-items: center; gap: 10px;
-  font-size: 18px; font-weight: 700;
+  padding: 18px 20px; display: flex; align-items: center; justify-content: center;
   border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: white;
+}
+.sidebar-logo-image {
+  height: 64px; width: auto; display: block;
 }
 .sidebar-logo-mark {
   width: 36px; height: 36px; border-radius: 10px;
@@ -275,8 +278,16 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   box-shadow: 0 20px 60px rgba(0,0,0,0.3);
 }
 .login-logo {
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  margin-bottom: 28px; font-size: 22px; font-weight: 700;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  margin-bottom: 28px;
+}
+.login-logo-image {
+  height: 130px; width: auto; display: block;
+}
+.login-logo-label {
+  font-size: 14px; font-weight: 700;
+  letter-spacing: 3px; color: var(--primary);
+  text-transform: uppercase;
 }
 
 /* Detail */
@@ -376,6 +387,8 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .sidebar { width: 70px; }
   .sidebar-logo span:not(.sidebar-logo-mark), .sidebar-nav a span:not(.sidebar-nav-icon),
   .user-info { display: none; }
+  .sidebar-logo { padding: 12px 8px; }
+  .sidebar-logo-image { height: 40px; }
   .sidebar-nav a { justify-content: center; }
   .form-grid-2 { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
