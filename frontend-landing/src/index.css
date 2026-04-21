@@ -226,21 +226,36 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .form-row { margin-bottom: 18px; }
 .form-row label {
-  display: block; font-weight: 600;
-  font-size: 14px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-weight: 600; font-size: 14px; margin-bottom: 6px;
+}
+.form-counter {
+  font-size: 12px; font-weight: 500; color: var(--text-soft);
 }
 .form-row input, .form-row select, .form-row textarea {
   width: 100%; padding: 12px 14px;
   border: 2px solid var(--border);
   border-radius: 10px;
   font-size: 15px; font-family: inherit;
-  transition: border .2s;
+  transition: border .2s, background .2s;
 }
 .form-row input:focus, .form-row select:focus, .form-row textarea:focus {
   outline: none; border-color: var(--primary);
 }
+.form-row .input-error {
+  border-color: var(--danger);
+  background: #fef2f2;
+}
+.form-row .input-error:focus { border-color: var(--danger); }
 .form-row textarea { resize: vertical; min-height: 90px; }
-.form-error { color: var(--danger); font-size: 13px; margin-top: 4px; }
+.form-error {
+  color: var(--danger); font-size: 13px; margin-top: 6px;
+  display: flex; align-items: center; gap: 4px;
+}
+.form-error::before {
+  content: 'error'; font-family: 'Material Symbols Rounded';
+  font-size: 16px;
+}
 .form-success {
   text-align: center; padding: 20px;
   background: #ecfdf5; color: var(--success);

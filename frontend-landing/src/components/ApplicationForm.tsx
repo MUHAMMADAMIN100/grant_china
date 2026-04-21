@@ -4,30 +4,116 @@ import { submitApplication, type Direction } from '../api';
 import { fadeUp, staggerContainer, viewportOnce } from '../motion';
 import Icon from '../Icon';
 
+const MAX_NAME = 100;
+const MAX_EMAIL = 120;
+const MAX_COMMENT = 500;
+const MAX_PHONE_DIGITS = 15;
+
+const formatPhone = (raw: string) => {
+  const cleaned = raw.replace(/[^\d+]/g, '');
+  const hasPlus = cleaned.startsWith('+');
+  const digits = cleaned.replace(/\D/g, '').slice(0, MAX_PHONE_DIGITS);
+  if (!digits) return hasPlus ? '+' : '';
+  const parts: string[] = [];
+  parts.push(digits.slice(0, 3));
+  if (digits.length > 3) parts.push(digits.slice(3, 6));
+  if (digits.length > 6) parts.push(digits.slice(6, 8));
+  if (digits.length > 8) parts.push(digits.slice(8, 10));
+  if (digits.length > 10) parts.push(digits.slice(10));
+  return (hasPlus ? '+' : '') + parts.filter(Boolean).join(' ');
+};
+
+const countPhoneDigits = (phone: string) => phone.replace(/\D/g, '').length;
+
+type Errors = Partial<Record<'fullName' | 'phone' | 'email' | 'comment', string>>;
+
 export default function ApplicationForm() {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [direction, setDirection] = useState<Direction>('BACHELOR');
   const [comment, setComment] = useState('');
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Errors>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
-  const validate = () => {
-    const e: Record<string, string> = {};
-    if (fullName.trim().length < 2) e.fullName = 'Введите ваше ФИО';
-    if (phone.trim().length < 5) e.phone = 'Укажите телефон';
-    if (email && !/^\S+@\S+\.\S+$/.test(email)) e.email = 'Некорректный email';
-    setErrors(e);
-    return Object.keys(e).length === 0;
+  const validateField = (field: keyof Errors, value: string): string | undefined => {
+    if (field === 'fullName') {
+      const v = value.trim();
+      if (v.length === 0) return 'Введите ваше ФИО';
+      if (v.length < 2) return 'Имя слишком короткое';
+      if (v.length > MAX_NAME) return `Максимум ${MAX_NAME} символов`;
+      if (!/[A-Za-zА-Яа-яЁёҚқҒғҲҳҶҷӢӣӮӯ]/.test(v)) return 'ФИО должно содержать буквы';
+      if (/[<>{}[\]\\\/]/.test(v)) return 'Недопустимые символы';
+      return;
+    }
+    if (field === 'phone') {
+      const v = value.trim();
+      if (v.length === 0) return 'Укажите номер телефона';
+      const digits = countPhoneDigits(v);
+      if (digits < 9) return 'Телефон слишком короткий';
+      if (digits > MAX_PHONE_DIGITS) return 'Телефон слишком длинный';
+      if (!/^[+\d\s\-()]+$/.test(v)) return 'Недопустимые символы';
+      return;
+    }
+    if (field === 'email') {
+      const v = value.trim();
+      if (!v) return; // необязательное
+      if (v.length > MAX_EMAIL) return `Максимум ${MAX_EMAIL} символов`;
+      if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(v)) return 'Некорректный email';
+      return;
+    }
+    if (field === 'comment') {
+      if (value.length > MAX_COMMENT) return `Максимум ${MAX_COMMENT} символов`;
+      return;
+    }
+    return;
+  };
+
+  const checkAll = (): Errors => ({
+    fullName: validateField('fullName', fullName),
+    phone: validateField('phone', phone),
+    email: validateField('email', email),
+    comment: validateField('comment', comment),
+  });
+
+  const cleanErrors = (e: Errors): Errors => {
+    const out: Errors = {};
+    (Object.keys(e) as (keyof Errors)[]).forEach((k) => {
+      if (e[k]) out[k] = e[k];
+    });
+    return out;
+  };
+
+  const handleBlur = (field: keyof Errors) => {
+    setTouched((t) => ({ ...t, [field]: true }));
+    const value = field === 'fullName' ? fullName : field === 'phone' ? phone : field === 'email' ? email : comment;
+    const err = validateField(field, value);
+    setErrors((prev) => ({ ...prev, [field]: err }));
+  };
+
+  const handleFieldChange = (field: keyof Errors, value: string) => {
+    if (field === 'fullName') setFullName(value);
+    else if (field === 'phone') setPhone(formatPhone(value));
+    else if (field === 'email') setEmail(value);
+    else if (field === 'comment') setComment(value);
+    // Если поле уже тронуто или есть ошибка — переоцениваем на лету
+    if (touched[field] || errors[field]) {
+      const err = validateField(field, field === 'phone' ? formatPhone(value) : value);
+      setErrors((prev) => ({ ...prev, [field]: err }));
+    }
   };
 
   const handleSubmit = async (ev: React.FormEvent) => {
     ev.preventDefault();
     setServerError(null);
-    if (!validate()) return;
+    const all = cleanErrors(checkAll());
+    setErrors(all);
+    setTouched({ fullName: true, phone: true, email: true, comment: true });
+    if (Object.keys(all).length > 0) return;
+
     setSubmitting(true);
     try {
       await submitApplication({
@@ -40,12 +126,17 @@ export default function ApplicationForm() {
       setSuccess(true);
       setFullName(''); setPhone(''); setEmail(''); setComment('');
       setDirection('BACHELOR');
+      setErrors({});
+      setTouched({});
+      setTimeout(() => setSuccess(false), 6000);
     } catch (err: any) {
-      setServerError(err?.message || 'Ошибка отправки');
+      setServerError(err?.message || 'Ошибка отправки. Попробуйте ещё раз.');
     } finally {
       setSubmitting(false);
     }
   };
+
+  const invalid = (f: keyof Errors) => (touched[f] || !!errors[f]) && !!errors[f];
 
   return (
     <section id="apply" className="form-section">
@@ -102,12 +193,17 @@ export default function ApplicationForm() {
           <div className="form-row">
             <label>ФИО *</label>
             <input
-              type="text" value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              type="text"
+              value={fullName}
+              onChange={(e) => handleFieldChange('fullName', e.target.value)}
+              onBlur={() => handleBlur('fullName')}
               placeholder="Иванов Иван Иванович"
+              maxLength={MAX_NAME}
+              className={invalid('fullName') ? 'input-error' : ''}
+              autoComplete="name"
             />
             <AnimatePresence>
-              {errors.fullName && (
+              {invalid('fullName') && (
                 <motion.div
                   className="form-error"
                   initial={{ opacity: 0, y: -5 }}
@@ -123,12 +219,17 @@ export default function ApplicationForm() {
           <div className="form-row">
             <label>Номер телефона *</label>
             <input
-              type="tel" value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              type="tel"
+              value={phone}
+              onChange={(e) => handleFieldChange('phone', e.target.value)}
+              onBlur={() => handleBlur('phone')}
               placeholder="+992 900 00 00 00"
+              className={invalid('phone') ? 'input-error' : ''}
+              autoComplete="tel"
+              inputMode="tel"
             />
             <AnimatePresence>
-              {errors.phone && (
+              {invalid('phone') && (
                 <motion.div
                   className="form-error"
                   initial={{ opacity: 0, y: -5 }}
@@ -144,12 +245,17 @@ export default function ApplicationForm() {
           <div className="form-row">
             <label>Email (необязательно)</label>
             <input
-              type="email" value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="email"
+              value={email}
+              onChange={(e) => handleFieldChange('email', e.target.value)}
+              onBlur={() => handleBlur('email')}
               placeholder="you@example.com"
+              maxLength={MAX_EMAIL}
+              className={invalid('email') ? 'input-error' : ''}
+              autoComplete="email"
             />
             <AnimatePresence>
-              {errors.email && (
+              {invalid('email') && (
                 <motion.div
                   className="form-error"
                   initial={{ opacity: 0, y: -5 }}
@@ -172,12 +278,30 @@ export default function ApplicationForm() {
           </div>
 
           <div className="form-row">
-            <label>Комментарий</label>
+            <label>
+              Комментарий
+              <span className="form-counter">{comment.length} / {MAX_COMMENT}</span>
+            </label>
             <textarea
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
+              onChange={(e) => handleFieldChange('comment', e.target.value)}
+              onBlur={() => handleBlur('comment')}
               placeholder="Расскажите о ваших целях, желаемом городе или вузе..."
+              maxLength={MAX_COMMENT}
+              className={invalid('comment') ? 'input-error' : ''}
             />
+            <AnimatePresence>
+              {invalid('comment') && (
+                <motion.div
+                  className="form-error"
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                >
+                  {errors.comment}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <motion.button
