@@ -101,7 +101,31 @@ export class ApplicationsService {
   }
 
   async update(id: string, dto: UpdateApplicationDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+
+    // Авто-создание студента при переводе заявки в работу
+    if (
+      dto.status === ApplicationStatus.IN_PROGRESS &&
+      existing.status === ApplicationStatus.NEW &&
+      !existing.studentId
+    ) {
+      const student = await this.prisma.student.create({
+        data: {
+          fullName: existing.fullName,
+          phones: [existing.phone],
+          email: existing.email,
+          direction: existing.direction,
+          cabinet: CABINET_BY_DIRECTION[existing.direction],
+          comment: existing.comment,
+        },
+      });
+      return this.prisma.application.update({
+        where: { id },
+        data: { ...dto, studentId: student.id },
+        include: { student: true },
+      });
+    }
+
     return this.prisma.application.update({
       where: { id },
       data: dto,
@@ -110,8 +134,12 @@ export class ApplicationsService {
   }
 
   async remove(id: string) {
-    await this.findOne(id);
-    await this.prisma.application.delete({ where: { id } });
+    const app = await this.findOne(id);
+    // Сначала удаляем связанного студента (каскадом удалятся его документы)
+    if (app.studentId) {
+      await this.prisma.student.delete({ where: { id: app.studentId } }).catch(() => undefined);
+    }
+    await this.prisma.application.delete({ where: { id } }).catch(() => undefined);
     return { ok: true };
   }
 
