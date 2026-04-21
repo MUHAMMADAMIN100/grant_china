@@ -96,8 +96,16 @@ export class StudentsService {
     return { ok: true };
   }
 
-  async addDocument(studentId: string, file: { filename: string; originalname: string; mimetype: string; size: number; url: string }) {
+  async addDocument(
+    studentId: string,
+    file: { filename: string; originalname: string; mimetype: string; size: number; url: string },
+    type: string = 'OTHER',
+  ) {
     await this.findOne(studentId);
+    // Для типизированных документов (не OTHER) — удаляем старый того же типа
+    if (type !== 'OTHER') {
+      await this.prisma.document.deleteMany({ where: { studentId, type } });
+    }
     return this.prisma.document.create({
       data: {
         studentId,
@@ -106,6 +114,7 @@ export class StudentsService {
         mimeType: file.mimetype,
         size: file.size,
         url: file.url,
+        type,
       },
     });
   }

@@ -1,22 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { deleteApplication, getApplication, updateApplication } from '../api/applications';
-import {
-  deleteDocument, getStudent, updateStudent,
-  uploadDocument, uploadPhoto,
-} from '../api/students';
+import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import type { Application, ApplicationStatus, Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
 import { useUI } from '../ui/Dialogs';
+import DocumentsChecklist from '../components/DocumentsChecklist';
 import Icon from '../Icon';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
-
-const fmtBytes = (b: number) => {
-  if (b < 1024) return `${b} Б`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} КБ`;
-  return `${(b / 1024 / 1024).toFixed(2)} МБ`;
-};
 
 export default function ApplicationDetail() {
   const { id } = useParams();
@@ -28,7 +20,6 @@ export default function ApplicationDetail() {
   const [form, setForm] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
-  const docRef = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
     if (!id) return;
@@ -103,28 +94,6 @@ export default function ApplicationDetail() {
     if (!file || !student) return;
     await uploadPhoto(student.id, file);
     toast('Фото загружено', 'success');
-    await reload();
-  };
-
-  const onDoc = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !student) return;
-    await uploadDocument(student.id, file);
-    if (docRef.current) docRef.current.value = '';
-    toast('Документ загружен', 'success');
-    await reload();
-  };
-
-  const onRemoveDoc = async (docId: string) => {
-    const ok = await confirm({
-      title: 'Удалить документ',
-      message: 'Документ будет удалён безвозвратно.',
-      confirmText: 'Удалить',
-      danger: true,
-    });
-    if (!ok) return;
-    await deleteDocument(docId);
-    toast('Документ удалён', 'success');
     await reload();
   };
 
@@ -248,37 +217,12 @@ export default function ApplicationDetail() {
               </div>
             </div>
 
-            <h3 style={{ marginTop: 30, marginBottom: 14, fontSize: 17 }}>Документы</h3>
-            <div className="documents-list">
-              {(student.documents || []).map((d) => (
-                <div key={d.id} className="doc-item">
-                  <span className="doc-icon"><Icon name="description" size={24} /></span>
-                  <div className="doc-info">
-                    <div className="doc-name">
-                      <a href={`${API_BASE}${d.url}`} target="_blank" rel="noreferrer" style={{ color: '#d52b2b' }}>
-                        {d.originalName}
-                      </a>
-                    </div>
-                    <div className="doc-size">{fmtBytes(d.size)} · {new Date(d.createdAt).toLocaleDateString('ru-RU')}</div>
-                  </div>
-                  {canEdit && (
-                    <button className="btn btn-sm btn-danger" onClick={() => onRemoveDoc(d.id)}>Удалить</button>
-                  )}
-                </div>
-              ))}
-              {(!student.documents || student.documents.length === 0) && (
-                <div className="empty" style={{ padding: 20 }}>Документов пока нет</div>
-              )}
-            </div>
-            {canEdit && (
-              <div style={{ marginTop: 14 }}>
-                <button className="btn btn-secondary" onClick={() => docRef.current?.click()}>
-                  <Icon name="attach_file" size={18} style={{ marginRight: 6 }} />
-                  Загрузить документ
-                </button>
-                <input ref={docRef} type="file" hidden onChange={onDoc} />
-              </div>
-            )}
+            <DocumentsChecklist
+              studentId={student.id}
+              documents={student.documents || []}
+              onChange={reload}
+              editable={!!canEdit}
+            />
           </>
         )}
       </div>

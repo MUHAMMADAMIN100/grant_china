@@ -31,6 +31,7 @@ export interface Document {
   mimeType: string;
   size: number;
   url: string;
+  type: string;
   createdAt: string;
 }
 

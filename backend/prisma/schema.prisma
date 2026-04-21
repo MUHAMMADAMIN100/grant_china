@@ -90,7 +90,10 @@ model Document {
   mimeType   String
   size       Int
   url        String
+  type       String   @default("OTHER")
   createdAt  DateTime @default(now())
+
+  @@index([studentId, type])
 }
 
 model Notification {

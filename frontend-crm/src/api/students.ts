@@ -41,8 +41,10 @@ export async function uploadPhoto(id: string, file: File) {
   return data;
 }
 
-export async function uploadDocument(id: string, file: File) {
-  const fd = new FormData(); fd.append('file', file);
+export async function uploadDocument(id: string, file: File, type: string = 'OTHER') {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('type', type);
   const { data } = await api.post<Document>(`/students/${id}/documents`, fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });

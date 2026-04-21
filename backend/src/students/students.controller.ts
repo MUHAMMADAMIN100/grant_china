@@ -105,16 +105,24 @@ export class StudentsController {
       limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
     }),
   )
-  async uploadDocument(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
+  async uploadDocument(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('type') type?: string,
+  ) {
     if (!file) throw new BadRequestException('Файл не передан');
     const url = `/uploads/${file.filename}`;
-    return this.students.addDocument(id, {
-      filename: file.filename,
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-      size: file.size,
-      url,
-    });
+    return this.students.addDocument(
+      id,
+      {
+        filename: file.filename,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+        url,
+      },
+      type || 'OTHER',
+    );
   }
 
   @Delete('documents/:docId')
