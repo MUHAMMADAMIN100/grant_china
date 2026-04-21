@@ -5,7 +5,7 @@ import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import type { Application, ApplicationStatus, Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
 import { useUI } from '../ui/Dialogs';
-import DocumentsChecklist from '../components/DocumentsChecklist';
+import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsChecklist';
 import Icon from '../Icon';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
@@ -50,10 +50,14 @@ export default function ApplicationDetail() {
 
   const onStatus = async (status: ApplicationStatus) => {
     if (!id) return;
-    await updateApplication(id, { status });
-    if (status === 'IN_PROGRESS') toast('Заявка взята в работу. Создана карточка студента.', 'success');
-    if (status === 'COMPLETED') toast('Заявка завершена. Студент доступен в разделе «Студенты».', 'success');
-    await reload();
+    try {
+      await updateApplication(id, { status });
+      if (status === 'IN_PROGRESS') toast('Заявка взята в работу. Создана карточка студента.', 'success');
+      if (status === 'COMPLETED') toast('Заявка завершена. Студент доступен в разделе «Студенты».', 'success');
+      await reload();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка изменения статуса', 'error');
+    }
   };
 
   const onDeleteApp = async () => {
@@ -102,6 +106,17 @@ export default function ApplicationDetail() {
 
   const isNew = app.status === 'NEW';
   const canEdit = app.status === 'IN_PROGRESS' && student;
+  const uploadedTypes = new Set((student?.documents || []).map((d) => d.type).filter((t) => t && t !== 'OTHER'));
+  const missingDocs = REQUIRED_DOCUMENTS.filter((r) => !uploadedTypes.has(r.type));
+  const canComplete = missingDocs.length === 0;
+
+  const handleComplete = () => {
+    if (!canComplete) {
+      toast(`Загрузите все документы (не хватает: ${missingDocs.length})`, 'error');
+      return;
+    }
+    onStatus('COMPLETED');
+  };
 
   return (
     <div className="card">
@@ -115,8 +130,14 @@ export default function ApplicationDetail() {
             </button>
           )}
           {app.status === 'IN_PROGRESS' && (
-            <button className="btn btn-sm btn-secondary" onClick={() => onStatus('COMPLETED')}>
-              Завершить
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={handleComplete}
+              disabled={!canComplete}
+              title={canComplete ? 'Завершить заявку' : `Загрузите все документы (не хватает: ${missingDocs.length})`}
+              style={!canComplete ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+            >
+              {canComplete ? 'Завершить' : `Завершить (${10 - missingDocs.length}/10)`}
             </button>
           )}
           {canEdit && !edit && (

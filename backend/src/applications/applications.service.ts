@@ -19,6 +19,19 @@ const DIRECTION_LABEL: Record<Direction, string> = {
   LANGUAGE: 'Языковые курсы',
 };
 
+const REQUIRED_DOCUMENT_TYPES: { type: string; label: string }[] = [
+  { type: 'PHOTO', label: 'Фото 3/4' },
+  { type: 'PASSPORT', label: 'Загран паспорт' },
+  { type: 'BANK', label: 'Справка с банка' },
+  { type: 'MEDICAL', label: 'Мед.справка' },
+  { type: 'NO_CRIMINAL', label: 'Справка о несудимости' },
+  { type: 'STUDY_PLAN', label: 'Study Plan' },
+  { type: 'CERTIFICATE', label: 'Certificate' },
+  { type: 'PARENTS_PASSPORT', label: 'Parents passport' },
+  { type: 'DIPLOMA', label: 'Аттестат' },
+  { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
+];
+
 @Injectable()
 export class ApplicationsService {
   constructor(
@@ -126,11 +139,34 @@ export class ApplicationsService {
       });
     }
 
+    // Блокируем перевод в "Завершено" пока не загружены все обязательные документы
+    if (
+      dto.status === ApplicationStatus.COMPLETED &&
+      existing.status !== ApplicationStatus.COMPLETED &&
+      existing.studentId
+    ) {
+      const missing = await this.missingRequiredDocs(existing.studentId);
+      if (missing.length > 0) {
+        throw new BadRequestException(
+          `Невозможно завершить: не загружены документы (${missing.length}): ${missing.join(', ')}`,
+        );
+      }
+    }
+
     return this.prisma.application.update({
       where: { id },
       data: dto,
       include: { student: true },
     });
+  }
+
+  private async missingRequiredDocs(studentId: string): Promise<string[]> {
+    const docs = await this.prisma.document.findMany({
+      where: { studentId },
+      select: { type: true },
+    });
+    const uploaded = new Set(docs.map((d) => d.type));
+    return REQUIRED_DOCUMENT_TYPES.filter((t) => !uploaded.has(t.type)).map((t) => t.label);
   }
 
   async remove(id: string) {
