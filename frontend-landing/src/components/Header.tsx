@@ -21,6 +21,7 @@ export default function Header() {
         <nav className="nav">
           <motion.a href="#services" whileHover={{ y: -2 }}>Программы</motion.a>
           <motion.a href="#advantages" whileHover={{ y: -2 }}>Преимущества</motion.a>
+          <motion.a href="#testimonials" whileHover={{ y: -2 }}>Отзывы</motion.a>
           <motion.a href="#contacts" whileHover={{ y: -2 }}>Контакты</motion.a>
         </nav>
         <motion.a
