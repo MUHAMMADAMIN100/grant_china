@@ -52,7 +52,7 @@ export default function Hero() {
               transition: { y: { duration: 4, repeat: Infinity, ease: 'easeInOut' } },
             }}
           >
-            <Icon name="castle" size={180} style={{ color: 'var(--primary)' }} />
+            <img src="/logo.png" alt="Grant China" className="hero-logo" />
           </motion.div>
         </motion.div>
 

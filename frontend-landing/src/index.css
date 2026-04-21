@@ -62,6 +62,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   height: 72px;
 }
 .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+.logo-image { height: 54px; width: auto; display: block; }
 .logo-mark {
   width: 36px; height: 36px; border-radius: 10px;
   background: linear-gradient(135deg, var(--primary) 0%, #ff6b6b 100%);
@@ -119,6 +120,12 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   border-radius: 24px;
   aspect-ratio: 4/5;
   display: flex; align-items: center; justify-content: center;
+  overflow: hidden; padding: 30px;
+}
+.hero-logo {
+  max-width: 100%; max-height: 100%;
+  width: auto; height: auto;
+  object-fit: contain;
 }
 
 /* Stats */
@@ -351,6 +358,12 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   padding: 50px 0 30px; text-align: center;
 }
 .footer p { margin-bottom: 8px; }
+.footer-logo {
+  height: 120px; width: auto; margin: 0 auto 24px;
+  display: block;
+  filter: brightness(0) invert(1);
+  opacity: 0.95;
+}
 
 /* Responsive */
 @media (max-width: 900px) {

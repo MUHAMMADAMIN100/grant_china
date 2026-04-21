@@ -15,8 +15,7 @@ export default function Header() {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
         >
-          <span className="logo-mark">G</span>
-          <span>GrantChina</span>
+          <img src="/logo.png" alt="Grant China" className="logo-image" />
         </motion.a>
         <nav className="nav">
           <motion.a href="#services" whileHover={{ y: -2 }}>Программы</motion.a>
