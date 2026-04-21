@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { convertApplication, deleteApplication, getApplication, updateApplication } from '../api/applications';
+import { useParams } from 'react-router-dom';
+import { getApplication, updateApplication } from '../api/applications';
 import type { Application, ApplicationStatus } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
-import { useUI } from '../ui/Dialogs';
 
 export default function ApplicationDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
-  const { confirm, toast } = useUI();
   const [app, setApp] = useState<Application | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,37 +17,6 @@ export default function ApplicationDetail() {
     if (!id) return;
     const upd = await updateApplication(id, { status });
     setApp(upd);
-  };
-
-  const onConvert = async () => {
-    if (!id) return;
-    const ok = await confirm({
-      title: 'Конвертация заявки',
-      message: 'Сконвертировать заявку в студента? Заявка будет помечена как завершённая.',
-      confirmText: 'Конвертировать',
-    });
-    if (!ok) return;
-    try {
-      const student = await convertApplication(id);
-      toast('Студент создан', 'success');
-      navigate(`/students/${student.id}`);
-    } catch (e: any) {
-      toast(e.response?.data?.message || 'Ошибка конвертации', 'error');
-    }
-  };
-
-  const onDelete = async () => {
-    if (!id) return;
-    const ok = await confirm({
-      title: 'Удалить заявку',
-      message: 'Действие нельзя отменить. Вы уверены?',
-      confirmText: 'Удалить',
-      danger: true,
-    });
-    if (!ok) return;
-    await deleteApplication(id);
-    toast('Заявка удалена', 'success');
-    navigate('/applications');
   };
 
   if (error) return <div className="error-banner">{error}</div>;
@@ -68,10 +34,6 @@ export default function ApplicationDetail() {
           {app.status !== 'COMPLETED' && (
             <button className="btn btn-sm btn-secondary" onClick={() => onStatus('COMPLETED')}>Завершить</button>
           )}
-          {!app.studentId && (
-            <button className="btn btn-sm btn-primary" onClick={onConvert}>В студенты</button>
-          )}
-          <button className="btn btn-sm btn-danger" onClick={onDelete}>Удалить</button>
         </div>
       </div>
       <div className="card-body">
