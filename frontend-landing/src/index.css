@@ -359,10 +359,10 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .footer p { margin-bottom: 8px; }
 .footer-logo {
-  height: 120px; width: auto; margin: 0 auto 24px;
-  display: block;
-  filter: brightness(0) invert(1);
-  opacity: 0.95;
+  height: 110px; width: auto; margin: 0 auto 20px;
+  display: block; background: white;
+  padding: 10px; border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(213, 43, 43, 0.2);
 }
 
 /* Responsive */
