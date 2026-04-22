@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { deleteApplication, getApplication, updateApplication } from '../api/applications';
+import { assignApplicationManager, deleteApplication, getApplication, updateApplication } from '../api/applications';
 import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import type { Application, ApplicationStatus, Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
+import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsChecklist';
+import ManagerBar from '../components/ManagerBar';
 import Icon from '../Icon';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
@@ -13,6 +15,7 @@ const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:30
 export default function ApplicationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
   const [app, setApp] = useState<Application | null>(null);
   const [student, setStudent] = useState<Student | null>(null);
@@ -60,6 +63,12 @@ export default function ApplicationDetail() {
     }
   };
 
+  const onReassign = async (managerId: string | null) => {
+    if (!id) return;
+    await assignApplicationManager(id, managerId);
+    await reload();
+  };
+
   const onDeleteApp = async () => {
     if (!id) return;
     const ok = await confirm({
@@ -71,41 +80,57 @@ export default function ApplicationDetail() {
       danger: true,
     });
     if (!ok) return;
-    await deleteApplication(id);
-    toast('Заявка удалена', 'success');
-    navigate('/applications');
+    try {
+      await deleteApplication(id);
+      toast('Заявка удалена', 'success');
+      navigate('/applications');
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка удаления', 'error');
+    }
   };
 
   const onSave = async () => {
     if (!student || !form) return;
     const phones = form.phones.split(',').map((p: string) => p.trim()).filter(Boolean);
-    await updateStudent(student.id, {
-      fullName: form.fullName,
-      phones,
-      email: form.email || undefined,
-      direction: form.direction,
-      cabinet: parseInt(form.cabinet, 10),
-      status: form.status,
-      comment: form.comment || undefined,
-    });
-    toast('Данные сохранены', 'success');
-    await reload();
-    setEdit(false);
+    try {
+      await updateStudent(student.id, {
+        fullName: form.fullName,
+        phones,
+        email: form.email || undefined,
+        direction: form.direction,
+        cabinet: parseInt(form.cabinet, 10),
+        status: form.status,
+        comment: form.comment || undefined,
+      });
+      toast('Данные сохранены', 'success');
+      await reload();
+      setEdit(false);
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
+    }
   };
 
   const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !student) return;
-    await uploadPhoto(student.id, file);
-    toast('Фото загружено', 'success');
-    await reload();
+    try {
+      await uploadPhoto(student.id, file);
+      toast('Фото загружено', 'success');
+      await reload();
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Ошибка загрузки', 'error');
+    }
   };
 
   if (error) return <div className="error-banner">{error}</div>;
   if (!app) return <div className="empty">Загрузка...</div>;
 
   const isNew = app.status === 'NEW';
-  const canEdit = app.status === 'IN_PROGRESS' && student;
+  const isAdmin = me?.role === 'ADMIN';
+  const isMine = !app.managerId || app.managerId === me?.id;
+  // Право редактировать: админ, либо свой менеджер, либо менеджера ещё нет (для случая "Взять в работу")
+  const canAct = isAdmin || isMine;
+  const canEdit = app.status === 'IN_PROGRESS' && student && canAct;
   const uploadedTypes = new Set((student?.documents || []).map((d) => d.type).filter((t) => t && t !== 'OTHER'));
   const missingDocs = REQUIRED_DOCUMENTS.filter((r) => !uploadedTypes.has(r.type));
   const canComplete = missingDocs.length === 0;
@@ -124,12 +149,12 @@ export default function ApplicationDetail() {
         <h2 className="card-title">{app.fullName}</h2>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`badge ${STATUS_BADGE[app.status]}`}>{STATUS_LABEL[app.status]}</span>
-          {isNew && (
+          {isNew && canAct && (
             <button className="btn btn-sm btn-primary" onClick={() => onStatus('IN_PROGRESS')}>
               Взять в работу
             </button>
           )}
-          {app.status === 'IN_PROGRESS' && (
+          {app.status === 'IN_PROGRESS' && canAct && (
             <button
               className="btn btn-sm btn-secondary"
               onClick={handleComplete}
@@ -151,12 +176,21 @@ export default function ApplicationDetail() {
               <button className="btn btn-sm btn-primary" onClick={onSave}>Сохранить</button>
             </>
           )}
-          <button className="btn btn-sm btn-danger" onClick={onDeleteApp}>Удалить</button>
+          {canAct && (
+            <button className="btn btn-sm btn-danger" onClick={onDeleteApp}>Удалить</button>
+          )}
         </div>
       </div>
 
       <div className="card-body">
-        {/* Исходные данные заявки — показываем только для NEW */}
+        {!isNew && (
+          <ManagerBar
+            manager={app.manager}
+            canEditNow={!!canEdit}
+            onReassign={onReassign}
+          />
+        )}
+
         {isNew && (
           <>
             <div className="detail-row"><div className="detail-label">Телефон</div><div className="detail-value">{app.phone}</div></div>
@@ -167,7 +201,6 @@ export default function ApplicationDetail() {
           </>
         )}
 
-        {/* Редактор студента — для IN_PROGRESS и COMPLETED */}
         {!isNew && student && form && (
           <>
             <div className="detail-grid">

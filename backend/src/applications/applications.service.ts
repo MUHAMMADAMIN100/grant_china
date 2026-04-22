@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { ApplicationStatus, Direction, Prisma } from '@prisma/client';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ApplicationStatus, Direction, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
@@ -32,6 +32,13 @@ const REQUIRED_DOCUMENT_TYPES: { type: string; label: string }[] = [
   { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
 ];
 
+const MANAGER_INCLUDE = {
+  student: { include: { manager: { select: { id: true, fullName: true, email: true } } } },
+  manager: { select: { id: true, fullName: true, email: true } },
+};
+
+type CurrentUser = { id: string; role: Role };
+
 @Injectable()
 export class ApplicationsService {
   constructor(
@@ -52,7 +59,6 @@ export class ApplicationsService {
       },
     });
 
-    // Уведомления (in-app для всех сотрудников и админов)
     await this.notifications.notifyAllStaff({
       type: 'APPLICATION_NEW',
       title: 'Новая заявка',
@@ -60,7 +66,6 @@ export class ApplicationsService {
       payload: { applicationId: app.id },
     });
 
-    // Telegram
     const tgText =
       `🆕 *Новая заявка GrantChina*\n` +
       `*ФИО:* ${app.fullName}\n` +
@@ -70,7 +75,6 @@ export class ApplicationsService {
       (app.comment ? `*Комментарий:* ${app.comment}` : '');
     this.telegram.send(tgText).catch(() => undefined);
 
-    // Email админу
     this.mail
       .sendToAdmin(
         `Новая заявка: ${app.fullName}`,
@@ -86,10 +90,17 @@ export class ApplicationsService {
     return app;
   }
 
-  async findAll(filters: { status?: ApplicationStatus; direction?: Direction; search?: string }) {
+  async findAll(filters: {
+    status?: ApplicationStatus;
+    direction?: Direction;
+    search?: string;
+    mine?: boolean;
+    currentUserId?: string;
+  }) {
     const where: Prisma.ApplicationWhereInput = {};
     if (filters.status) where.status = filters.status;
     if (filters.direction) where.direction = filters.direction;
+    if (filters.mine && filters.currentUserId) where.managerId = filters.currentUserId;
     if (filters.search) {
       where.OR = [
         { fullName: { contains: filters.search, mode: 'insensitive' } },
@@ -100,23 +111,32 @@ export class ApplicationsService {
     return this.prisma.application.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { student: true },
+      include: MANAGER_INCLUDE,
     });
   }
 
   async findOne(id: string) {
     const app = await this.prisma.application.findUnique({
       where: { id },
-      include: { student: true },
+      include: MANAGER_INCLUDE,
     });
     if (!app) throw new NotFoundException('Заявка не найдена');
     return app;
   }
 
-  async update(id: string, dto: UpdateApplicationDto) {
-    const existing = await this.findOne(id);
+  private ensureCanEdit(app: { managerId: string | null }, user: CurrentUser) {
+    if (user.role === 'ADMIN') return;
+    if (!app.managerId) return; // ещё не назначен — все могут (кроме случая когда NEW)
+    if (app.managerId !== user.id) {
+      throw new ForbiddenException('Только назначенный менеджер или администратор может редактировать эту заявку');
+    }
+  }
 
-    // Авто-создание студента при переводе заявки в работу
+  async update(id: string, dto: UpdateApplicationDto, user: CurrentUser) {
+    const existing = await this.findOne(id);
+    this.ensureCanEdit(existing, user);
+
+    // Авто-создание студента и назначение менеджера при переводе в работу
     if (
       dto.status === ApplicationStatus.IN_PROGRESS &&
       existing.status === ApplicationStatus.NEW &&
@@ -130,16 +150,16 @@ export class ApplicationsService {
           direction: existing.direction,
           cabinet: CABINET_BY_DIRECTION[existing.direction],
           comment: existing.comment,
+          managerId: user.id,
         },
       });
       return this.prisma.application.update({
         where: { id },
-        data: { ...dto, studentId: student.id },
-        include: { student: true },
+        data: { ...dto, studentId: student.id, managerId: user.id },
+        include: MANAGER_INCLUDE,
       });
     }
 
-    // Блокируем перевод в "Завершено" пока не загружены все обязательные документы
     if (
       dto.status === ApplicationStatus.COMPLETED &&
       existing.status !== ApplicationStatus.COMPLETED &&
@@ -156,7 +176,33 @@ export class ApplicationsService {
     return this.prisma.application.update({
       where: { id },
       data: dto,
-      include: { student: true },
+      include: MANAGER_INCLUDE,
+    });
+  }
+
+  async assignManager(id: string, managerId: string | null, user: CurrentUser) {
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException('Только администратор может переназначать менеджера');
+    }
+    const existing = await this.findOne(id);
+
+    if (managerId) {
+      const exists = await this.prisma.user.findUnique({ where: { id: managerId } });
+      if (!exists) throw new NotFoundException('Пользователь не найден');
+    }
+
+    // Синхронизируем менеджера на связанном студенте
+    if (existing.studentId) {
+      await this.prisma.student.update({
+        where: { id: existing.studentId },
+        data: { managerId },
+      });
+    }
+
+    return this.prisma.application.update({
+      where: { id },
+      data: { managerId },
+      include: MANAGER_INCLUDE,
     });
   }
 
@@ -169,43 +215,14 @@ export class ApplicationsService {
     return REQUIRED_DOCUMENT_TYPES.filter((t) => !uploaded.has(t.type)).map((t) => t.label);
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: CurrentUser) {
     const app = await this.findOne(id);
-    // Сначала удаляем связанного студента (каскадом удалятся его документы)
+    this.ensureCanEdit(app, user);
     if (app.studentId) {
       await this.prisma.student.delete({ where: { id: app.studentId } }).catch(() => undefined);
     }
     await this.prisma.application.delete({ where: { id } }).catch(() => undefined);
     return { ok: true };
-  }
-
-  /**
-   * Конвертирует заявку в студента: создаёт карточку студента,
-   * автоматически распределяет по кабинету, помечает заявку завершённой.
-   */
-  async convertToStudent(id: string) {
-    const app = await this.findOne(id);
-    if (app.studentId) {
-      throw new BadRequestException('Заявка уже сконвертирована в студента');
-    }
-
-    const student = await this.prisma.student.create({
-      data: {
-        fullName: app.fullName,
-        phones: [app.phone],
-        email: app.email,
-        direction: app.direction,
-        cabinet: CABINET_BY_DIRECTION[app.direction],
-        comment: app.comment,
-      },
-    });
-
-    await this.prisma.application.update({
-      where: { id },
-      data: { status: ApplicationStatus.COMPLETED, studentId: student.id },
-    });
-
-    return student;
   }
 
   async stats() {

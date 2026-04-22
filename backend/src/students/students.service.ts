@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Direction, Prisma, StudentStatus } from '@prisma/client';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Direction, Prisma, Role, StudentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
@@ -10,11 +10,26 @@ const CABINET_BY_DIRECTION: Record<Direction, number> = {
   LANGUAGE: 3,
 };
 
+const STUDENT_INCLUDE = {
+  documents: true,
+  manager: { select: { id: true, fullName: true, email: true } },
+} as const;
+
+type CurrentUser = { id: string; role: Role };
+
 @Injectable()
 export class StudentsService {
   constructor(private prisma: PrismaService) {}
 
-  async create(dto: CreateStudentDto) {
+  private ensureCanEdit(student: { managerId: string | null }, user: CurrentUser) {
+    if (user.role === 'ADMIN') return;
+    if (!student.managerId) return;
+    if (student.managerId !== user.id) {
+      throw new ForbiddenException('Только назначенный менеджер или администратор может редактировать этого студента');
+    }
+  }
+
+  async create(dto: CreateStudentDto, user?: CurrentUser) {
     const cabinet = dto.cabinet ?? CABINET_BY_DIRECTION[dto.direction];
     return this.prisma.student.create({
       data: {
@@ -26,8 +41,9 @@ export class StudentsService {
         cabinet,
         status: dto.status ?? StudentStatus.ACTIVE,
         comment: dto.comment || null,
+        managerId: user?.id || null,
       },
-      include: { documents: true },
+      include: STUDENT_INCLUDE,
     });
   }
 
@@ -36,11 +52,14 @@ export class StudentsService {
     status?: StudentStatus;
     cabinet?: number;
     search?: string;
+    mine?: boolean;
+    currentUserId?: string;
   }) {
     const where: Prisma.StudentWhereInput = {};
     if (filters.direction) where.direction = filters.direction;
     if (filters.status) where.status = filters.status;
     if (filters.cabinet) where.cabinet = filters.cabinet;
+    if (filters.mine && filters.currentUserId) where.managerId = filters.currentUserId;
     if (filters.search) {
       where.OR = [
         { fullName: { contains: filters.search, mode: 'insensitive' } },
@@ -51,21 +70,22 @@ export class StudentsService {
     return this.prisma.student.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { documents: true },
+      include: STUDENT_INCLUDE,
     });
   }
 
   async findOne(id: string) {
     const student = await this.prisma.student.findUnique({
       where: { id },
-      include: { documents: true, applications: true },
+      include: { ...STUDENT_INCLUDE, applications: true },
     });
     if (!student) throw new NotFoundException('Студент не найден');
     return student;
   }
 
-  async update(id: string, dto: UpdateStudentDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateStudentDto, user: CurrentUser) {
+    const existing = await this.findOne(id);
+    this.ensureCanEdit(existing, user);
 
     const data: Prisma.StudentUpdateInput = {};
     if (dto.fullName !== undefined) data.fullName = dto.fullName;
@@ -76,7 +96,6 @@ export class StudentsService {
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.direction !== undefined) {
       data.direction = dto.direction;
-      // Если направление меняется, а кабинет вручную не указан — переназначаем автоматически
       if (dto.cabinet === undefined) {
         data.cabinet = CABINET_BY_DIRECTION[dto.direction];
       }
@@ -86,12 +105,34 @@ export class StudentsService {
     return this.prisma.student.update({
       where: { id },
       data,
-      include: { documents: true },
+      include: STUDENT_INCLUDE,
     });
   }
 
-  async remove(id: string) {
+  async assignManager(id: string, managerId: string | null, user: CurrentUser) {
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException('Только администратор может переназначать менеджера');
+    }
     await this.findOne(id);
+    if (managerId) {
+      const exists = await this.prisma.user.findUnique({ where: { id: managerId } });
+      if (!exists) throw new NotFoundException('Пользователь не найден');
+    }
+    // Синхронизируем на связанных заявках
+    await this.prisma.application.updateMany({
+      where: { studentId: id },
+      data: { managerId },
+    });
+    return this.prisma.student.update({
+      where: { id },
+      data: { managerId },
+      include: STUDENT_INCLUDE,
+    });
+  }
+
+  async remove(id: string, user: CurrentUser) {
+    const existing = await this.findOne(id);
+    this.ensureCanEdit(existing, user);
     await this.prisma.student.delete({ where: { id } });
     return { ok: true };
   }
@@ -100,9 +141,10 @@ export class StudentsService {
     studentId: string,
     file: { filename: string; originalname: string; mimetype: string; size: number; url: string },
     type: string = 'OTHER',
+    user?: CurrentUser,
   ) {
-    await this.findOne(studentId);
-    // Для типизированных документов (не OTHER) — удаляем старый того же типа
+    const existing = await this.findOne(studentId);
+    if (user) this.ensureCanEdit(existing, user);
     if (type !== 'OTHER') {
       await this.prisma.document.deleteMany({ where: { studentId, type } });
     }
@@ -119,9 +161,13 @@ export class StudentsService {
     });
   }
 
-  async removeDocument(documentId: string) {
-    const doc = await this.prisma.document.findUnique({ where: { id: documentId } });
+  async removeDocument(documentId: string, user: CurrentUser) {
+    const doc = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      include: { student: { select: { managerId: true } } },
+    });
     if (!doc) throw new NotFoundException('Документ не найден');
+    if (doc.student) this.ensureCanEdit(doc.student, user);
     await this.prisma.document.delete({ where: { id: documentId } });
     return { ok: true };
   }

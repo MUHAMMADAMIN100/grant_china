@@ -11,6 +11,12 @@ export interface User {
   createdAt?: string;
 }
 
+export interface ManagerInfo {
+  id: string;
+  fullName: string;
+  email: string;
+}
+
 export interface Application {
   id: string;
   fullName: string;
@@ -21,6 +27,8 @@ export interface Application {
   status: ApplicationStatus;
   studentId: string | null;
   student?: Student | null;
+  managerId: string | null;
+  manager?: ManagerInfo | null;
   createdAt: string;
 }
 
@@ -45,6 +53,8 @@ export interface Student {
   cabinet: number;
   status: StudentStatus;
   comment: string | null;
+  managerId: string | null;
+  manager?: ManagerInfo | null;
   documents?: Document[];
   applications?: Application[];
   createdAt: string;

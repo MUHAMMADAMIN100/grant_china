@@ -6,6 +6,7 @@ export interface StudentFilters {
   status?: StudentStatus;
   cabinet?: number;
   search?: string;
+  mine?: boolean;
 }
 
 export async function listStudents(filters: StudentFilters = {}) {
@@ -25,6 +26,11 @@ export async function createStudent(payload: Partial<Student>) {
 
 export async function updateStudent(id: string, payload: Partial<Student>) {
   const { data } = await api.patch<Student>(`/students/${id}`, payload);
+  return data;
+}
+
+export async function assignStudentManager(id: string, managerId: string | null) {
+  const { data } = await api.patch<Student>(`/students/${id}/manager`, { managerId });
   return data;
 }
 

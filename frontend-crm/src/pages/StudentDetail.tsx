@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { deleteStudent, getStudent, updateStudent, uploadPhoto } from '../api/students';
+import { assignStudentManager, deleteStudent, getStudent, updateStudent, uploadPhoto } from '../api/students';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
+import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import DocumentsChecklist from '../components/DocumentsChecklist';
+import ManagerBar from '../components/ManagerBar';
 import Icon from '../Icon';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
@@ -12,6 +14,7 @@ const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:30
 export default function StudentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
   const [student, setStudent] = useState<Student | null>(null);
   const [edit, setEdit] = useState(false);
@@ -38,25 +41,39 @@ export default function StudentDetail() {
   const onSave = async () => {
     if (!id || !form) return;
     const phones = form.phones.split(',').map((p: string) => p.trim()).filter(Boolean);
-    await updateStudent(id, {
-      fullName: form.fullName,
-      phones,
-      email: form.email || undefined,
-      direction: form.direction,
-      cabinet: parseInt(form.cabinet, 10),
-      status: form.status,
-      comment: form.comment || undefined,
-    });
-    toast('Данные сохранены', 'success');
-    await reload();
-    setEdit(false);
+    try {
+      await updateStudent(id, {
+        fullName: form.fullName,
+        phones,
+        email: form.email || undefined,
+        direction: form.direction,
+        cabinet: parseInt(form.cabinet, 10),
+        status: form.status,
+        comment: form.comment || undefined,
+      });
+      toast('Данные сохранены', 'success');
+      await reload();
+      setEdit(false);
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
+    }
   };
 
   const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
-    await uploadPhoto(id, file);
-    toast('Фото загружено', 'success');
+    try {
+      await uploadPhoto(id, file);
+      toast('Фото загружено', 'success');
+      await reload();
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Ошибка загрузки', 'error');
+    }
+  };
+
+  const onReassign = async (managerId: string | null) => {
+    if (!id) return;
+    await assignStudentManager(id, managerId);
     await reload();
   };
 
@@ -69,27 +86,40 @@ export default function StudentDetail() {
       danger: true,
     });
     if (!ok) return;
-    await deleteStudent(id);
-    toast('Студент удалён', 'success');
-    navigate('/students');
+    try {
+      await deleteStudent(id);
+      toast('Студент удалён', 'success');
+      navigate('/students');
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка удаления', 'error');
+    }
   };
 
   if (!student || !form) return <div className="empty">Загрузка...</div>;
+
+  const isAdmin = me?.role === 'ADMIN';
+  const isMine = !student.managerId || student.managerId === me?.id;
+  const canEdit = isAdmin || isMine;
 
   return (
     <div className="card">
       <div className="card-header">
         <h2 className="card-title">{student.fullName}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          {!edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
-          {edit && <>
+          {canEdit && !edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
+          {canEdit && edit && <>
             <button className="btn btn-secondary btn-sm" onClick={() => { setEdit(false); reload(); }}>Отмена</button>
             <button className="btn btn-primary btn-sm" onClick={onSave}>Сохранить</button>
           </>}
-          <button className="btn btn-danger btn-sm" onClick={onDeleteStudent}>Удалить</button>
+          {canEdit && <button className="btn btn-danger btn-sm" onClick={onDeleteStudent}>Удалить</button>}
         </div>
       </div>
       <div className="card-body">
+        <ManagerBar
+          manager={student.manager}
+          canEditNow={canEdit}
+          onReassign={onReassign}
+        />
         <div className="detail-grid">
           <div>
             <div className="detail-photo">
@@ -97,11 +127,15 @@ export default function StudentDetail() {
                 ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
                 : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
             </div>
-            <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={() => photoRef.current?.click()}>
-              <Icon name="photo_camera" size={18} style={{ marginRight: 6 }} />
-              Загрузить фото
-            </button>
-            <input ref={photoRef} type="file" accept="image/*" hidden onChange={onPhoto} />
+            {canEdit && (
+              <>
+                <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={() => photoRef.current?.click()}>
+                  <Icon name="photo_camera" size={18} style={{ marginRight: 6 }} />
+                  Загрузить фото
+                </button>
+                <input ref={photoRef} type="file" accept="image/*" hidden onChange={onPhoto} />
+              </>
+            )}
           </div>
           <div>
             {!edit ? (
@@ -153,7 +187,7 @@ export default function StudentDetail() {
           studentId={student.id}
           documents={student.documents || []}
           onChange={reload}
-          editable={true}
+          editable={canEdit}
         />
       </div>
     </div>

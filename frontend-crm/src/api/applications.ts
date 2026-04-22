@@ -5,6 +5,7 @@ export interface AppFilters {
   status?: ApplicationStatus;
   direction?: Direction;
   search?: string;
+  mine?: boolean;
 }
 
 export async function listApplications(filters: AppFilters = {}) {
@@ -19,6 +20,11 @@ export async function getApplication(id: string) {
 
 export async function updateApplication(id: string, payload: Partial<Application>) {
   const { data } = await api.patch<Application>(`/applications/${id}`, payload);
+  return data;
+}
+
+export async function assignApplicationManager(id: string, managerId: string | null) {
+  const { data } = await api.patch<Application>(`/applications/${id}/manager`, { managerId });
   return data;
 }
 

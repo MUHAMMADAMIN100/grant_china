@@ -4,15 +4,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
+import { useAuth } from '../store/auth';
 import Icon from '../Icon';
+
+type Scope = 'all' | 'mine';
 
 export default function Students() {
   const navigate = useNavigate();
+  const me = useAuth((s) => s.user);
   const [items, setItems] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [direction, setDirection] = useState<Direction | ''>('');
   const [status, setStatus] = useState<StudentStatus | ''>('');
   const [cabinet, setCabinet] = useState('');
+  const [scope, setScope] = useState<Scope>('all');
   const [loading, setLoading] = useState(true);
 
   const load = () => {
@@ -22,6 +27,7 @@ export default function Students() {
       direction: direction || undefined,
       status: status || undefined,
       cabinet: cabinet ? parseInt(cabinet, 10) : undefined,
+      mine: scope === 'mine',
     })
       .then(setItems)
       .finally(() => setLoading(false));
@@ -30,7 +36,7 @@ export default function Students() {
   useEffect(() => {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
-  }, [search, direction, status, cabinet]);
+  }, [search, direction, status, cabinet, scope]);
 
   return (
     <motion.div
@@ -41,14 +47,32 @@ export default function Students() {
     >
       <div className="card-header">
         <h2 className="card-title">База студентов</h2>
-        <motion.button
-          className="btn btn-primary"
-          onClick={() => navigate('/students/new')}
-          whileHover={{ scale: 1.05, y: -2 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          + Новый студент
-        </motion.button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="scope-switch">
+            <button
+              className={`scope-btn${scope === 'mine' ? ' active' : ''}`}
+              onClick={() => setScope('mine')}
+            >
+              <Icon name="person" size={16} />
+              Мои
+            </button>
+            <button
+              className={`scope-btn${scope === 'all' ? ' active' : ''}`}
+              onClick={() => setScope('all')}
+            >
+              <Icon name="groups" size={16} />
+              Все
+            </button>
+          </div>
+          <motion.button
+            className="btn btn-primary"
+            onClick={() => navigate('/students/new')}
+            whileHover={{ scale: 1.05, y: -2 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            + Новый студент
+          </motion.button>
+        </div>
       </div>
       <div className="card-body">
         <div className="filters">
@@ -81,14 +105,15 @@ export default function Students() {
             </motion.div>
           ) : items.length === 0 ? (
             <motion.div key="empty" className="empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <div className="empty-icon"><Icon name="school" size={48} /></div>Студентов не найдено
+              <div className="empty-icon"><Icon name="school" size={48} /></div>
+              {scope === 'mine' ? 'У вас пока нет назначенных студентов' : 'Студентов не найдено'}
             </motion.div>
           ) : (
             <motion.div key="table" className="table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <table className="table">
                 <thead>
                   <tr>
-                    <th>ФИО</th><th>Телефоны</th><th>Направление</th><th>Кабинет</th><th>Статус</th>
+                    <th>ФИО</th><th>Телефоны</th><th>Направление</th><th>Кабинет</th><th>Менеджер</th><th>Статус</th>
                   </tr>
                 </thead>
                 <motion.tbody
@@ -111,6 +136,16 @@ export default function Students() {
                       <td>{s.phones.join(', ') || '—'}</td>
                       <td>{DIRECTION_LABEL[s.direction]}</td>
                       <td>№{s.cabinet}</td>
+                      <td>
+                        {s.manager ? (
+                          <span className={s.manager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
+                            {s.manager.fullName}
+                            {s.manager.id === me?.id && <span className="mgr-you"> (вы)</span>}
+                          </span>
+                        ) : (
+                          <span className="mgr-none">—</span>
+                        )}
+                      </td>
                       <td><span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span></td>
                     </motion.tr>
                   ))}
