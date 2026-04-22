@@ -9,9 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/file-saver": "^2.0.7",
     "axios": "^1.6.7",
+    "docx": "^9.6.1",
+    "file-saver": "^2.0.5",
     "framer-motion": "^12.38.0",
-    "pdfmake": "^0.3.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.22.0",

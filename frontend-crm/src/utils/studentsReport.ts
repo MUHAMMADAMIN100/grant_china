@@ -1,3 +1,4 @@
+import { saveAs } from 'file-saver';
 import type { Student } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
 
@@ -5,50 +6,32 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('ru-RU');
 
 export async function generateStudentsReport(params: {
   students: Student[];
-  from?: string;
-  to?: string;
+  from: string;
+  to: string;
 }) {
-  // Динамический импорт — pdfmake грузится только при реальном клике
-  const pdfMakeModule = await import('pdfmake/build/pdfmake');
-  const pdfFontsModule = await import('pdfmake/build/vfs_fonts');
-  const pdfMake: any = (pdfMakeModule as any).default || pdfMakeModule;
-  const pdfFonts: any = (pdfFontsModule as any).default || pdfFontsModule;
-  pdfMake.vfs = pdfFonts.vfs || pdfFonts.pdfMake?.vfs;
-
   const { students, from, to } = params;
 
-  const periodText = from && to
-    ? `за период ${fmtDate(from)} — ${fmtDate(to)}`
-    : from
-      ? `с ${fmtDate(from)}`
-      : to
-        ? `до ${fmtDate(to)}`
-        : 'за всё время';
+  const {
+    Document,
+    Packer,
+    Paragraph,
+    TextRun,
+    HeadingLevel,
+    AlignmentType,
+    Table,
+    TableRow,
+    TableCell,
+    WidthType,
+    BorderStyle,
+    ShadingType,
+    PageOrientation,
+    Header,
+    Footer,
+    PageNumber,
+  } = await import('docx');
 
+  const periodText = `за период ${fmtDate(from)} — ${fmtDate(to)}`;
   const generatedAt = new Date().toLocaleString('ru-RU');
-
-  const tableBody: any[] = [
-    [
-      { text: '№', style: 'th' },
-      { text: 'ФИО', style: 'th' },
-      { text: 'Направление', style: 'th' },
-      { text: 'Кабинет', style: 'th' },
-      { text: 'Статус', style: 'th' },
-      { text: 'Телефон', style: 'th' },
-      { text: 'Менеджер', style: 'th' },
-      { text: 'Дата', style: 'th' },
-    ],
-    ...students.map((s, i) => [
-      { text: String(i + 1), style: 'td' },
-      { text: s.fullName, style: 'td' },
-      { text: DIRECTION_LABEL[s.direction], style: 'td' },
-      { text: String(s.cabinet), style: 'td' },
-      { text: STUDENT_STATUS_LABEL[s.status], style: 'td' },
-      { text: s.phones.join(', ') || '—', style: 'td' },
-      { text: s.manager?.fullName || '—', style: 'td' },
-      { text: fmtDate(s.createdAt), style: 'td' },
-    ]),
-  ];
 
   const byStatus = students.reduce<Record<string, number>>((acc, s) => {
     acc[s.status] = (acc[s.status] || 0) + 1;
@@ -59,86 +42,169 @@ export async function generateStudentsReport(params: {
     return acc;
   }, {});
 
-  const docDefinition: any = {
-    pageSize: 'A4',
-    pageOrientation: 'landscape',
-    pageMargins: [28, 50, 28, 50],
-    info: {
-      title: `GrantChina — Отчёт по студентам ${periodText}`,
-      author: 'GrantChina CRM',
-    },
-    header: (currentPage: number) =>
-      currentPage === 1
-        ? null
-        : {
-            text: 'GrantChina — Отчёт по студентам',
-            alignment: 'right',
-            margin: [0, 20, 28, 0],
-            fontSize: 9,
-            color: '#888888',
-          },
-    footer: (currentPage: number, pageCount: number) => ({
-      columns: [
-        { text: `Сформировано: ${generatedAt}`, alignment: 'left', margin: [28, 0, 0, 0], fontSize: 9, color: '#888888' },
-        { text: `Стр. ${currentPage} из ${pageCount}`, alignment: 'right', margin: [0, 0, 28, 0], fontSize: 9, color: '#888888' },
+  const BORDER = { style: BorderStyle.SINGLE, size: 4, color: 'D5D9DF' };
+  const cellBorders = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
+
+  const headerCell = (text: string, width?: number) =>
+    new TableCell({
+      width: width ? { size: width, type: WidthType.DXA } : undefined,
+      borders: cellBorders,
+      shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'D52B2B' },
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.LEFT,
+          children: [new TextRun({ text, bold: true, color: 'FFFFFF', size: 20 })],
+        }),
+      ],
+    });
+
+  const bodyCell = (text: string, alt = false) =>
+    new TableCell({
+      borders: cellBorders,
+      shading: alt ? { type: ShadingType.CLEAR, color: 'auto', fill: 'F8FAFC' } : undefined,
+      children: [
+        new Paragraph({
+          children: [new TextRun({ text: text || '—', size: 18 })],
+        }),
+      ],
+    });
+
+  const tableRows: InstanceType<typeof TableRow>[] = [
+    new TableRow({
+      tableHeader: true,
+      children: [
+        headerCell('№'),
+        headerCell('ФИО'),
+        headerCell('Направление'),
+        headerCell('Кабинет'),
+        headerCell('Статус'),
+        headerCell('Телефон'),
+        headerCell('Менеджер'),
+        headerCell('Дата'),
       ],
     }),
-    content: [
-      { text: 'GrantChina', style: 'brand' },
-      { text: 'Отчёт по студентам', style: 'title' },
-      { text: periodText, style: 'subtitle' },
-      {
-        columns: [
-          {
-            width: '*',
-            stack: [
-              { text: `Всего студентов: ${students.length}`, style: 'summaryItem' },
-              ...Object.entries(byStatus).map(([k, v]) => ({
-                text: `• ${STUDENT_STATUS_LABEL[k as keyof typeof STUDENT_STATUS_LABEL] || k}: ${v}`,
-                style: 'summarySub',
-              })),
-            ],
-          },
-          {
-            width: '*',
-            stack: [
-              { text: 'По направлениям:', style: 'summaryItem' },
-              ...Object.entries(byDirection).map(([k, v]) => ({
-                text: `• ${DIRECTION_LABEL[k as keyof typeof DIRECTION_LABEL] || k}: ${v}`,
-                style: 'summarySub',
-              })),
-            ],
-          },
-        ],
-        margin: [0, 0, 0, 14],
+    ...students.map(
+      (s, i) =>
+        new TableRow({
+          children: [
+            bodyCell(String(i + 1), i % 2 === 1),
+            bodyCell(s.fullName, i % 2 === 1),
+            bodyCell(DIRECTION_LABEL[s.direction], i % 2 === 1),
+            bodyCell(String(s.cabinet), i % 2 === 1),
+            bodyCell(STUDENT_STATUS_LABEL[s.status], i % 2 === 1),
+            bodyCell(s.phones.join(', '), i % 2 === 1),
+            bodyCell(s.manager?.fullName || '—', i % 2 === 1),
+            bodyCell(fmtDate(s.createdAt), i % 2 === 1),
+          ],
+        }),
+    ),
+  ];
+
+  const doc = new Document({
+    creator: 'GrantChina CRM',
+    title: `Отчёт по студентам ${periodText}`,
+    styles: {
+      default: {
+        document: {
+          run: { font: 'Calibri', size: 20 },
+        },
       },
+    },
+    sections: [
       {
-        table: {
-          headerRows: 1,
-          widths: ['auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto'],
-          body: tableBody,
+        properties: {
+          page: {
+            size: { orientation: PageOrientation.LANDSCAPE },
+            margin: { top: 720, bottom: 720, left: 720, right: 720 },
+          },
         },
-        layout: {
-          fillColor: (rowIndex: number) => (rowIndex === 0 ? '#d52b2b' : rowIndex % 2 === 0 ? '#f8fafc' : null),
-          hLineColor: () => '#e3e7ef',
-          vLineColor: () => '#e3e7ef',
-          hLineWidth: () => 0.5,
-          vLineWidth: () => 0.5,
+        headers: {
+          default: new Header({
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.RIGHT,
+                children: [
+                  new TextRun({ text: 'GrantChina — Отчёт по студентам', color: '888888', size: 16 }),
+                ],
+              }),
+            ],
+          }),
         },
+        footers: {
+          default: new Footer({
+            children: [
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `Сформировано: ${generatedAt}`, color: '888888', size: 16 }),
+                  new TextRun({ text: '\tСтр. ', color: '888888', size: 16 }),
+                  new TextRun({ children: [PageNumber.CURRENT], color: '888888', size: 16 }),
+                  new TextRun({ text: ' из ', color: '888888', size: 16 }),
+                  new TextRun({ children: [PageNumber.TOTAL_PAGES], color: '888888', size: 16 }),
+                ],
+              }),
+            ],
+          }),
+        },
+        children: [
+          new Paragraph({
+            children: [new TextRun({ text: 'GrantChina', bold: true, color: 'D52B2B', size: 40 })],
+          }),
+          new Paragraph({
+            heading: HeadingLevel.HEADING_1,
+            children: [new TextRun({ text: 'Отчёт по студентам', bold: true, size: 32 })],
+          }),
+          new Paragraph({
+            children: [new TextRun({ text: periodText, color: '5B6478', size: 22 })],
+            spacing: { after: 240 },
+          }),
+
+          new Paragraph({
+            children: [new TextRun({ text: `Всего студентов: ${students.length}`, bold: true, size: 22 })],
+          }),
+          new Paragraph({
+            children: [new TextRun({ text: 'По статусам:', bold: true, size: 20 })],
+            spacing: { before: 100 },
+          }),
+          ...Object.entries(byStatus).map(
+            ([k, v]) =>
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: `  • ${STUDENT_STATUS_LABEL[k as keyof typeof STUDENT_STATUS_LABEL] || k}: ${v}`,
+                    size: 20,
+                    color: '5B6478',
+                  }),
+                ],
+              }),
+          ),
+          new Paragraph({
+            children: [new TextRun({ text: 'По направлениям:', bold: true, size: 20 })],
+            spacing: { before: 100 },
+          }),
+          ...Object.entries(byDirection).map(
+            ([k, v]) =>
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: `  • ${DIRECTION_LABEL[k as keyof typeof DIRECTION_LABEL] || k}: ${v}`,
+                    size: 20,
+                    color: '5B6478',
+                  }),
+                ],
+              }),
+          ),
+          new Paragraph({ text: '', spacing: { after: 200 } }),
+
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: tableRows,
+          }),
+        ],
       },
     ],
-    styles: {
-      brand: { fontSize: 20, bold: true, color: '#d52b2b', margin: [0, 0, 0, 4] },
-      title: { fontSize: 16, bold: true, margin: [0, 0, 0, 4] },
-      subtitle: { fontSize: 11, color: '#5b6478', margin: [0, 0, 0, 14] },
-      summaryItem: { fontSize: 11, bold: true, margin: [0, 0, 0, 4] },
-      summarySub: { fontSize: 10, color: '#5b6478', margin: [0, 0, 0, 2] },
-      th: { bold: true, fontSize: 10, color: 'white', margin: [4, 6, 4, 6] },
-      td: { fontSize: 9, margin: [4, 4, 4, 4] },
-    },
-    defaultStyle: { font: 'Roboto' },
-  };
+  });
 
-  const fileName = `grantchina-students-${new Date().toISOString().slice(0, 10)}.pdf`;
-  pdfMake.createPdf(docDefinition).download(fileName);
+  const blob = await Packer.toBlob(doc);
+  const fileName = `grantchina-students-${new Date().toISOString().slice(0, 10)}.docx`;
+  saveAs(blob, fileName);
 }

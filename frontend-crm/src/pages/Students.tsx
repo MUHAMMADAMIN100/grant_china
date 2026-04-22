@@ -45,17 +45,26 @@ export default function Students() {
     return () => clearTimeout(t);
   }, [search, direction, status, cabinet, scope]);
 
+  const reportDatesValid =
+    !!reportFrom && !!reportTo && new Date(reportFrom) <= new Date(reportTo);
+
   const onDownloadReport = async () => {
+    if (!reportFrom || !reportTo) {
+      toast('Выберите обе даты: "От" и "До"', 'error');
+      return;
+    }
+    if (new Date(reportFrom) > new Date(reportTo)) {
+      toast('Дата "До" должна быть позже "От"', 'error');
+      return;
+    }
     setGenerating(true);
     try {
       const all = await listStudents({});
-      const from = reportFrom ? new Date(reportFrom + 'T00:00:00') : null;
-      const to = reportTo ? new Date(reportTo + 'T23:59:59') : null;
+      const from = new Date(reportFrom + 'T00:00:00');
+      const to = new Date(reportTo + 'T23:59:59');
       const filtered = all.filter((s) => {
         const d = new Date(s.createdAt);
-        if (from && d < from) return false;
-        if (to && d > to) return false;
-        return true;
+        return d >= from && d <= to;
       });
       if (filtered.length === 0) {
         toast('За выбранный период нет студентов', 'error');
@@ -64,11 +73,13 @@ export default function Students() {
       }
       await generateStudentsReport({
         students: filtered,
-        from: reportFrom || undefined,
-        to: reportTo || undefined,
+        from: reportFrom,
+        to: reportTo,
       });
       toast(`Отчёт сгенерирован (${filtered.length} студентов)`, 'success');
       setReportOpen(false);
+      setReportFrom('');
+      setReportTo('');
     } catch (e: any) {
       toast(e?.message || 'Ошибка генерации отчёта', 'error');
     } finally {
@@ -107,10 +118,10 @@ export default function Students() {
             onClick={() => setReportOpen(true)}
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
-            title="Скачать отчёт в PDF"
+            title="Скачать отчёт в Word"
           >
-            <Icon name="download" size={16} style={{ marginRight: 4 }} />
-            Отчёт PDF
+            <Icon name="description" size={16} style={{ marginRight: 4 }} />
+            Отчёт Word
           </motion.button>
           <motion.button
             className="btn btn-primary"
@@ -223,28 +234,32 @@ export default function Students() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="dialog-icon">
-                <Icon name="download" size={28} />
+                <Icon name="description" size={28} />
               </div>
-              <div className="dialog-title">Отчёт по студентам</div>
+              <div className="dialog-title">Отчёт по студентам (Word)</div>
               <div className="dialog-message">
-                Выберите период. Без указания дат в отчёт попадут все студенты.
+                Укажите обе даты — "От" и "До". В отчёт попадут студенты, зарегистрированные в этот период.
               </div>
 
               <div className="form-grid-2" style={{ textAlign: 'left', marginBottom: 20 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label>От</label>
+                  <label>От *</label>
                   <input
                     type="date"
                     value={reportFrom}
+                    max={reportTo || undefined}
                     onChange={(e) => setReportFrom(e.target.value)}
+                    required
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label>До</label>
+                  <label>До *</label>
                   <input
                     type="date"
                     value={reportTo}
+                    min={reportFrom || undefined}
                     onChange={(e) => setReportTo(e.target.value)}
+                    required
                   />
                 </div>
               </div>
@@ -261,10 +276,12 @@ export default function Students() {
                 <motion.button
                   className="btn btn-primary"
                   onClick={onDownloadReport}
-                  disabled={generating}
+                  disabled={generating || !reportDatesValid}
                   whileTap={{ scale: 0.97 }}
+                  style={!reportDatesValid && !generating ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                  title={!reportDatesValid ? 'Выберите обе даты' : 'Скачать Word'}
                 >
-                  {generating ? 'Создание…' : 'Скачать PDF'}
+                  {generating ? 'Создание…' : 'Скачать Word'}
                 </motion.button>
               </div>
             </motion.div>
