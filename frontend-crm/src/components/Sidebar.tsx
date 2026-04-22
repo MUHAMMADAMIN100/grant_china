@@ -12,6 +12,7 @@ export default function Sidebar() {
     { to: '/dashboard', icon: 'dashboard', label: 'Дашборд' },
     { to: '/applications', icon: 'assignment', label: 'Заявки' },
     { to: '/students', icon: 'school', label: 'Студенты' },
+    { to: '/tasks', icon: 'task_alt', label: 'Задачи' },
     ...(user?.role === 'ADMIN' ? [{ to: '/users', icon: 'group', label: 'Пользователи' }] : []),
   ];
 

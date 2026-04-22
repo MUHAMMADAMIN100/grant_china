@@ -11,6 +11,7 @@ import Students from './pages/Students';
 import StudentDetail from './pages/StudentDetail';
 import StudentNew from './pages/StudentNew';
 import Users from './pages/Users';
+import Tasks from './pages/Tasks';
 
 export default function App() {
   const init = useAuth((s) => s.init);
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/students" element={<Students />} />
         <Route path="/students/new" element={<StudentNew />} />
         <Route path="/students/:id" element={<StudentDetail />} />
+        <Route path="/tasks" element={<Tasks />} />
         <Route path="/users" element={<Users />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

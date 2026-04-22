@@ -70,6 +70,31 @@ export interface Notification {
   createdAt: string;
 }
 
+export type TaskStatus = 'TODO' | 'DONE';
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  assignedToId: string;
+  assignedTo?: { id: string; fullName: string; email: string };
+  createdById: string | null;
+  createdBy?: { id: string; fullName: string; email: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  TODO: 'К выполнению',
+  DONE: 'Выполнено',
+};
+
+export const TASK_STATUS_BADGE: Record<TaskStatus, string> = {
+  TODO: 'badge-warning',
+  DONE: 'badge-success',
+};
+
 export const DIRECTION_LABEL: Record<Direction, string> = {
   BACHELOR: 'Бакалавриат',
   MASTER: 'Магистратура',

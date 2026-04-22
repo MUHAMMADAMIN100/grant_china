@@ -1,0 +1,122 @@
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Role, TaskStatus } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateTaskDto } from './dto/create-task.dto';
+import { UpdateTaskDto } from './dto/update-task.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../mail/mail.service';
+
+type CurrentUser = { id: string; role: Role };
+
+const TASK_INCLUDE = {
+  assignedTo: { select: { id: true, fullName: true, email: true } },
+  createdBy: { select: { id: true, fullName: true, email: true } },
+} as const;
+
+@Injectable()
+export class TasksService {
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+    private mail: MailService,
+  ) {}
+
+  async create(dto: CreateTaskDto, user: CurrentUser) {
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException('Только администратор может создавать задачи');
+    }
+    const assignee = await this.prisma.user.findUnique({ where: { id: dto.assignedToId } });
+    if (!assignee) throw new NotFoundException('Сотрудник не найден');
+
+    const task = await this.prisma.task.create({
+      data: {
+        title: dto.title.trim(),
+        description: dto.description.trim(),
+        assignedToId: dto.assignedToId,
+        createdById: user.id,
+      },
+      include: TASK_INCLUDE,
+    });
+
+    // In-app уведомление назначенному сотруднику
+    await this.notifications.notifyUser(assignee.id, {
+      type: 'TASK_ASSIGNED',
+      title: 'Новая задача',
+      message: task.title,
+      payload: { taskId: task.id },
+    });
+
+    // Email сотруднику
+    this.mail
+      .send(
+        assignee.email,
+        `Новая задача: ${task.title}`,
+        `<h2>Вам назначена новая задача</h2>
+         <p><b>${task.title}</b></p>
+         <p style="white-space: pre-wrap">${task.description}</p>
+         <p style="color:#666; font-size: 13px">Откройте CRM, чтобы начать выполнение.</p>`,
+      )
+      .catch(() => undefined);
+
+    return task;
+  }
+
+  async findAll(filters: { mine?: boolean; currentUserId: string; role: Role }) {
+    const where =
+      filters.role === 'ADMIN' && !filters.mine
+        ? {}
+        : { assignedToId: filters.currentUserId };
+    return this.prisma.task.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: TASK_INCLUDE,
+    });
+  }
+
+  async findOne(id: string) {
+    const task = await this.prisma.task.findUnique({ where: { id }, include: TASK_INCLUDE });
+    if (!task) throw new NotFoundException('Задача не найдена');
+    return task;
+  }
+
+  async update(id: string, dto: UpdateTaskDto, user: CurrentUser) {
+    const task = await this.findOne(id);
+    const isOwner = task.assignedToId === user.id;
+    if (user.role !== 'ADMIN' && !isOwner) {
+      throw new ForbiddenException('Вы не можете редактировать эту задачу');
+    }
+    // Сотрудник не может переназначать задачу — только админ
+    if (user.role !== 'ADMIN' && dto.assignedToId !== undefined) {
+      throw new ForbiddenException('Только администратор может переназначать задачу');
+    }
+    return this.prisma.task.update({
+      where: { id },
+      data: {
+        ...(dto.title !== undefined ? { title: dto.title } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.status !== undefined ? { status: dto.status } : {}),
+        ...(dto.assignedToId !== undefined ? { assignedToId: dto.assignedToId } : {}),
+      },
+      include: TASK_INCLUDE,
+    });
+  }
+
+  async remove(id: string, user: CurrentUser) {
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException('Только администратор может удалять задачи');
+    }
+    await this.findOne(id);
+    await this.prisma.task.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  async stats(user: CurrentUser) {
+    const where = user.role === 'ADMIN' ? {} : { assignedToId: user.id };
+    const [total, done, todo] = await Promise.all([
+      this.prisma.task.count({ where }),
+      this.prisma.task.count({ where: { ...where, status: TaskStatus.DONE } }),
+      this.prisma.task.count({ where: { ...where, status: TaskStatus.TODO } }),
+    ]);
+    return { total, done, todo };
+  }
+}

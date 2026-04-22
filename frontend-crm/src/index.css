@@ -328,6 +328,38 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   font-size: 14px;
 }
 
+/* Tasks */
+.tasks-list { display: flex; flex-direction: column; gap: 12px; }
+.task-item {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 16px; background: white;
+  border: 1px solid var(--border); border-radius: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.task-item:hover { box-shadow: var(--shadow); }
+.task-done { background: var(--success-soft); border-color: rgba(16, 185, 129, 0.2); }
+.task-done .task-title { text-decoration: line-through; color: var(--text-soft); }
+.task-check {
+  flex-shrink: 0; padding: 2px; color: var(--text-light);
+  transition: color 0.2s, transform 0.2s;
+}
+.task-check:hover:not(.disabled):not(:disabled) { color: var(--success); transform: scale(1.1); }
+.task-check.checked { color: var(--success); }
+.task-check.disabled, .task-check:disabled { cursor: not-allowed; opacity: 0.5; }
+.task-content { flex: 1; min-width: 0; }
+.task-title { font-weight: 600; font-size: 15px; color: var(--text); margin-bottom: 4px; }
+.task-desc {
+  color: var(--text-soft); font-size: 14px;
+  line-height: 1.5; margin-bottom: 10px;
+  white-space: pre-wrap; word-wrap: break-word;
+}
+.task-meta {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-soft);
+}
+.task-meta-item { display: flex; align-items: center; gap: 4px; }
+.task-meta-item .material-symbols-rounded { color: var(--text-light); }
+
 /* Scope switch (Мои / Все) */
 .scope-switch {
   display: inline-flex; background: var(--bg); border-radius: 8px; padding: 3px;

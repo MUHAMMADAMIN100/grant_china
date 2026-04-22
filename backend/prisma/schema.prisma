@@ -31,6 +31,11 @@ enum StudentStatus {
   ARCHIVED
 }
 
+enum TaskStatus {
+  TODO
+  DONE
+}
+
 model User {
   id         String   @id @default(uuid())
   email      String   @unique
@@ -43,6 +48,8 @@ model User {
   notifications      Notification[]
   managedApplications Application[] @relation("ApplicationManager")
   managedStudents    Student[]     @relation("StudentManager")
+  assignedTasks      Task[]        @relation("TaskAssignee")
+  createdTasks       Task[]        @relation("TaskCreator")
 }
 
 model Application {
@@ -102,6 +109,22 @@ model Document {
   createdAt  DateTime @default(now())
 
   @@index([studentId, type])
+}
+
+model Task {
+  id           String     @id @default(uuid())
+  title        String
+  description  String
+  status       TaskStatus @default(TODO)
+  assignedToId String
+  assignedTo   User       @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+  createdById  String?
+  createdBy    User?      @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([assignedToId])
+  @@index([status])
 }
 
 model Notification {

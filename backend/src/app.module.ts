@@ -12,6 +12,7 @@ import { FilesModule } from './files/files.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { MailModule } from './mail/mail.module';
+import { TasksModule } from './tasks/tasks.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { MailModule } from './mail/mail.module';
     NotificationsModule,
     TelegramModule,
     MailModule,
+    TasksModule,
   ],
 })
 export class AppModule {}

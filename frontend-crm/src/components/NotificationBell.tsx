@@ -1,13 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listNotifications, markAllRead, markRead, unreadCount } from '../api/notifications';
 import type { Notification } from '../api/types';
 import Icon from '../Icon';
 
+function notificationHref(n: Notification): string | null {
+  const p = n.payload || {};
+  if (p.applicationId) return `/applications/${p.applicationId}`;
+  if (p.studentId) return `/students/${p.studentId}`;
+  if (p.taskId) return '/tasks';
+  if (n.type === 'TASK_ASSIGNED') return '/tasks';
+  if (n.type === 'APPLICATION_NEW') return '/applications';
+  return null;
+}
+
 export default function NotificationBell() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(0);
   const [items, setItems] = useState<Notification[]>([]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const refreshCount = async () => {
     try { setCount(await unreadCount()); } catch {}
@@ -25,11 +38,36 @@ export default function NotificationBell() {
     }
   }, [open]);
 
+  // Закрытие по клику вне панели/кнопки
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   const onItemClick = async (n: Notification) => {
     if (!n.read) {
       await markRead(n.id).catch(() => {});
       setItems((prev) => prev.map((i) => (i.id === n.id ? { ...i, read: true } : i)));
       refreshCount();
+    }
+    const href = notificationHref(n);
+    if (href) {
+      setOpen(false);
+      navigate(href);
     }
   };
 
@@ -40,7 +78,7 @@ export default function NotificationBell() {
   };
 
   return (
-    <>
+    <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-flex' }}>
       <motion.button
         className="notif-button"
         onClick={() => setOpen(!open)}
@@ -106,6 +144,7 @@ export default function NotificationBell() {
                       show: { opacity: 1, x: 0 },
                     }}
                     whileHover={{ x: 4 }}
+                    style={{ cursor: 'pointer' }}
                   >
                     <div className="notif-item-title">{n.title}</div>
                     <div className="notif-item-msg">{n.message}</div>
@@ -117,6 +156,6 @@ export default function NotificationBell() {
           </motion.div>
         )}
       </AnimatePresence>
-    </>
+    </div>
   );
 }
