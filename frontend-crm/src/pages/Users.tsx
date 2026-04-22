@@ -88,14 +88,14 @@ export default function Users() {
               {items.map((u) => (
                 <tr key={u.id} style={{ cursor: 'default' }}>
                   <td><strong>{u.fullName}</strong>{u.id === me?.id && <span style={{ color: '#5b6478', fontSize: 12 }}> (вы)</span>}</td>
-                  <td>{u.email}</td>
-                  <td>
+                  <td data-label="Email">{u.email}</td>
+                  <td data-label="Роль">
                     <select value={u.role} onChange={(e) => onChangeRole(u, e.target.value as Role)} disabled={u.id === me?.id}>
                       <option value="EMPLOYEE">Сотрудник</option>
                       <option value="ADMIN">Администратор</option>
                     </select>
                   </td>
-                  <td>{u.createdAt ? new Date(u.createdAt).toLocaleDateString('ru-RU') : '—'}</td>
+                  <td data-label="Создан">{u.createdAt ? new Date(u.createdAt).toLocaleDateString('ru-RU') : '—'}</td>
                   <td>
                     <button className="btn btn-sm btn-danger" onClick={() => onDelete(u)} disabled={u.id === me?.id}>
                       Удалить

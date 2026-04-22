@@ -114,9 +114,9 @@ export default function Applications() {
                       style={{ cursor: 'pointer' }}
                     >
                       <td><strong>{a.fullName}</strong></td>
-                      <td>{a.phone}</td>
-                      <td>{DIRECTION_LABEL[a.direction]}</td>
-                      <td>
+                      <td data-label="Телефон">{a.phone}</td>
+                      <td data-label="Направление">{DIRECTION_LABEL[a.direction]}</td>
+                      <td data-label="Менеджер">
                         {a.manager ? (
                           <span className={a.manager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
                             {a.manager.fullName}
@@ -126,8 +126,8 @@ export default function Applications() {
                           <span className="mgr-none">—</span>
                         )}
                       </td>
-                      <td><span className={`badge ${STATUS_BADGE[a.status]}`}>{STATUS_LABEL[a.status]}</span></td>
-                      <td>{new Date(a.createdAt).toLocaleDateString('ru-RU')}</td>
+                      <td data-label="Статус"><span className={`badge ${STATUS_BADGE[a.status]}`}>{STATUS_LABEL[a.status]}</span></td>
+                      <td data-label="Дата">{new Date(a.createdAt).toLocaleDateString('ru-RU')}</td>
                     </motion.tr>
                   ))}
                 </motion.tbody>

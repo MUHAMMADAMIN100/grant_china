@@ -603,14 +603,140 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .toast-error .material-symbols-rounded { color: var(--danger); }
 .toast-info .material-symbols-rounded { color: var(--info); }
 
-@media (max-width: 768px) {
-  .sidebar { width: 70px; }
+/* ===== TABLET (481–900) ===== */
+@media (max-width: 900px) {
+  .sidebar { width: 72px; }
   .sidebar-logo span:not(.sidebar-logo-mark), .sidebar-nav a span:not(.sidebar-nav-icon),
   .user-info { display: none; }
   .sidebar-logo { padding: 12px 8px; }
   .sidebar-logo-image { height: 40px; }
-  .sidebar-nav a { justify-content: center; }
+  .sidebar-nav a { justify-content: center; padding: 12px 10px; }
   .form-grid-2 { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
-  .content { padding: 16px; }
+  .content { padding: 18px; }
+  .card-header { flex-wrap: wrap; gap: 10px; }
+  .docs-grid { grid-template-columns: 1fr; }
+}
+
+/* ===== MOBILE (до 720) — sidebar становится нижней навигацией ===== */
+@media (max-width: 720px) {
+  .app-layout { flex-direction: column; }
+  .sidebar {
+    width: 100%; height: auto; position: fixed;
+    bottom: 0; left: 0; right: 0; z-index: 50;
+    flex-direction: row;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+  .sidebar-logo, .sidebar-user { display: none; }
+  .sidebar-nav {
+    flex: 1; padding: 6px 4px;
+    display: flex; justify-content: space-around;
+  }
+  .sidebar-nav a {
+    flex: 1; flex-direction: column; gap: 2px;
+    padding: 6px 4px; font-size: 10px; border-radius: 6px;
+    text-align: center; margin-bottom: 0; min-width: 0;
+  }
+  .sidebar-nav a span:not(.sidebar-nav-icon) {
+    display: block !important; font-size: 10px; line-height: 1.1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  .sidebar-nav-icon { font-size: 20px; }
+  .main { padding-bottom: 72px; min-height: 100vh; }
+  .topbar {
+    padding: 0 14px; height: 56px;
+    position: sticky; top: 0;
+  }
+  .topbar-title { font-size: 17px; }
+  .content { padding: 12px; }
+
+  /* Card header — название + кнопки в колонку */
+  .card-header {
+    flex-direction: column; align-items: stretch; gap: 10px;
+    padding: 14px 14px 8px;
+  }
+  .card-title { font-size: 17px; }
+  .card-body { padding: 14px; }
+
+  /* Фильтры — на всю ширину, колонка */
+  .filters { flex-direction: column; gap: 8px; }
+  .filters > * { width: 100%; flex: none; min-width: 0; }
+  .scope-switch { width: 100%; }
+  .scope-btn { flex: 1; justify-content: center; }
+
+  /* Таблицы → карточки */
+  .table-wrap { overflow: visible; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table thead { display: none; }
+  .table tr {
+    background: white; border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  }
+  .table tr:hover { background: white; }
+  .table td {
+    border: none !important; padding: 4px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 10px; font-size: 14px; white-space: normal;
+  }
+  .table td:first-child {
+    font-size: 16px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border) !important;
+    margin-bottom: 8px; display: block;
+  }
+  .table td[data-label]::before {
+    content: attr(data-label);
+    font-weight: 500; color: var(--text-soft); font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+
+  /* Детали заявки/студента */
+  .detail-photo { aspect-ratio: 1; max-width: 220px; margin: 0 auto; }
+  .detail-row { flex-direction: column; align-items: stretch; gap: 2px; padding: 10px 0; }
+  .detail-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+  /* Документы */
+  .docs-info { font-size: 13px; padding: 10px 12px; }
+  .docs-progress { padding: 12px; }
+  .doc-slot { padding: 12px; }
+
+  /* Задачи */
+  .task-item { flex-direction: column; }
+  .task-status-switch { width: 100%; }
+  .task-status-btn { flex: 1; justify-content: center; }
+  .task-status-btn span { font-size: 11px; }
+  .task-delete-btn { align-self: flex-end; }
+
+  /* Диалог */
+  .dialog-card { padding: 22px; border-radius: 14px; }
+  .dialog-title { font-size: 17px; }
+  .dialog-actions { flex-direction: column-reverse; }
+  .dialog-actions .btn { width: 100%; }
+
+  /* Тосты */
+  .toast-stack { top: 10px; right: 10px; left: 10px; }
+  .toast { min-width: 0; max-width: 100%; }
+
+  /* Notification panel — во весь экран */
+  .notif-panel {
+    position: fixed; top: 56px !important; right: 0 !important;
+    left: 0; width: 100%; max-height: calc(100vh - 56px);
+    border-radius: 0; border-left: none; border-right: none;
+  }
+
+  /* Менеджер-дропдаун */
+  .manager-bar { flex-direction: column; align-items: stretch; gap: 10px; }
+  .manager-dropdown { position: fixed; left: 10px; right: 10px; top: 120px; min-width: 0; }
+
+  /* Формы новых/редактирования */
+  .form-actions { flex-direction: column-reverse; gap: 8px; }
+  .form-actions .btn { width: 100%; justify-content: center; }
+}
+
+/* ===== SMALL PHONES (до 380) ===== */
+@media (max-width: 380px) {
+  .sidebar-nav a span:not(.sidebar-nav-icon) { font-size: 9px; }
+  .content { padding: 10px; }
+  .card-body { padding: 12px; }
+  .btn.btn-large { padding: 10px 16px; }
 }

@@ -133,10 +133,10 @@ export default function Students() {
                       style={{ cursor: 'pointer' }}
                     >
                       <td><strong>{s.fullName}</strong></td>
-                      <td>{s.phones.join(', ') || '—'}</td>
-                      <td>{DIRECTION_LABEL[s.direction]}</td>
-                      <td>№{s.cabinet}</td>
-                      <td>
+                      <td data-label="Телефоны">{s.phones.join(', ') || '—'}</td>
+                      <td data-label="Направление">{DIRECTION_LABEL[s.direction]}</td>
+                      <td data-label="Кабинет">№{s.cabinet}</td>
+                      <td data-label="Менеджер">
                         {s.manager ? (
                           <span className={s.manager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
                             {s.manager.fullName}
@@ -146,7 +146,7 @@ export default function Students() {
                           <span className="mgr-none">—</span>
                         )}
                       </td>
-                      <td><span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span></td>
+                      <td data-label="Статус"><span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span></td>
                     </motion.tr>
                   ))}
                 </motion.tbody>
