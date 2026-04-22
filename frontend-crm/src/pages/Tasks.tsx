@@ -68,11 +68,13 @@ export default function Tasks() {
     }
   };
 
-  const toggleStatus = async (t: Task) => {
-    const next: TaskStatus = t.status === 'DONE' ? 'TODO' : 'DONE';
+  const setStatus = async (t: Task, next: TaskStatus) => {
+    if (t.status === next) return;
     try {
       await updateTask(t.id, { status: next });
-      toast(next === 'DONE' ? 'Задача выполнена' : 'Задача возвращена в работу', 'success');
+      if (next === 'DONE') toast('Задача выполнена', 'success');
+      else if (next === 'IN_PROGRESS') toast('Задача взята в работу', 'success');
+      else toast('Задача возвращена в очередь', 'info');
       await load();
     } catch (e: any) {
       toast(e?.response?.data?.message || 'Ошибка', 'error');
@@ -222,7 +224,12 @@ export default function Tasks() {
             >
               {items.map((t) => {
                 const isOwner = t.assignedToId === me?.id;
-                const canToggle = isAdmin || isOwner;
+                const canChange = isAdmin || isOwner;
+                const statuses: { value: TaskStatus; icon: string; label: string }[] = [
+                  { value: 'TODO', icon: 'radio_button_unchecked', label: 'К выполнению' },
+                  { value: 'IN_PROGRESS', icon: 'autorenew', label: 'В работе' },
+                  { value: 'DONE', icon: 'check_circle', label: 'Выполнено' },
+                ];
                 return (
                   <motion.div
                     key={t.id}
@@ -233,14 +240,6 @@ export default function Tasks() {
                     }}
                     layout
                   >
-                    <button
-                      className={`task-check${t.status === 'DONE' ? ' checked' : ''}${!canToggle ? ' disabled' : ''}`}
-                      onClick={() => canToggle && toggleStatus(t)}
-                      disabled={!canToggle}
-                      title={canToggle ? (t.status === 'DONE' ? 'Вернуть в работу' : 'Отметить выполненной') : 'Только назначенный сотрудник или админ'}
-                    >
-                      <Icon name={t.status === 'DONE' ? 'check_circle' : 'radio_button_unchecked'} size={26} />
-                    </button>
                     <div className="task-content">
                       <div className="task-title">{t.title}</div>
                       <div className="task-desc">{t.description}</div>
@@ -262,9 +261,24 @@ export default function Tasks() {
                           {new Date(t.createdAt).toLocaleDateString('ru-RU')}
                         </span>
                       </div>
+
+                      <div className="task-status-switch">
+                        {statuses.map((s) => (
+                          <button
+                            key={s.value}
+                            className={`task-status-btn${t.status === s.value ? ' active' : ''} task-status-${s.value.toLowerCase()}`}
+                            onClick={() => canChange && setStatus(t, s.value)}
+                            disabled={!canChange}
+                            title={canChange ? s.label : 'Только назначенный сотрудник или админ'}
+                          >
+                            <Icon name={s.icon} size={16} />
+                            <span>{s.label}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     {isAdmin && (
-                      <button className="btn btn-sm btn-danger" onClick={() => onDelete(t)} title="Удалить задачу">
+                      <button className="btn btn-sm btn-danger task-delete-btn" onClick={() => onDelete(t)} title="Удалить задачу">
                         <Icon name="delete" size={16} />
                       </button>
                     )}

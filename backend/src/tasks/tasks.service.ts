@@ -112,11 +112,12 @@ export class TasksService {
 
   async stats(user: CurrentUser) {
     const where = user.role === 'ADMIN' ? {} : { assignedToId: user.id };
-    const [total, done, todo] = await Promise.all([
+    const [total, todo, inProgress, done] = await Promise.all([
       this.prisma.task.count({ where }),
-      this.prisma.task.count({ where: { ...where, status: TaskStatus.DONE } }),
       this.prisma.task.count({ where: { ...where, status: TaskStatus.TODO } }),
+      this.prisma.task.count({ where: { ...where, status: TaskStatus.IN_PROGRESS } }),
+      this.prisma.task.count({ where: { ...where, status: TaskStatus.DONE } }),
     ]);
-    return { total, done, todo };
+    return { total, todo, inProgress, done };
   }
 }

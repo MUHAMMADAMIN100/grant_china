@@ -70,7 +70,7 @@ export interface Notification {
   createdAt: string;
 }
 
-export type TaskStatus = 'TODO' | 'DONE';
+export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
 
 export interface Task {
   id: string;
@@ -87,11 +87,13 @@ export interface Task {
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   TODO: 'К выполнению',
+  IN_PROGRESS: 'В работе',
   DONE: 'Выполнено',
 };
 
 export const TASK_STATUS_BADGE: Record<TaskStatus, string> = {
-  TODO: 'badge-warning',
+  TODO: 'badge-info',
+  IN_PROGRESS: 'badge-warning',
   DONE: 'badge-success',
 };
 

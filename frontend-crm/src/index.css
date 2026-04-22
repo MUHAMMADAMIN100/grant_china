@@ -339,6 +339,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .task-item:hover { box-shadow: var(--shadow); }
 .task-done { background: var(--success-soft); border-color: rgba(16, 185, 129, 0.2); }
 .task-done .task-title { text-decoration: line-through; color: var(--text-soft); }
+.task-in_progress { background: var(--warning-soft); border-color: rgba(245, 158, 11, 0.3); }
 .task-check {
   flex-shrink: 0; padding: 2px; color: var(--text-light);
   transition: color 0.2s, transform 0.2s;
@@ -359,6 +360,25 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .task-meta-item { display: flex; align-items: center; gap: 4px; }
 .task-meta-item .material-symbols-rounded { color: var(--text-light); }
+.task-delete-btn { flex-shrink: 0; align-self: flex-start; }
+
+.task-status-switch {
+  display: inline-flex; gap: 4px; margin-top: 12px;
+  padding: 4px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 10px;
+  flex-wrap: wrap;
+}
+.task-status-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 7px;
+  font-size: 12px; font-weight: 500;
+  color: var(--text-soft); transition: all 0.2s;
+}
+.task-status-btn:hover:not(:disabled):not(.active) { color: var(--text); background: rgba(0,0,0,0.04); }
+.task-status-btn.active.task-status-todo { background: var(--info); color: white; }
+.task-status-btn.active.task-status-in_progress { background: var(--warning); color: white; }
+.task-status-btn.active.task-status-done { background: var(--success); color: white; }
+.task-status-btn:disabled { cursor: not-allowed; opacity: 0.6; }
 
 /* Scope switch (Мои / Все) */
 .scope-switch {
