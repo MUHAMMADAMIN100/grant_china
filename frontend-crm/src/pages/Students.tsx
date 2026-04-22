@@ -5,6 +5,8 @@ import { listStudents } from '../api/students';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
+import { useUI } from '../ui/Dialogs';
+import { generateStudentsReport } from '../utils/studentsReport';
 import Icon from '../Icon';
 
 type Scope = 'all' | 'mine';
@@ -12,6 +14,7 @@ type Scope = 'all' | 'mine';
 export default function Students() {
   const navigate = useNavigate();
   const me = useAuth((s) => s.user);
+  const { toast } = useUI();
   const [items, setItems] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [direction, setDirection] = useState<Direction | ''>('');
@@ -19,6 +22,10 @@ export default function Students() {
   const [cabinet, setCabinet] = useState('');
   const [scope, setScope] = useState<Scope>('all');
   const [loading, setLoading] = useState(true);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportFrom, setReportFrom] = useState('');
+  const [reportTo, setReportTo] = useState('');
+  const [generating, setGenerating] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -37,6 +44,37 @@ export default function Students() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
   }, [search, direction, status, cabinet, scope]);
+
+  const onDownloadReport = async () => {
+    setGenerating(true);
+    try {
+      const all = await listStudents({});
+      const from = reportFrom ? new Date(reportFrom + 'T00:00:00') : null;
+      const to = reportTo ? new Date(reportTo + 'T23:59:59') : null;
+      const filtered = all.filter((s) => {
+        const d = new Date(s.createdAt);
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      });
+      if (filtered.length === 0) {
+        toast('За выбранный период нет студентов', 'error');
+        setGenerating(false);
+        return;
+      }
+      await generateStudentsReport({
+        students: filtered,
+        from: reportFrom || undefined,
+        to: reportTo || undefined,
+      });
+      toast(`Отчёт сгенерирован (${filtered.length} студентов)`, 'success');
+      setReportOpen(false);
+    } catch (e: any) {
+      toast(e?.message || 'Ошибка генерации отчёта', 'error');
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   return (
     <motion.div
@@ -64,6 +102,16 @@ export default function Students() {
               Все
             </button>
           </div>
+          <motion.button
+            className="btn btn-secondary"
+            onClick={() => setReportOpen(true)}
+            whileHover={{ scale: 1.05, y: -2 }}
+            whileTap={{ scale: 0.95 }}
+            title="Скачать отчёт в PDF"
+          >
+            <Icon name="download" size={16} style={{ marginRight: 4 }} />
+            Отчёт PDF
+          </motion.button>
           <motion.button
             className="btn btn-primary"
             onClick={() => navigate('/students/new')}
@@ -155,6 +203,74 @@ export default function Students() {
           )}
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {reportOpen && (
+          <motion.div
+            className="dialog-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !generating && setReportOpen(false)}
+          >
+            <motion.div
+              className="dialog-card"
+              style={{ maxWidth: 460 }}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ duration: 0.22 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="dialog-icon">
+                <Icon name="download" size={28} />
+              </div>
+              <div className="dialog-title">Отчёт по студентам</div>
+              <div className="dialog-message">
+                Выберите период. Без указания дат в отчёт попадут все студенты.
+              </div>
+
+              <div className="form-grid-2" style={{ textAlign: 'left', marginBottom: 20 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>От</label>
+                  <input
+                    type="date"
+                    value={reportFrom}
+                    onChange={(e) => setReportFrom(e.target.value)}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>До</label>
+                  <input
+                    type="date"
+                    value={reportTo}
+                    onChange={(e) => setReportTo(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="dialog-actions">
+                <motion.button
+                  className="btn btn-secondary"
+                  onClick={() => setReportOpen(false)}
+                  disabled={generating}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  Отмена
+                </motion.button>
+                <motion.button
+                  className="btn btn-primary"
+                  onClick={onDownloadReport}
+                  disabled={generating}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  {generating ? 'Создание…' : 'Скачать PDF'}
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
