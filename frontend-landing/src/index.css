@@ -215,7 +215,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   color: white; padding: 100px 0;
 }
 .form-section .section-eyebrow { color: var(--accent); }
-.form-section h2 { color: white; }
+.form-section h2 {
+  color: white; text-align: center;
+  font-size: clamp(30px, 4vw, 42px); font-weight: 800;
+  margin-bottom: 18px;
+}
 .form-section .section-sub { color: rgba(255,255,255,0.7); }
 
 .form-card {
