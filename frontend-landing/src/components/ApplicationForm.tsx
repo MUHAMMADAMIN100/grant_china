@@ -124,6 +124,11 @@ export default function ApplicationForm() {
         comment: comment.trim() || undefined,
       });
       setSuccess(true);
+      // Аналитика: событие конверсии
+      try {
+        (window as any).gtag?.('event', 'submit_application', { direction });
+        (window as any).ym?.((window as any).__YM_ID__, 'reachGoal', 'APPLICATION_SUBMIT');
+      } catch {}
       setFullName(''); setPhone(''); setEmail(''); setComment('');
       setDirection('BACHELOR');
       setErrors({});

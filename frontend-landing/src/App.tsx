@@ -1,6 +1,7 @@
 import Header from './components/Header';
 import Hero from './components/Hero';
 import Services from './components/Services';
+import Directions from './components/Directions';
 import Advantages from './components/Advantages';
 import Testimonials from './components/Testimonials';
 import ApplicationForm from './components/ApplicationForm';
@@ -14,6 +15,7 @@ export default function App() {
       <main>
         <Hero />
         <Services />
+        <Directions />
         <Advantages />
         <Testimonials />
         <ApplicationForm />

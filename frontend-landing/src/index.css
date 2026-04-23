@@ -209,6 +209,36 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .advantage h3 { font-size: 20px; margin-bottom: 10px; font-weight: 700; }
 .advantage p { color: var(--text-soft); }
 
+/* Directions */
+.directions-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+.direction-card {
+  background: white;
+  padding: 26px 22px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  transition: all .25s;
+}
+.direction-card:hover {
+  box-shadow: var(--shadow);
+  border-color: transparent;
+}
+.direction-icon {
+  width: 54px; height: 54px; border-radius: 14px;
+  background: linear-gradient(135deg, #fff0f0, #fff5e6);
+  color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 14px;
+}
+.direction-card h3 {
+  font-size: 17px; font-weight: 700; margin-bottom: 8px;
+}
+.direction-card p {
+  color: var(--text-soft); font-size: 14px; line-height: 1.5;
+}
+
 /* Form */
 .form-section {
   background: linear-gradient(135deg, #1a1f2e 0%, #2d3548 100%);
@@ -379,16 +409,69 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 
 /* Footer */
 .footer {
-  background: #0f1320; color: rgba(255,255,255,0.7);
-  padding: 50px 0 30px; text-align: center;
+  background: #0f1320; color: rgba(255,255,255,0.75);
+  padding: 60px 0 24px;
 }
-.footer p { margin-bottom: 8px; }
-.footer-logo {
-  height: 110px; width: auto; margin: 0 auto 20px;
-  display: block; background: white;
-  padding: 10px; border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(213, 43, 43, 0.2);
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1.3fr;
+  gap: 48px;
+  margin-bottom: 40px;
 }
+.footer-col { min-width: 0; }
+.footer-brand {
+  font-size: 24px; font-weight: 800; color: white;
+  margin-bottom: 14px;
+}
+.footer-desc {
+  font-size: 14px; line-height: 1.6;
+  color: rgba(255,255,255,0.6); margin-bottom: 20px;
+}
+.footer-col-title {
+  font-size: 13px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  color: white; margin-bottom: 18px;
+}
+.footer-links { list-style: none; }
+.footer-links li { margin-bottom: 10px; }
+.footer-links a {
+  color: rgba(255,255,255,0.6); font-size: 14px;
+  transition: color 0.2s;
+}
+.footer-links a:hover { color: var(--accent); }
+.footer-contacts { list-style: none; }
+.footer-contacts li {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-bottom: 14px; font-size: 14px;
+  color: rgba(255,255,255,0.7); line-height: 1.5;
+}
+.footer-contacts li .material-symbols-rounded {
+  color: var(--primary); flex-shrink: 0; margin-top: 2px;
+}
+.footer-contacts a {
+  color: rgba(255,255,255,0.7); transition: color 0.2s;
+}
+.footer-contacts a:hover { color: var(--accent); }
+.footer-socials {
+  display: flex; gap: 10px;
+}
+.footer-social {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: rgba(255,255,255,0.08);
+  display: flex; align-items: center; justify-content: center;
+  color: white; transition: all 0.2s;
+}
+.footer-social:hover {
+  background: var(--primary); transform: translateY(-2px);
+}
+.footer-bottom {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 12px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 13px; color: rgba(255,255,255,0.5);
+}
+.footer-tags { text-align: right; }
 
 /* Responsive */
 @media (max-width: 900px) {
@@ -396,6 +479,13 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .hero-image { display: none; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .services-grid, .advantages-grid, .contacts-grid { grid-template-columns: 1fr; }
+  .directions-grid { grid-template-columns: 1fr; }
+  .footer-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+  .footer-bottom { flex-direction: column; align-items: center; text-align: center; }
+  .footer-tags { text-align: center; }
   .nav { display: none; }
   .section { padding: 60px 0; }
   .testimonial-stage { height: 720px; }
@@ -409,4 +499,9 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .testimonial-text { font-size: 15px; }
   .testimonial-meta > div { justify-content: center; }
   .testimonial-arrow { width: 40px; height: 40px; }
+}
+
+@media (max-width: 600px) {
+  .footer-grid { grid-template-columns: 1fr; gap: 28px; }
+  .footer { padding: 40px 0 20px; }
 }
