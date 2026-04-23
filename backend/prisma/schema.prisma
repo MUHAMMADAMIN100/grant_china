@@ -82,9 +82,10 @@ model Student {
   id           String        @id @default(uuid())
   fullName     String
   phones       String[]      @default([])
-  email        String?
-  password     String?
-  photoUrl     String?
+  email           String?
+  password        String?
+  applicationForm Json?
+  photoUrl        String?
   direction    Direction
   cabinet      Int
   status       StudentStatus @default(ACTIVE)

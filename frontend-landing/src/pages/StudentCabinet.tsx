@@ -11,6 +11,7 @@ import {
   type StudentMe,
 } from '../studentApi';
 import { connectStudentRealtime, useStudentRealtime, getSocket } from '../realtime';
+import ApplicationFormSection from '../components/ApplicationFormSection';
 import Icon from '../Icon';
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -349,6 +350,15 @@ export default function StudentCabinet() {
             <input ref={otherRef} type="file" hidden onChange={(e) => onUpload(e, 'OTHER')} />
           </div>
         </motion.section>
+
+        {/* Анкета */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
+        >
+          <ApplicationFormSection />
+        </motion.div>
       </main>
     </div>
   );

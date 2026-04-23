@@ -9,6 +9,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
+import ApplicationFormView from '../components/ApplicationFormView';
 import Icon from '../Icon';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
@@ -63,6 +64,9 @@ export default function ApplicationDetail() {
       if (data?.studentId === app?.studentId) reload();
     },
     'document:deleted': (data: any) => {
+      if (data?.studentId === app?.studentId) reload();
+    },
+    'form:updated': (data: any) => {
       if (data?.studentId === app?.studentId) reload();
     },
   });
@@ -291,9 +295,14 @@ export default function ApplicationDetail() {
               studentId={student.id}
               studentName={student.fullName}
               documents={student.documents || []}
+              applicationForm={student.applicationForm}
               onChange={reload}
               editable={!!canEdit}
             />
+
+            <div style={{ marginTop: 28 }}>
+              <ApplicationFormView form={student.applicationForm} />
+            </div>
           </>
         )}
       </div>

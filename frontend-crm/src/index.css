@@ -636,6 +636,78 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .access-bar-email { font-size: 14px; color: var(--text); }
 
+/* Application form (readonly view in CRM) */
+.af-view {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+}
+.af-view-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, #fff5f5, #fff9f0);
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+}
+.af-view-title { font-size: 16px; font-weight: 700; margin: 0 0 2px; }
+.af-view-sub { font-size: 13px; color: var(--text-soft); }
+.af-view-bar {
+  width: 120px; height: 6px;
+  background: var(--border); border-radius: 3px; overflow: hidden;
+}
+.af-view-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), #ff6b6b);
+  border-radius: 3px; transition: width 0.4s;
+}
+.af-view-empty {
+  padding: 36px 20px; text-align: center;
+  color: var(--text-soft); font-size: 14px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.af-view-empty .material-symbols-rounded { color: var(--text-light); }
+
+.af-view-sections { padding: 14px 20px; display: flex; flex-direction: column; gap: 16px; }
+.af-view-section { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.af-view-section-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.af-view-section-icon {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: linear-gradient(135deg, #fff0f0, #fff5e6);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--primary);
+}
+.af-view-section-title { font-size: 13px; font-weight: 700; }
+.af-view-section-title-en {
+  font-size: 11px; color: var(--text-soft); font-style: italic;
+}
+.af-view-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px; padding: 14px;
+}
+.af-view-field { min-width: 0; }
+.af-view-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px;
+  color: var(--text-soft); font-weight: 600; margin-bottom: 2px;
+}
+.af-view-value {
+  font-size: 13px; color: var(--text); font-weight: 500;
+  word-break: break-word;
+}
+.af-view-table { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.af-view-table-row {
+  padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg);
+}
+.af-view-row-label {
+  font-weight: 700; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--primary); margin-bottom: 6px;
+}
+.af-view-row-cells {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
 /* Student credentials box */
 .creds-box {
   background: var(--bg); border: 1px solid var(--border);

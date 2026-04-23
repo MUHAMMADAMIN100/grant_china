@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   UploadedFile,
   UseGuards,
@@ -45,6 +46,29 @@ export class StudentAuthController {
   @Get('me')
   me(@CurrentUser() user: any) {
     return this.auth.me(user.id);
+  }
+
+  @UseGuards(StudentJwtGuard)
+  @Get('form')
+  async getForm(@CurrentUser() user: any) {
+    const s = await this.prisma.student.findUnique({
+      where: { id: user.id },
+      select: { applicationForm: true },
+    });
+    return { form: s?.applicationForm || null };
+  }
+
+  @UseGuards(StudentJwtGuard)
+  @Patch('form')
+  async updateForm(@CurrentUser() user: any, @Body() form: any) {
+    const updated = await this.prisma.student.update({
+      where: { id: user.id },
+      data: { applicationForm: form },
+      select: { applicationForm: true },
+    });
+    this.realtime.emitStudentAndStaff(user.id, 'form:updated', { studentId: user.id });
+    this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
+    return { form: updated.applicationForm };
   }
 
   // Студент загружает свой документ

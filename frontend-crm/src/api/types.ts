@@ -59,6 +59,7 @@ export interface Student {
   manager?: ManagerInfo | null;
   chinaManagerId: string | null;
   chinaManager?: ManagerInfo | null;
+  applicationForm?: any;
   documents?: Document[];
   applications?: Application[];
   createdAt: string;

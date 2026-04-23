@@ -9,6 +9,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import DocumentsChecklist from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
+import ApplicationFormView from '../components/ApplicationFormView';
 import Icon from '../Icon';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
@@ -46,6 +47,7 @@ export default function StudentDetail() {
     'student:updated': (data: any) => { if (data?.studentId === id) reload(); },
     'document:uploaded': (data: any) => { if (data?.studentId === id) reload(); },
     'document:deleted': (data: any) => { if (data?.studentId === id) reload(); },
+    'form:updated': (data: any) => { if (data?.studentId === id) reload(); },
   });
 
   const onSave = async () => {
@@ -255,9 +257,14 @@ export default function StudentDetail() {
           studentId={student.id}
           studentName={student.fullName}
           documents={student.documents || []}
+          applicationForm={student.applicationForm}
           onChange={reload}
           editable={canEdit}
         />
+
+        <div style={{ marginTop: 28 }}>
+          <ApplicationFormView form={student.applicationForm} />
+        </div>
       </div>
 
       <AnimatePresence>

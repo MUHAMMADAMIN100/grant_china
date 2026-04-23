@@ -30,6 +30,7 @@ type Props = {
   studentId: string;
   studentName?: string;
   documents: Document[];
+  applicationForm?: any;
   onChange: () => void;
   editable: boolean;
 };
@@ -37,7 +38,7 @@ type Props = {
 const sanitizeFileName = (s: string) =>
   s.replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_').slice(0, 80);
 
-export default function DocumentsChecklist({ studentId, studentName, documents, onChange, editable }: Props) {
+export default function DocumentsChecklist({ studentId, studentName, documents, applicationForm, onChange, editable }: Props) {
   const { confirm, toast } = useUI();
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [zipping, setZipping] = useState(false);
@@ -69,7 +70,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
   };
 
   const handleDownloadZip = async () => {
-    if (documents.length === 0) return;
+    if (documents.length === 0 && !applicationForm) return;
     setZipping(true);
     try {
       const [{ default: JSZip }, { saveAs }] = await Promise.all([
@@ -77,6 +78,17 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
         import('file-saver'),
       ]);
       const zip = new JSZip();
+
+      // Сначала — анкета в формате Word (если хоть что-то заполнено или даже пустая)
+      if (applicationForm) {
+        try {
+          const { generateStudentFormDocx } = await import('../utils/studentFormDocx');
+          const formBlob = await generateStudentFormDocx(studentName || 'Student', applicationForm);
+          zip.file('00_Анкета_Студента.docx', formBlob);
+        } catch (err) {
+          console.error('Failed to generate form docx:', err);
+        }
+      }
 
       // Загружаем типизированные документы
       for (let i = 0; i < REQUIRED_DOCUMENTS.length; i++) {

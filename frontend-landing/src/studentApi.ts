@@ -76,3 +76,15 @@ export async function studentDeleteDocument(id: string) {
   const { data } = await client.delete(`/student-auth/documents/${id}`);
   return data;
 }
+
+export type ApplicationFormData = any;
+
+export async function getStudentForm() {
+  const { data } = await client.get<{ form: ApplicationFormData | null }>('/student-auth/form');
+  return data.form;
+}
+
+export async function saveStudentForm(form: ApplicationFormData) {
+  const { data } = await client.patch<{ form: ApplicationFormData }>('/student-auth/form', form);
+  return data.form;
+}
