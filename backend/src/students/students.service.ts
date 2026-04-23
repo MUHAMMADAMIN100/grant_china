@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 function generatePassword(length = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -28,7 +29,7 @@ type CurrentUser = { id: string; role: Role };
 
 @Injectable()
 export class StudentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private realtime: RealtimeGateway) {}
 
   private ensureCanEdit(
     student: { managerId: string | null; chinaManagerId?: string | null },
@@ -160,11 +161,13 @@ export class StudentsService {
     }
     if (dto.cabinet !== undefined) data.cabinet = dto.cabinet;
 
-    return this.prisma.student.update({
+    const updated = await this.prisma.student.update({
       where: { id },
       data,
       include: STUDENT_INCLUDE,
     });
+    this.realtime.emitStudentAndStaff(id, 'student:updated', { studentId: id });
+    return updated;
   }
 
   async assignManager(
@@ -197,11 +200,14 @@ export class StudentsService {
     if (Object.keys(data).length > 0) {
       await this.prisma.application.updateMany({ where: { studentId: id }, data });
     }
-    return this.prisma.student.update({
+    const updated = await this.prisma.student.update({
       where: { id },
       data,
       include: STUDENT_INCLUDE,
     });
+    this.realtime.emitStudentAndStaff(id, 'student:updated', { studentId: id });
+    this.realtime.emitStaff('application:updated', { studentId: id });
+    return updated;
   }
 
   async remove(id: string, user: CurrentUser) {
@@ -222,7 +228,7 @@ export class StudentsService {
     if (type !== 'OTHER') {
       await this.prisma.document.deleteMany({ where: { studentId, type } });
     }
-    return this.prisma.document.create({
+    const doc = await this.prisma.document.create({
       data: {
         studentId,
         filename: file.filename,
@@ -233,6 +239,9 @@ export class StudentsService {
         type,
       },
     });
+    this.realtime.emitStudentAndStaff(studentId, 'document:uploaded', { studentId, doc });
+    this.realtime.emitStudentAndStaff(studentId, 'student:updated', { studentId });
+    return doc;
   }
 
   async removeDocument(documentId: string, user: CurrentUser) {
@@ -243,6 +252,11 @@ export class StudentsService {
     if (!doc) throw new NotFoundException('Документ не найден');
     if (doc.student) this.ensureCanEdit(doc.student, user);
     await this.prisma.document.delete({ where: { id: documentId } });
+    const studentId = (doc as any).studentId;
+    if (studentId) {
+      this.realtime.emitStudentAndStaff(studentId, 'document:deleted', { studentId, docId: documentId });
+      this.realtime.emitStudentAndStaff(studentId, 'student:updated', { studentId });
+    }
     return { ok: true };
   }
 

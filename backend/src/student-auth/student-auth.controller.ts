@@ -18,6 +18,7 @@ import { StudentAuthService } from './student-auth.service';
 import { StudentJwtGuard } from './student-jwt.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const uploadStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -29,7 +30,11 @@ const uploadStorage = diskStorage({
 
 @Controller('student-auth')
 export class StudentAuthController {
-  constructor(private auth: StudentAuthService, private prisma: PrismaService) {}
+  constructor(
+    private auth: StudentAuthService,
+    private prisma: PrismaService,
+    private realtime: RealtimeGateway,
+  ) {}
 
   @Post('login')
   login(@Body() body: { email: string; password: string }) {
@@ -62,7 +67,7 @@ export class StudentAuthController {
     if (docType !== 'OTHER') {
       await this.prisma.document.deleteMany({ where: { studentId: user.id, type: docType } });
     }
-    return this.prisma.document.create({
+    const doc = await this.prisma.document.create({
       data: {
         studentId: user.id,
         filename: file.filename,
@@ -73,6 +78,9 @@ export class StudentAuthController {
         type: docType,
       },
     });
+    this.realtime.emitStudentAndStaff(user.id, 'document:uploaded', { studentId: user.id, doc });
+    this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
+    return doc;
   }
 
   @UseGuards(StudentJwtGuard)
@@ -83,6 +91,8 @@ export class StudentAuthController {
       throw new BadRequestException('Документ не найден');
     }
     await this.prisma.document.delete({ where: { id: docId } });
+    this.realtime.emitStudentAndStaff(user.id, 'document:deleted', { studentId: user.id, docId });
+    this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
     return { ok: true };
   }
 }

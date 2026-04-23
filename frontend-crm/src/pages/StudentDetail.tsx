@@ -6,6 +6,7 @@ import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
+import { useRealtime } from '../realtime';
 import DocumentsChecklist from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
 import Icon from '../Icon';
@@ -40,6 +41,12 @@ export default function StudentDetail() {
   };
 
   useEffect(() => { reload(); }, [id]);
+
+  useRealtime({
+    'student:updated': (data: any) => { if (data?.studentId === id) reload(); },
+    'document:uploaded': (data: any) => { if (data?.studentId === id) reload(); },
+    'document:deleted': (data: any) => { if (data?.studentId === id) reload(); },
+  });
 
   const onSave = async () => {
     if (!id || !form) return;

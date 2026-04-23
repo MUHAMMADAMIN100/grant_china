@@ -5,6 +5,7 @@ import { listApplications } from '../api/applications';
 import type { Application, ApplicationStatus, Direction } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
+import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 
 type Scope = 'all' | 'mine';
@@ -35,6 +36,12 @@ export default function Applications() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
   }, [search, status, direction, scope]);
+
+  useRealtime({
+    'application:new': () => load(),
+    'application:updated': () => load(),
+    'application:deleted': () => load(),
+  });
 
   return (
     <motion.div

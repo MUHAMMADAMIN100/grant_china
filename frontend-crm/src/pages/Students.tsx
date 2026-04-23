@@ -6,6 +6,7 @@ import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
+import { useRealtime } from '../realtime';
 import { generateStudentsReport } from '../utils/studentsReport';
 import Icon from '../Icon';
 
@@ -44,6 +45,12 @@ export default function Students() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
   }, [search, direction, status, cabinet, scope]);
+
+  useRealtime({
+    'student:updated': () => load(),
+    'application:new': () => load(),
+    'application:updated': () => load(),
+  });
 
   const reportDatesValid =
     !!reportFrom && !!reportTo && new Date(reportFrom) <= new Date(reportTo);

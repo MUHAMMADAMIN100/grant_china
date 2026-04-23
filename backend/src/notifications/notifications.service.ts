@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 interface NotifyPayload {
   type: string;
@@ -10,7 +11,7 @@ interface NotifyPayload {
 
 @Injectable()
 export class NotificationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private realtime: RealtimeGateway) {}
 
   async notifyAllStaff(data: NotifyPayload) {
     const users = await this.prisma.user.findMany({ select: { id: true } });
@@ -24,10 +25,17 @@ export class NotificationsService {
         payload: data.payload ?? undefined,
       })),
     });
+    // Realtime — всем сотрудникам
+    this.realtime.emitStaff('notification:new', {
+      type: data.type,
+      title: data.title,
+      message: data.message,
+      payload: data.payload,
+    });
   }
 
   async notifyUser(userId: string, data: NotifyPayload) {
-    return this.prisma.notification.create({
+    const notif = await this.prisma.notification.create({
       data: {
         userId,
         type: data.type,
@@ -36,6 +44,14 @@ export class NotificationsService {
         payload: data.payload ?? undefined,
       },
     });
+    this.realtime.emitUser(userId, 'notification:new', {
+      id: notif.id,
+      type: data.type,
+      title: data.title,
+      message: data.message,
+      payload: data.payload,
+    });
+    return notif;
   }
 
   async listForUser(userId: string, onlyUnread = false) {

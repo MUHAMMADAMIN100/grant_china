@@ -5,6 +5,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 type CurrentUser = { id: string; role: Role };
 
@@ -19,6 +20,7 @@ export class TasksService {
     private prisma: PrismaService,
     private notifications: NotificationsService,
     private mail: MailService,
+    private realtime: RealtimeGateway,
   ) {}
 
   async create(dto: CreateTaskDto, user: CurrentUser) {
@@ -58,6 +60,12 @@ export class TasksService {
       )
       .catch(() => undefined);
 
+    this.realtime.emitStaff('task:new', { task });
+    this.realtime.emitUser(assignee.id, 'notification:new', {
+      type: 'TASK_ASSIGNED',
+      title: 'Новая задача',
+      message: task.title,
+    });
     return task;
   }
 
@@ -89,7 +97,7 @@ export class TasksService {
     if (user.role !== 'ADMIN' && dto.assignedToId !== undefined) {
       throw new ForbiddenException('Только администратор может переназначать задачу');
     }
-    return this.prisma.task.update({
+    const updated = await this.prisma.task.update({
       where: { id },
       data: {
         ...(dto.title !== undefined ? { title: dto.title } : {}),
@@ -99,6 +107,8 @@ export class TasksService {
       },
       include: TASK_INCLUDE,
     });
+    this.realtime.emitStaff('task:updated', { task: updated });
+    return updated;
   }
 
   async remove(id: string, user: CurrentUser) {
@@ -107,6 +117,7 @@ export class TasksService {
     }
     await this.findOne(id);
     await this.prisma.task.delete({ where: { id } });
+    this.realtime.emitStaff('task:deleted', { id });
     return { ok: true };
   }
 

@@ -6,6 +6,7 @@ import type { Task, TaskStatus, User } from '../api/types';
 import { TASK_STATUS_BADGE, TASK_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
+import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 
 type Scope = 'all' | 'mine';
@@ -37,6 +38,12 @@ export default function Tasks() {
   useEffect(() => {
     load();
   }, [scope]);
+
+  useRealtime({
+    'task:new': () => load(),
+    'task:updated': () => load(),
+    'task:deleted': () => load(),
+  });
 
   useEffect(() => {
     if (isAdmin) {

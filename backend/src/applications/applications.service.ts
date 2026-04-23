@@ -6,6 +6,7 @@ import { UpdateApplicationDto } from './dto/update-application.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MailService } from '../mail/mail.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
@@ -52,6 +53,7 @@ export class ApplicationsService {
     private notifications: NotificationsService,
     private telegram: TelegramService,
     private mail: MailService,
+    private realtime: RealtimeGateway,
   ) {}
 
   async create(dto: CreateApplicationDto) {
@@ -93,6 +95,7 @@ export class ApplicationsService {
       )
       .catch(() => undefined);
 
+    this.realtime.emitStaff('application:new', { application: app });
     return app;
   }
 
@@ -174,11 +177,13 @@ export class ApplicationsService {
           comment: existing.comment,
         },
       });
-      return this.prisma.application.update({
+      const updated = await this.prisma.application.update({
         where: { id },
         data: { ...dto, studentId: student.id },
         include: MANAGER_INCLUDE,
       });
+      this.realtime.emitStaff('application:updated', { application: updated });
+      return updated;
     }
 
     if (
@@ -194,11 +199,16 @@ export class ApplicationsService {
       }
     }
 
-    return this.prisma.application.update({
+    const updated = await this.prisma.application.update({
       where: { id },
       data: dto,
       include: MANAGER_INCLUDE,
     });
+    this.realtime.emitStaff('application:updated', { application: updated });
+    if (updated.studentId) {
+      this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
+    }
+    return updated;
   }
 
   async assignManager(
@@ -235,11 +245,16 @@ export class ApplicationsService {
       });
     }
 
-    return this.prisma.application.update({
+    const updated = await this.prisma.application.update({
       where: { id },
       data,
       include: MANAGER_INCLUDE,
     });
+    this.realtime.emitStaff('application:updated', { application: updated });
+    if (updated.studentId) {
+      this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
+    }
+    return updated;
   }
 
   private async missingRequiredDocs(studentId: string): Promise<string[]> {
@@ -258,6 +273,7 @@ export class ApplicationsService {
       await this.prisma.student.delete({ where: { id: app.studentId } }).catch(() => undefined);
     }
     await this.prisma.application.delete({ where: { id } }).catch(() => undefined);
+    this.realtime.emitStaff('application:deleted', { id });
     return { ok: true };
   }
 

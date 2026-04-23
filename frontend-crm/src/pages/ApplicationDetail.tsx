@@ -6,6 +6,7 @@ import type { Application, ApplicationStatus, Direction, Student, StudentStatus 
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
+import { useRealtime } from '../realtime';
 import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
 import Icon from '../Icon';
@@ -50,6 +51,21 @@ export default function ApplicationDetail() {
   };
 
   useEffect(() => { reload(); }, [id]);
+
+  useRealtime({
+    'application:updated': (data: any) => {
+      if (data?.application?.id === id || data?.studentId === app?.studentId) reload();
+    },
+    'student:updated': (data: any) => {
+      if (data?.studentId && data.studentId === app?.studentId) reload();
+    },
+    'document:uploaded': (data: any) => {
+      if (data?.studentId === app?.studentId) reload();
+    },
+    'document:deleted': (data: any) => {
+      if (data?.studentId === app?.studentId) reload();
+    },
+  });
 
   const onStatus = async (status: ApplicationStatus) => {
     if (!id) return;

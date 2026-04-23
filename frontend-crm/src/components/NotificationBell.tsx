@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listNotifications, markAllRead, markRead, unreadCount } from '../api/notifications';
 import type { Notification } from '../api/types';
+import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 
 function notificationHref(n: Notification): string | null {
@@ -31,6 +32,15 @@ export default function NotificationBell() {
     const t = setInterval(refreshCount, 30000);
     return () => clearInterval(t);
   }, []);
+
+  useRealtime({
+    'notification:new': () => {
+      refreshCount();
+      if (open) {
+        listNotifications().then(setItems).catch(() => {});
+      }
+    },
+  });
 
   useEffect(() => {
     if (open) {

@@ -10,6 +10,7 @@ import {
   studentUploadDocument,
   type StudentMe,
 } from '../studentApi';
+import { connectStudentRealtime, useStudentRealtime, getSocket } from '../realtime';
 import Icon from '../Icon';
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -58,12 +59,20 @@ export default function StudentCabinet() {
   };
 
   useEffect(() => {
-    if (!getToken()) {
+    const token = getToken();
+    if (!token) {
       navigate('/login', { replace: true });
       return;
     }
+    if (!getSocket()) connectStudentRealtime(token);
     load();
   }, []);
+
+  useStudentRealtime({
+    'student:updated': () => load(),
+    'document:uploaded': () => load(),
+    'document:deleted': () => load(),
+  });
 
   const load = async () => {
     setLoading(true);
