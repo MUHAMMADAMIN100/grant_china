@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { createStudent } from '../api/students';
 import type { Direction } from '../api/types';
+import { useUI } from '../ui/Dialogs';
+import Icon from '../Icon';
 
 export default function StudentNew() {
   const navigate = useNavigate();
+  const { toast } = useUI();
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -12,24 +16,44 @@ export default function StudentNew() {
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState<
+    | { id: string; email: string; password: string; fullName: string }
+    | null
+  >(null);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const student = await createStudent({
+      const res: any = await createStudent({
         fullName,
         phones: phone ? [phone] : [],
-        email: email || undefined,
+        email,
         direction,
         comment: comment || undefined,
       });
-      navigate(`/students/${student.id}`);
+      setCredentials({
+        id: res.id,
+        email: res.email,
+        password: res.plainPassword,
+        fullName: res.fullName,
+      });
     } catch (e: any) {
       setError(e.response?.data?.message?.toString() || 'Ошибка создания');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const copyBoth = async () => {
+    if (!credentials) return;
+    const text = `Логин: ${credentials.email}\nПароль: ${credentials.password}\nВход: https://grant-china-landing.vercel.app/login`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Данные скопированы', 'success');
+    } catch {
+      toast('Не удалось скопировать', 'error');
     }
   };
 
@@ -49,8 +73,8 @@ export default function StudentNew() {
               <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+992 ..." />
             </div>
             <div className="form-group">
-              <label>Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <label>Email * <span style={{ fontWeight: 400, color: 'var(--text-soft)', fontSize: 12 }}>— станет логином студента</span></label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
           </div>
           <div className="form-group">
@@ -73,6 +97,64 @@ export default function StudentNew() {
           </div>
         </form>
       </div>
+
+      <AnimatePresence>
+        {credentials && (
+          <motion.div
+            className="dialog-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="dialog-card"
+              style={{ maxWidth: 480 }}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.22 }}
+            >
+              <div className="dialog-icon" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+                <Icon name="check_circle" size={28} />
+              </div>
+              <div className="dialog-title">Студент создан</div>
+              <div className="dialog-message">
+                Передайте эти данные <b>{credentials.fullName}</b> — это единственный раз, когда система показывает пароль.
+              </div>
+
+              <div className="creds-box">
+                <div className="creds-row">
+                  <span className="creds-label">Логин:</span>
+                  <code className="creds-value">{credentials.email}</code>
+                </div>
+                <div className="creds-row">
+                  <span className="creds-label">Пароль:</span>
+                  <code className="creds-value">{credentials.password}</code>
+                </div>
+                <div className="creds-row">
+                  <span className="creds-label">Ссылка:</span>
+                  <code className="creds-value" style={{ fontSize: 12 }}>
+                    grant-china-landing.vercel.app/login
+                  </code>
+                </div>
+              </div>
+
+              <div className="dialog-actions">
+                <button className="btn btn-secondary" onClick={copyBoth}>
+                  <Icon name="content_copy" size={16} style={{ marginRight: 4 }} />
+                  Копировать
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => navigate(`/students/${credentials.id}`)}
+                >
+                  Открыть карточку
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,8 +1,16 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { Direction, Prisma, Role, StudentStatus } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
+
+function generatePassword(length = 8): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
@@ -37,11 +45,28 @@ export class StudentsService {
 
   async create(dto: CreateStudentDto, _user?: CurrentUser) {
     const cabinet = dto.cabinet ?? CABINET_BY_DIRECTION[dto.direction];
-    return this.prisma.student.create({
+    const emailNormalized = dto.email.trim().toLowerCase();
+
+    // Проверяем уникальность email среди студентов и пользователей
+    const dupStudent = await this.prisma.student.findFirst({ where: { email: emailNormalized } });
+    if (dupStudent) {
+      throw new BadRequestException('Студент с таким email уже существует');
+    }
+    const dupUser = await this.prisma.user.findUnique({ where: { email: emailNormalized } });
+    if (dupUser) {
+      throw new BadRequestException('Этот email уже занят сотрудником');
+    }
+
+    // Генерим пароль, сохраняем хеш, возвращаем plain-текст один раз
+    const plainPassword = generatePassword(8);
+    const passwordHash = await bcrypt.hash(plainPassword, 10);
+
+    const student = await this.prisma.student.create({
       data: {
         fullName: dto.fullName.trim(),
         phones: dto.phones?.length ? dto.phones : [],
-        email: dto.email || null,
+        email: emailNormalized,
+        password: passwordHash,
         photoUrl: dto.photoUrl || null,
         direction: dto.direction,
         cabinet,
@@ -50,6 +75,23 @@ export class StudentsService {
       },
       include: STUDENT_INCLUDE,
     });
+
+    // Возвращаем студента + плейн-пароль отдельным полем (только в этом ответе!)
+    return { ...student, plainPassword };
+  }
+
+  async regeneratePassword(id: string, user: CurrentUser) {
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException('Только администратор может сбрасывать пароль студента');
+    }
+    const existing = await this.findOne(id);
+    if (!existing.email) {
+      throw new BadRequestException('У студента нет email — невозможно создать доступ');
+    }
+    const plainPassword = generatePassword(8);
+    const passwordHash = await bcrypt.hash(plainPassword, 10);
+    await this.prisma.student.update({ where: { id }, data: { password: passwordHash } });
+    return { email: existing.email, password: plainPassword };
   }
 
   async findAll(filters: {

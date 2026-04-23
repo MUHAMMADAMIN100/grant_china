@@ -13,6 +13,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { MailModule } from './mail/mail.module';
 import { TasksModule } from './tasks/tasks.module';
+import { StudentAuthModule } from './student-auth/student-auth.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { TasksModule } from './tasks/tasks.module';
     TelegramModule,
     MailModule,
     TasksModule,
+    StudentAuthModule,
   ],
 })
 export class AppModule {}

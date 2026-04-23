@@ -1,0 +1,346 @@
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  API_BASE,
+  clearToken,
+  getToken,
+  studentDeleteDocument,
+  studentMe,
+  studentUploadDocument,
+  type StudentMe,
+} from '../studentApi';
+import Icon from '../Icon';
+
+const DIRECTION_LABEL: Record<string, string> = {
+  BACHELOR: 'Бакалавриат',
+  MASTER: 'Магистратура',
+  LANGUAGE: 'Языковые курсы',
+};
+const STATUS_LABEL: Record<string, string> = {
+  ACTIVE: 'Активный',
+  PAUSED: 'На паузе',
+  GRADUATED: 'Выпустился',
+  ARCHIVED: 'В архиве',
+};
+
+const REQUIRED_DOCS = [
+  { type: 'PHOTO', label: 'Фото 3/4', hint: 'В электронном формате' },
+  { type: 'PASSPORT', label: 'Загран паспорт' },
+  { type: 'BANK', label: 'Справка с банка' },
+  { type: 'MEDICAL', label: 'Мед.справка (для Китая)' },
+  { type: 'NO_CRIMINAL', label: 'Справка о несудимости' },
+  { type: 'STUDY_PLAN', label: 'Study Plan' },
+  { type: 'CERTIFICATE', label: 'Certificate' },
+  { type: 'PARENTS_PASSPORT', label: 'Parents passport' },
+  { type: 'DIPLOMA', label: 'Аттестат', hint: 'Или табель оценок + справка со школы' },
+  { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
+];
+
+const fmtBytes = (b: number) => {
+  if (b < 1024) return `${b} Б`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} КБ`;
+  return `${(b / 1024 / 1024).toFixed(2)} МБ`;
+};
+
+export default function StudentCabinet() {
+  const navigate = useNavigate();
+  const [me, setMe] = useState<StudentMe | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const otherRef = useRef<HTMLInputElement>(null);
+
+  const showToast = (kind: 'ok' | 'err', text: string) => {
+    setToast({ kind, text });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  useEffect(() => {
+    if (!getToken()) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    load();
+  }, []);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await studentMe();
+      setMe(data);
+    } catch {
+      clearToken();
+      navigate('/login', { replace: true });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = () => {
+    clearToken();
+    navigate('/login');
+  };
+
+  const onUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(type);
+    try {
+      await studentUploadDocument(file, type);
+      showToast('ok', 'Документ загружен');
+      await load();
+    } catch (err: any) {
+      showToast('err', err?.response?.data?.message || 'Ошибка загрузки');
+    } finally {
+      setUploading(null);
+      e.target.value = '';
+    }
+  };
+
+  const onDelete = async (docId: string) => {
+    if (!confirm('Удалить документ?')) return;
+    try {
+      await studentDeleteDocument(docId);
+      showToast('ok', 'Документ удалён');
+      await load();
+    } catch (err: any) {
+      showToast('err', err?.response?.data?.message || 'Ошибка');
+    }
+  };
+
+  if (loading || !me) {
+    return <div className="stu-loading">Загрузка...</div>;
+  }
+
+  const typed = (me.documents || []).filter((d) => d.type && d.type !== 'OTHER');
+  const other = (me.documents || []).filter((d) => !d.type || d.type === 'OTHER');
+  const uploaded = REQUIRED_DOCS.filter((r) => typed.some((d) => d.type === r.type)).length;
+  const percent = Math.round((uploaded / REQUIRED_DOCS.length) * 100);
+
+  return (
+    <div className="stu-page">
+      <header className="stu-header">
+        <div className="container stu-header-inner">
+          <Link to="/" className="logo">
+            <img src="/logo.png" alt="Grant China" className="logo-image" style={{ height: 44 }} />
+          </Link>
+          <div className="stu-header-user">
+            <div className="stu-header-name">{me.fullName}</div>
+            <button className="btn btn-outline" onClick={logout}>
+              <Icon name="logout" size={18} style={{ marginRight: 4 }} />
+              Выйти
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="container stu-main">
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              className={`stu-toast stu-toast-${toast.kind}`}
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <Icon name={toast.kind === 'ok' ? 'check_circle' : 'error'} size={18} />
+              {toast.text}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Профиль */}
+        <motion.section
+          className="stu-card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          <div className="stu-profile">
+            <div className="stu-photo">
+              {me.photoUrl ? (
+                <img src={`${API_BASE}${me.photoUrl}`} alt="" />
+              ) : (
+                <Icon name="person" size={60} />
+              )}
+            </div>
+            <div className="stu-profile-info">
+              <h1 className="stu-profile-name">{me.fullName}</h1>
+              <div className="stu-badges">
+                <span className="stu-badge">{DIRECTION_LABEL[me.direction]}</span>
+                <span className="stu-badge">Кабинет №{me.cabinet}</span>
+                <span className={`stu-badge stu-status-${me.status.toLowerCase()}`}>
+                  {STATUS_LABEL[me.status]}
+                </span>
+              </div>
+              <div className="stu-profile-grid">
+                <div><span>Email:</span> <b>{me.email}</b></div>
+                <div><span>Телефоны:</span> <b>{me.phones.join(', ') || '—'}</b></div>
+              </div>
+            </div>
+          </div>
+        </motion.section>
+
+        {/* Менеджеры */}
+        <motion.section
+          className="stu-card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+        >
+          <h2 className="stu-section-title">Ваши менеджеры</h2>
+          <div className="stu-managers">
+            <div className={`stu-manager-slot${!me.manager ? ' empty' : ''}`}>
+              <div className="stu-manager-flag">🇹🇯 Таджикистан</div>
+              <div className="stu-manager-name">
+                {me.manager?.fullName || 'Ещё не назначен'}
+              </div>
+              {me.manager?.email && (
+                <a href={`mailto:${me.manager.email}`} className="stu-manager-email">
+                  <Icon name="mail" size={14} /> {me.manager.email}
+                </a>
+              )}
+            </div>
+            <div className={`stu-manager-slot${!me.chinaManager ? ' empty' : ''}`}>
+              <div className="stu-manager-flag">🇨🇳 Китай</div>
+              <div className="stu-manager-name">
+                {me.chinaManager?.fullName || 'Ещё не назначен'}
+              </div>
+              {me.chinaManager?.email && (
+                <a href={`mailto:${me.chinaManager.email}`} className="stu-manager-email">
+                  <Icon name="mail" size={14} /> {me.chinaManager.email}
+                </a>
+              )}
+            </div>
+          </div>
+        </motion.section>
+
+        {/* Документы */}
+        <motion.section
+          className="stu-card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
+        >
+          <h2 className="stu-section-title">Документы</h2>
+
+          <div className="stu-note">
+            <Icon name="info" size={18} />
+            <div>
+              Все документы нужно <b>перевести на английский</b> и <b>нотариально заверить</b>.
+              Загружайте в любом формате — менеджер проверит.
+            </div>
+          </div>
+
+          <div className="stu-progress">
+            <div className="stu-progress-text">
+              <span>Загружено <b>{uploaded}</b> из {REQUIRED_DOCS.length}</span>
+              <span className="stu-progress-percent">{percent}%</span>
+            </div>
+            <div className="stu-progress-bar">
+              <motion.div
+                className="stu-progress-fill"
+                initial={{ width: 0 }}
+                animate={{ width: `${percent}%` }}
+                transition={{ duration: 0.5 }}
+              />
+            </div>
+          </div>
+
+          <div className="stu-docs-grid">
+            {REQUIRED_DOCS.map((req) => {
+              const doc = typed.find((d) => d.type === req.type);
+              const loading = uploading === req.type;
+              return (
+                <div key={req.type} className={`stu-doc${doc ? ' uploaded' : ''}`}>
+                  <div className="stu-doc-head">
+                    <Icon
+                      name={doc ? 'check_circle' : 'radio_button_unchecked'}
+                      size={20}
+                      style={{ color: doc ? '#10b981' : '#9ca3af' }}
+                    />
+                    <div>
+                      <div className="stu-doc-label">{req.label}</div>
+                      {req.hint && <div className="stu-doc-hint">{req.hint}</div>}
+                    </div>
+                  </div>
+                  {doc ? (
+                    <div className="stu-doc-file">
+                      <a href={`${API_BASE}${doc.url}`} target="_blank" rel="noreferrer">
+                        <Icon name="description" size={16} /> {doc.originalName}
+                      </a>
+                      <div className="stu-doc-meta">
+                        {fmtBytes(doc.size)} · {new Date(doc.createdAt).toLocaleDateString('ru-RU')}
+                      </div>
+                      <div className="stu-doc-actions">
+                        <button
+                          className="btn btn-outline btn-small"
+                          onClick={() => inputs.current[req.type]?.click()}
+                          disabled={loading}
+                        >
+                          <Icon name="refresh" size={14} /> Заменить
+                        </button>
+                        <button
+                          className="btn btn-danger btn-small"
+                          onClick={() => onDelete(doc.id)}
+                        >
+                          <Icon name="delete" size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="btn btn-primary btn-small stu-doc-upload"
+                      onClick={() => inputs.current[req.type]?.click()}
+                      disabled={loading}
+                    >
+                      <Icon name={loading ? 'progress_activity' : 'upload'} size={16} />
+                      {loading ? 'Загрузка...' : 'Загрузить'}
+                    </button>
+                  )}
+                  <input
+                    ref={(el) => { inputs.current[req.type] = el; }}
+                    type="file"
+                    hidden
+                    onChange={(e) => onUpload(e, req.type)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="stu-other">
+            <h3>Другие файлы</h3>
+            {other.length === 0 ? (
+              <div className="stu-empty">Пока нет других документов</div>
+            ) : (
+              <div className="stu-other-list">
+                {other.map((d) => (
+                  <div key={d.id} className="stu-other-item">
+                    <a href={`${API_BASE}${d.url}`} target="_blank" rel="noreferrer">
+                      <Icon name="description" size={16} /> {d.originalName}
+                    </a>
+                    <button className="btn btn-danger btn-small" onClick={() => onDelete(d.id)}>
+                      <Icon name="delete" size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              className="btn btn-outline btn-small"
+              style={{ marginTop: 10 }}
+              onClick={() => otherRef.current?.click()}
+              disabled={uploading === 'OTHER'}
+            >
+              <Icon name="attach_file" size={14} /> Загрузить другой файл
+            </button>
+            <input ref={otherRef} type="file" hidden onChange={(e) => onUpload(e, 'OTHER')} />
+          </div>
+        </motion.section>
+      </main>
+    </div>
+  );
+}

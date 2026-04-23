@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignStudentManager, deleteStudent, getStudent, updateStudent, uploadPhoto } from '../api/students';
+import { assignStudentManager, deleteStudent, getStudent, regenerateStudentPassword, updateStudent, uploadPhoto } from '../api/students';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
@@ -20,6 +21,8 @@ export default function StudentDetail() {
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState<any>(null);
   const photoRef = useRef<HTMLInputElement>(null);
+  const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
 
   const reload = async () => {
     if (!id) return;
@@ -77,6 +80,37 @@ export default function StudentDetail() {
     await reload();
   };
 
+  const onRegenerate = async () => {
+    if (!id) return;
+    const ok = await confirm({
+      title: 'Сбросить пароль студента',
+      message: 'Старый пароль станет недействительным. Новый покажется один раз — передайте его студенту.',
+      confirmText: 'Сбросить',
+      danger: true,
+    });
+    if (!ok) return;
+    setRegenerating(true);
+    try {
+      const cr = await regenerateStudentPassword(id);
+      setCredentials(cr);
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка', 'error');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const copyCreds = async () => {
+    if (!credentials) return;
+    const text = `Логин: ${credentials.email}\nПароль: ${credentials.password}\nВход: https://grant-china-landing.vercel.app/login`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Скопировано', 'success');
+    } catch {
+      toast('Не удалось скопировать', 'error');
+    }
+  };
+
   const onDeleteStudent = async () => {
     if (!id) return;
     const ok = await confirm({
@@ -121,6 +155,32 @@ export default function StudentDetail() {
           chinaManager={student.chinaManager}
           onReassign={onReassign}
         />
+
+        {isAdmin && (
+          <div className="access-bar">
+            <div className="access-bar-info">
+              <Icon name="lock_person" size={22} />
+              <div>
+                <div className="access-bar-title">Доступ в личный кабинет студента</div>
+                <div className="access-bar-email">
+                  {student.email ? <>Логин: <b>{student.email}</b></> : 'Email не указан'}
+                </div>
+              </div>
+            </div>
+            {student.email && (
+              <motion.button
+                className="btn btn-sm btn-secondary"
+                onClick={onRegenerate}
+                disabled={regenerating}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Icon name="refresh" size={16} style={{ marginRight: 4 }} />
+                {regenerating ? 'Сброс...' : 'Сбросить пароль'}
+              </motion.button>
+            )}
+          </div>
+        )}
+
         <div className="detail-grid">
           <div>
             <div className="detail-photo">
@@ -192,6 +252,52 @@ export default function StudentDetail() {
           editable={canEdit}
         />
       </div>
+
+      <AnimatePresence>
+        {credentials && (
+          <motion.div
+            className="dialog-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setCredentials(null)}
+          >
+            <motion.div
+              className="dialog-card"
+              style={{ maxWidth: 480 }}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="dialog-icon" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+                <Icon name="key" size={28} />
+              </div>
+              <div className="dialog-title">Новый пароль</div>
+              <div className="dialog-message">
+                Передайте студенту — пароль показывается один раз.
+              </div>
+              <div className="creds-box">
+                <div className="creds-row">
+                  <span className="creds-label">Логин:</span>
+                  <code className="creds-value">{credentials.email}</code>
+                </div>
+                <div className="creds-row">
+                  <span className="creds-label">Пароль:</span>
+                  <code className="creds-value">{credentials.password}</code>
+                </div>
+              </div>
+              <div className="dialog-actions">
+                <button className="btn btn-secondary" onClick={copyCreds}>
+                  <Icon name="content_copy" size={16} style={{ marginRight: 4 }} />
+                  Копировать
+                </button>
+                <button className="btn btn-primary" onClick={() => setCredentials(null)}>Готово</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

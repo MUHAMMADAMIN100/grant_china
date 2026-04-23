@@ -90,6 +90,11 @@ export class StudentsController {
     return this.students.remove(id, user);
   }
 
+  @Post(':id/regenerate-password')
+  regeneratePassword(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.students.regeneratePassword(id, user);
+  }
+
   @Post(':id/photo')
   @UseInterceptors(
     FileInterceptor('file', {

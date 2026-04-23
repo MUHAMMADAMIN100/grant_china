@@ -11,9 +11,8 @@ export class CreateStudentDto {
   @IsString({ each: true })
   phones?: string[];
 
-  @IsOptional()
   @IsEmail()
-  email?: string;
+  email: string;
 
   @IsOptional()
   @IsString()

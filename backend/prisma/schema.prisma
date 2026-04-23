@@ -83,6 +83,7 @@ model Student {
   fullName     String
   phones       String[]      @default([])
   email        String?
+  password     String?
   photoUrl     String?
   direction    Direction
   cabinet      Int

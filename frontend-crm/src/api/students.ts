@@ -42,6 +42,13 @@ export async function deleteStudent(id: string) {
   return data;
 }
 
+export async function regenerateStudentPassword(id: string) {
+  const { data } = await api.post<{ email: string; password: string }>(
+    `/students/${id}/regenerate-password`,
+  );
+  return data;
+}
+
 export async function uploadPhoto(id: string, file: File) {
   const fd = new FormData(); fd.append('file', file);
   const { data } = await api.post<Student>(`/students/${id}/photo`, fd, {

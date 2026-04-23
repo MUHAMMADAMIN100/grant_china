@@ -1,4 +1,6 @@
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
+import Icon from '../Icon';
 
 export default function Header() {
   return (
@@ -24,14 +26,20 @@ export default function Header() {
           <motion.a href="#testimonials" whileHover={{ y: -2 }}>Отзывы</motion.a>
           <motion.a href="#contacts" whileHover={{ y: -2 }}>Контакты</motion.a>
         </nav>
-        <motion.a
-          href="#apply"
-          className="btn btn-primary"
-          whileHover={{ scale: 1.05, y: -2 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          Оставить заявку
-        </motion.a>
+        <div className="header-actions">
+          <Link to="/login" className="header-login">
+            <Icon name="person" size={18} />
+            <span>Вход</span>
+          </Link>
+          <motion.a
+            href="#apply"
+            className="btn btn-primary"
+            whileHover={{ scale: 1.05, y: -2 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            Оставить заявку
+          </motion.a>
+        </div>
       </div>
     </motion.header>
   );
