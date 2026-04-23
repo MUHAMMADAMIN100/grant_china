@@ -33,8 +33,14 @@ const REQUIRED_DOCUMENT_TYPES: { type: string; label: string }[] = [
 ];
 
 const MANAGER_INCLUDE = {
-  student: { include: { manager: { select: { id: true, fullName: true, email: true } } } },
+  student: {
+    include: {
+      manager: { select: { id: true, fullName: true, email: true } },
+      chinaManager: { select: { id: true, fullName: true, email: true } },
+    },
+  },
   manager: { select: { id: true, fullName: true, email: true } },
+  chinaManager: { select: { id: true, fullName: true, email: true } },
 };
 
 type CurrentUser = { id: string; role: Role };
@@ -98,16 +104,27 @@ export class ApplicationsService {
     currentUserId?: string;
   }) {
     const where: Prisma.ApplicationWhereInput = {};
+    const and: Prisma.ApplicationWhereInput[] = [];
     if (filters.status) where.status = filters.status;
     if (filters.direction) where.direction = filters.direction;
-    if (filters.mine && filters.currentUserId) where.managerId = filters.currentUserId;
-    if (filters.search) {
-      where.OR = [
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
-        { phone: { contains: filters.search, mode: 'insensitive' } },
-        { email: { contains: filters.search, mode: 'insensitive' } },
-      ];
+    if (filters.mine && filters.currentUserId) {
+      and.push({
+        OR: [
+          { managerId: filters.currentUserId },
+          { chinaManagerId: filters.currentUserId },
+        ],
+      });
     }
+    if (filters.search) {
+      and.push({
+        OR: [
+          { fullName: { contains: filters.search, mode: 'insensitive' } },
+          { phone: { contains: filters.search, mode: 'insensitive' } },
+          { email: { contains: filters.search, mode: 'insensitive' } },
+        ],
+      });
+    }
+    if (and.length) where.AND = and;
     return this.prisma.application.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -124,19 +141,24 @@ export class ApplicationsService {
     return app;
   }
 
-  private ensureCanEdit(app: { managerId: string | null }, user: CurrentUser) {
+  private ensureCanEdit(
+    app: { managerId: string | null; chinaManagerId?: string | null },
+    user: CurrentUser,
+  ) {
     if (user.role === 'ADMIN') return;
-    if (!app.managerId) return; // ещё не назначен — все могут (кроме случая когда NEW)
-    if (app.managerId !== user.id) {
-      throw new ForbiddenException('Только назначенный менеджер или администратор может редактировать эту заявку');
-    }
+    const assigned = app.managerId || app.chinaManagerId;
+    if (!assigned) return; // ещё не назначен — любой может взять в работу
+    if (app.managerId === user.id || app.chinaManagerId === user.id) return;
+    throw new ForbiddenException(
+      'Только назначенные менеджеры или администратор могут редактировать эту заявку',
+    );
   }
 
   async update(id: string, dto: UpdateApplicationDto, user: CurrentUser) {
     const existing = await this.findOne(id);
     this.ensureCanEdit(existing, user);
 
-    // Авто-создание студента и назначение менеджера при переводе в работу
+    // Авто-создание студента при переводе в работу (БЕЗ авто-назначения менеджеров)
     if (
       dto.status === ApplicationStatus.IN_PROGRESS &&
       existing.status === ApplicationStatus.NEW &&
@@ -150,12 +172,11 @@ export class ApplicationsService {
           direction: existing.direction,
           cabinet: CABINET_BY_DIRECTION[existing.direction],
           comment: existing.comment,
-          managerId: user.id,
         },
       });
       return this.prisma.application.update({
         where: { id },
-        data: { ...dto, studentId: student.id, managerId: user.id },
+        data: { ...dto, studentId: student.id },
         include: MANAGER_INCLUDE,
       });
     }
@@ -180,28 +201,43 @@ export class ApplicationsService {
     });
   }
 
-  async assignManager(id: string, managerId: string | null, user: CurrentUser) {
+  async assignManager(
+    id: string,
+    patch: { managerId?: string | null; chinaManagerId?: string | null },
+    user: CurrentUser,
+  ) {
     if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор может переназначать менеджера');
+      throw new ForbiddenException('Только администратор может переназначать менеджеров');
     }
     const existing = await this.findOne(id);
 
-    if (managerId) {
-      const exists = await this.prisma.user.findUnique({ where: { id: managerId } });
-      if (!exists) throw new NotFoundException('Пользователь не найден');
+    const data: any = {};
+    if (patch.managerId !== undefined) {
+      if (patch.managerId) {
+        const exists = await this.prisma.user.findUnique({ where: { id: patch.managerId } });
+        if (!exists) throw new NotFoundException('Локальный менеджер не найден');
+      }
+      data.managerId = patch.managerId;
+    }
+    if (patch.chinaManagerId !== undefined) {
+      if (patch.chinaManagerId) {
+        const exists = await this.prisma.user.findUnique({ where: { id: patch.chinaManagerId } });
+        if (!exists) throw new NotFoundException('Китайский менеджер не найден');
+      }
+      data.chinaManagerId = patch.chinaManagerId;
     }
 
-    // Синхронизируем менеджера на связанном студенте
-    if (existing.studentId) {
+    // Синхронизируем менеджеров на связанном студенте
+    if (existing.studentId && Object.keys(data).length > 0) {
       await this.prisma.student.update({
         where: { id: existing.studentId },
-        data: { managerId },
+        data,
       });
     }
 
     return this.prisma.application.update({
       where: { id },
-      data: { managerId },
+      data,
       include: MANAGER_INCLUDE,
     });
   }

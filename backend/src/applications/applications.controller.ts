@@ -69,10 +69,10 @@ export class ApplicationsController {
   @Patch(':id/manager')
   assignManager(
     @Param('id') id: string,
-    @Body('managerId') managerId: string | null,
+    @Body() body: { managerId?: string | null; chinaManagerId?: string | null },
     @CurrentUser() user: any,
   ) {
-    return this.apps.assignManager(id, managerId, user);
+    return this.apps.assignManager(id, body, user);
   }
 
   @UseGuards(JwtAuthGuard)

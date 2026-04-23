@@ -28,14 +28,19 @@ const fmtBytes = (b: number) => {
 
 type Props = {
   studentId: string;
+  studentName?: string;
   documents: Document[];
   onChange: () => void;
   editable: boolean;
 };
 
-export default function DocumentsChecklist({ studentId, documents, onChange, editable }: Props) {
+const sanitizeFileName = (s: string) =>
+  s.replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_').slice(0, 80);
+
+export default function DocumentsChecklist({ studentId, studentName, documents, onChange, editable }: Props) {
   const { confirm, toast } = useUI();
   const [uploadingType, setUploadingType] = useState<string | null>(null);
+  const [zipping, setZipping] = useState(false);
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const otherRef = useRef<HTMLInputElement>(null);
 
@@ -60,6 +65,53 @@ export default function DocumentsChecklist({ studentId, documents, onChange, edi
     } finally {
       setUploadingType(null);
       e.target.value = '';
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    if (documents.length === 0) return;
+    setZipping(true);
+    try {
+      const [{ default: JSZip }, { saveAs }] = await Promise.all([
+        import('jszip'),
+        import('file-saver'),
+      ]);
+      const zip = new JSZip();
+
+      // Загружаем типизированные документы
+      for (let i = 0; i < REQUIRED_DOCUMENTS.length; i++) {
+        const req = REQUIRED_DOCUMENTS[i];
+        const doc = typedDocs.find((d) => d.type === req.type);
+        if (!doc) continue;
+        const res = await fetch(`${API_BASE}${doc.url}`);
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        const ext = doc.originalName.includes('.') ? doc.originalName.split('.').pop() : '';
+        const baseName = `${String(i + 1).padStart(2, '0')}_${sanitizeFileName(req.label)}`;
+        const fileName = ext ? `${baseName}.${ext}` : baseName;
+        zip.file(fileName, blob);
+      }
+
+      // Прочие документы — в папке "Прочее"
+      if (otherDocs.length > 0) {
+        const otherFolder = zip.folder('Прочее');
+        for (const doc of otherDocs) {
+          const res = await fetch(`${API_BASE}${doc.url}`);
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          otherFolder?.file(sanitizeFileName(doc.originalName), blob);
+        }
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const date = new Date().toISOString().slice(0, 10);
+      const safeName = sanitizeFileName(studentName || 'student');
+      saveAs(blob, `${safeName}_документы_${date}.zip`);
+      toast('Архив скачан', 'success');
+    } catch (e: any) {
+      toast(e?.message || 'Ошибка создания архива', 'error');
+    } finally {
+      setZipping(false);
     }
   };
 
@@ -88,7 +140,25 @@ export default function DocumentsChecklist({ studentId, documents, onChange, edi
       <div className="docs-progress">
         <div className="docs-progress-text">
           <span>Загружено <b>{uploadedCount}</b> из {total}</span>
-          <span className="docs-progress-percent">{percent}%</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="docs-progress-percent">{percent}%</span>
+            <motion.button
+              className="btn btn-sm btn-secondary"
+              onClick={handleDownloadZip}
+              disabled={zipping || documents.length === 0}
+              whileHover={!zipping && documents.length > 0 ? { scale: 1.04 } : {}}
+              whileTap={{ scale: 0.96 }}
+              title={
+                documents.length === 0
+                  ? 'Нет документов для скачивания'
+                  : 'Скачать все файлы одним архивом'
+              }
+              style={documents.length === 0 ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+            >
+              <Icon name={zipping ? 'progress_activity' : 'folder_zip'} size={16} style={{ marginRight: 4 }} />
+              {zipping ? 'Архивируем…' : `Скачать ZIP (${documents.length})`}
+            </motion.button>
+          </div>
         </div>
         <div className="docs-progress-bar">
           <motion.div

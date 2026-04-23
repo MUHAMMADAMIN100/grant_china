@@ -71,9 +71,9 @@ export default function StudentDetail() {
     }
   };
 
-  const onReassign = async (managerId: string | null) => {
+  const onReassign = async (patch: { managerId?: string | null; chinaManagerId?: string | null }) => {
     if (!id) return;
-    await assignStudentManager(id, managerId);
+    await assignStudentManager(id, patch);
     await reload();
   };
 
@@ -98,7 +98,8 @@ export default function StudentDetail() {
   if (!student || !form) return <div className="empty">Загрузка...</div>;
 
   const isAdmin = me?.role === 'ADMIN';
-  const isMine = !student.managerId || student.managerId === me?.id;
+  const assigned = !!student.managerId || !!student.chinaManagerId;
+  const isMine = !assigned || student.managerId === me?.id || student.chinaManagerId === me?.id;
   const canEdit = isAdmin || isMine;
 
   return (
@@ -117,7 +118,7 @@ export default function StudentDetail() {
       <div className="card-body">
         <ManagerBar
           manager={student.manager}
-          canEditNow={canEdit}
+          chinaManager={student.chinaManager}
           onReassign={onReassign}
         />
         <div className="detail-grid">
@@ -185,6 +186,7 @@ export default function StudentDetail() {
 
         <DocumentsChecklist
           studentId={student.id}
+          studentName={student.fullName}
           documents={student.documents || []}
           onChange={reload}
           editable={canEdit}

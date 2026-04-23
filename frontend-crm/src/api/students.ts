@@ -29,8 +29,11 @@ export async function updateStudent(id: string, payload: Partial<Student>) {
   return data;
 }
 
-export async function assignStudentManager(id: string, managerId: string | null) {
-  const { data } = await api.patch<Student>(`/students/${id}/manager`, { managerId });
+export async function assignStudentManager(
+  id: string,
+  patch: { managerId?: string | null; chinaManagerId?: string | null },
+) {
+  const { data } = await api.patch<Student>(`/students/${id}/manager`, patch);
   return data;
 }
 

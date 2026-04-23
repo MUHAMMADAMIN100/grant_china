@@ -6,63 +6,66 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
 
+type Slot = 'local' | 'china';
+
 type Props = {
   manager: ManagerInfo | null | undefined;
-  canEditNow: boolean;
-  onReassign: (managerId: string | null) => Promise<void>;
+  chinaManager: ManagerInfo | null | undefined;
+  onReassign: (patch: { managerId?: string | null; chinaManagerId?: string | null }) => Promise<void>;
 };
 
-export default function ManagerBar({ manager, canEditNow, onReassign }: Props) {
-  const me = useAuth((s) => s.user);
-  const { toast } = useUI();
-  const [users, setUsers] = useState<User[]>([]);
+function Slot({
+  kind,
+  label,
+  icon,
+  manager,
+  isAdmin,
+  meId,
+  users,
+  onPick,
+  saving,
+}: {
+  kind: Slot;
+  label: string;
+  icon: string;
+  manager: ManagerInfo | null | undefined;
+  isAdmin: boolean;
+  meId?: string;
+  users: User[];
+  onPick: (kind: Slot, userId: string | null) => void;
+  saving: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const isAdmin = me?.role === 'ADMIN';
-  const isMine = manager?.id === me?.id;
+  const isMine = manager?.id === meId;
 
   useEffect(() => {
-    if (isAdmin) {
-      listUsers().then(setUsers).catch(() => {});
-    }
-  }, [isAdmin]);
-
-  const pick = async (userId: string | null) => {
-    setSaving(true);
-    try {
-      await onReassign(userId);
-      toast('Менеджер обновлён', 'success');
-      setOpen(false);
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка переназначения', 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
+    if (!open) return;
+    const close = () => setOpen(false);
+    setTimeout(() => document.addEventListener('click', close, { once: true }), 0);
+    return () => document.removeEventListener('click', close);
+  }, [open]);
 
   return (
-    <div className={`manager-bar${isMine ? ' manager-bar-mine' : ''}${!manager ? ' manager-bar-empty' : ''}`}>
-      <div className="manager-bar-label">
-        <Icon name="account_circle" size={22} />
+    <div className={`manager-slot${isMine ? ' mine' : ''}${!manager ? ' empty' : ''}`}>
+      <div className="manager-slot-head">
+        <Icon name={icon} size={20} />
         <div>
-          <div className="manager-bar-title">Менеджер</div>
-          <div className="manager-bar-name">
+          <div className="manager-slot-label">{label}</div>
+          <div className="manager-slot-name">
             {manager ? manager.fullName : 'Не назначен'}
             {isMine && <span className="manager-bar-you">(вы)</span>}
           </div>
         </div>
       </div>
       {isAdmin && (
-        <div className="manager-bar-actions">
+        <div style={{ position: 'relative' }}>
           <motion.button
             className="btn btn-sm btn-secondary"
-            onClick={() => setOpen((o) => !o)}
+            onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
             disabled={saving}
             whileTap={{ scale: 0.95 }}
           >
-            <Icon name="edit" size={16} style={{ marginRight: 4 }} />
-            Переназначить
+            <Icon name="edit" size={14} />
           </motion.button>
           <AnimatePresence>
             {open && (
@@ -72,13 +75,14 @@ export default function ManagerBar({ manager, canEditNow, onReassign }: Props) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -5, scale: 0.97 }}
                 transition={{ duration: 0.18 }}
+                onClick={(e) => e.stopPropagation()}
               >
                 <div className="manager-dropdown-list">
                   {users.map((u) => (
                     <button
                       key={u.id}
                       className={`manager-dropdown-item${u.id === manager?.id ? ' active' : ''}`}
-                      onClick={() => pick(u.id)}
+                      onClick={() => { onPick(kind, u.id); setOpen(false); }}
                       disabled={saving}
                     >
                       <Icon name={u.id === manager?.id ? 'radio_button_checked' : 'radio_button_unchecked'} size={18} />
@@ -93,7 +97,7 @@ export default function ManagerBar({ manager, canEditNow, onReassign }: Props) {
                   {manager && (
                     <button
                       className="manager-dropdown-item manager-dropdown-clear"
-                      onClick={() => pick(null)}
+                      onClick={() => { onPick(kind, null); setOpen(false); }}
                       disabled={saving}
                     >
                       <Icon name="person_off" size={18} />
@@ -106,12 +110,58 @@ export default function ManagerBar({ manager, canEditNow, onReassign }: Props) {
           </AnimatePresence>
         </div>
       )}
-      {!isAdmin && !isMine && manager && canEditNow === false && (
-        <div className="manager-bar-hint">
-          <Icon name="lock" size={16} />
-          Только менеджер может редактировать
-        </div>
-      )}
+    </div>
+  );
+}
+
+export default function ManagerBar({ manager, chinaManager, onReassign }: Props) {
+  const me = useAuth((s) => s.user);
+  const { toast } = useUI();
+  const [users, setUsers] = useState<User[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const isAdmin = me?.role === 'ADMIN';
+
+  useEffect(() => {
+    if (isAdmin) listUsers().then(setUsers).catch(() => {});
+  }, [isAdmin]);
+
+  const pick = async (kind: Slot, userId: string | null) => {
+    setSaving(true);
+    try {
+      await onReassign(kind === 'local' ? { managerId: userId } : { chinaManagerId: userId });
+      toast(kind === 'local' ? 'Локальный менеджер обновлён' : 'Китайский менеджер обновлён', 'success');
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка переназначения', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="manager-bar-two">
+      <Slot
+        kind="local"
+        label="Менеджер (Таджикистан)"
+        icon="apartment"
+        manager={manager}
+        isAdmin={isAdmin}
+        meId={me?.id}
+        users={users}
+        onPick={pick}
+        saving={saving}
+      />
+      <Slot
+        kind="china"
+        label="Менеджер (Китай)"
+        icon="flag"
+        manager={chinaManager}
+        isAdmin={isAdmin}
+        meId={me?.id}
+        users={users}
+        onPick={pick}
+        saving={saving}
+      />
     </div>
   );
 }

@@ -79,10 +79,10 @@ export class StudentsController {
   @Patch(':id/manager')
   assignManager(
     @Param('id') id: string,
-    @Body('managerId') managerId: string | null,
+    @Body() body: { managerId?: string | null; chinaManagerId?: string | null },
     @CurrentUser() user: any,
   ) {
-    return this.students.assignManager(id, managerId, user);
+    return this.students.assignManager(id, body, user);
   }
 
   @Delete(':id')

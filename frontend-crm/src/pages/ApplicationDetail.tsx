@@ -63,9 +63,9 @@ export default function ApplicationDetail() {
     }
   };
 
-  const onReassign = async (managerId: string | null) => {
+  const onReassign = async (patch: { managerId?: string | null; chinaManagerId?: string | null }) => {
     if (!id) return;
-    await assignApplicationManager(id, managerId);
+    await assignApplicationManager(id, patch);
     await reload();
   };
 
@@ -127,8 +127,8 @@ export default function ApplicationDetail() {
 
   const isNew = app.status === 'NEW';
   const isAdmin = me?.role === 'ADMIN';
-  const isMine = !app.managerId || app.managerId === me?.id;
-  // Право редактировать: админ, либо свой менеджер, либо менеджера ещё нет (для случая "Взять в работу")
+  const assigned = !!app.managerId || !!app.chinaManagerId;
+  const isMine = !assigned || app.managerId === me?.id || app.chinaManagerId === me?.id;
   const canAct = isAdmin || isMine;
   const canEdit = app.status === 'IN_PROGRESS' && student && canAct;
   const uploadedTypes = new Set((student?.documents || []).map((d) => d.type).filter((t) => t && t !== 'OTHER'));
@@ -186,7 +186,7 @@ export default function ApplicationDetail() {
         {!isNew && (
           <ManagerBar
             manager={app.manager}
-            canEditNow={!!canEdit}
+            chinaManager={app.chinaManager}
             onReassign={onReassign}
           />
         )}
@@ -273,6 +273,7 @@ export default function ApplicationDetail() {
 
             <DocumentsChecklist
               studentId={student.id}
+              studentName={student.fullName}
               documents={student.documents || []}
               onChange={reload}
               editable={!!canEdit}

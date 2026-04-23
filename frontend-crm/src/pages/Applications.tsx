@@ -116,15 +116,29 @@ export default function Applications() {
                       <td><strong>{a.fullName}</strong></td>
                       <td data-label="Телефон">{a.phone}</td>
                       <td data-label="Направление">{DIRECTION_LABEL[a.direction]}</td>
-                      <td data-label="Менеджер">
-                        {a.manager ? (
-                          <span className={a.manager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
-                            {a.manager.fullName}
-                            {a.manager.id === me?.id && <span className="mgr-you"> (вы)</span>}
-                          </span>
-                        ) : (
-                          <span className="mgr-none">—</span>
-                        )}
+                      <td data-label="Менеджеры">
+                        <div className="mgr-cell">
+                          <div className="mgr-row">
+                            <span className="mgr-tag tj">TJ</span>
+                            {a.manager ? (
+                              <span className={a.manager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
+                                {a.manager.fullName}
+                              </span>
+                            ) : (
+                              <span className="mgr-none">—</span>
+                            )}
+                          </div>
+                          <div className="mgr-row">
+                            <span className="mgr-tag cn">CN</span>
+                            {a.chinaManager ? (
+                              <span className={a.chinaManager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
+                                {a.chinaManager.fullName}
+                              </span>
+                            ) : (
+                              <span className="mgr-none">—</span>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td data-label="Статус"><span className={`badge ${STATUS_BADGE[a.status]}`}>{STATUS_LABEL[a.status]}</span></td>
                       <td data-label="Дата">{new Date(a.createdAt).toLocaleDateString('ru-RU')}</td>

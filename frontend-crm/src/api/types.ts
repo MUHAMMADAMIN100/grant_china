@@ -29,6 +29,8 @@ export interface Application {
   student?: Student | null;
   managerId: string | null;
   manager?: ManagerInfo | null;
+  chinaManagerId: string | null;
+  chinaManager?: ManagerInfo | null;
   createdAt: string;
 }
 
@@ -55,6 +57,8 @@ export interface Student {
   comment: string | null;
   managerId: string | null;
   manager?: ManagerInfo | null;
+  chinaManagerId: string | null;
+  chinaManager?: ManagerInfo | null;
   documents?: Document[];
   applications?: Application[];
   createdAt: string;

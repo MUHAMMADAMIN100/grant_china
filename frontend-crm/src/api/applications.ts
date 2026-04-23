@@ -23,8 +23,11 @@ export async function updateApplication(id: string, payload: Partial<Application
   return data;
 }
 
-export async function assignApplicationManager(id: string, managerId: string | null) {
-  const { data } = await api.patch<Application>(`/applications/${id}/manager`, { managerId });
+export async function assignApplicationManager(
+  id: string,
+  patch: { managerId?: string | null; chinaManagerId?: string | null },
+) {
+  const { data } = await api.patch<Application>(`/applications/${id}/manager`, patch);
   return data;
 }
 

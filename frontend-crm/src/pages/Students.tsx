@@ -195,15 +195,29 @@ export default function Students() {
                       <td data-label="Телефоны">{s.phones.join(', ') || '—'}</td>
                       <td data-label="Направление">{DIRECTION_LABEL[s.direction]}</td>
                       <td data-label="Кабинет">№{s.cabinet}</td>
-                      <td data-label="Менеджер">
-                        {s.manager ? (
-                          <span className={s.manager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
-                            {s.manager.fullName}
-                            {s.manager.id === me?.id && <span className="mgr-you"> (вы)</span>}
-                          </span>
-                        ) : (
-                          <span className="mgr-none">—</span>
-                        )}
+                      <td data-label="Менеджеры">
+                        <div className="mgr-cell">
+                          <div className="mgr-row">
+                            <span className="mgr-tag tj">TJ</span>
+                            {s.manager ? (
+                              <span className={s.manager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
+                                {s.manager.fullName}
+                              </span>
+                            ) : (
+                              <span className="mgr-none">—</span>
+                            )}
+                          </div>
+                          <div className="mgr-row">
+                            <span className="mgr-tag cn">CN</span>
+                            {s.chinaManager ? (
+                              <span className={s.chinaManager.id === me?.id ? 'mgr-mine' : 'mgr-other'}>
+                                {s.chinaManager.fullName}
+                              </span>
+                            ) : (
+                              <span className="mgr-none">—</span>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td data-label="Статус"><span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span></td>
                     </motion.tr>
