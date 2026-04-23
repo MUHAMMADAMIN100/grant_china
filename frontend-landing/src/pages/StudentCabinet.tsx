@@ -66,7 +66,7 @@ export default function StudentCabinet() {
       return;
     }
     if (!getSocket()) connectStudentRealtime(token);
-    load();
+    load(true); // первый заход — показать спиннер
   }, []);
 
   useStudentRealtime({
@@ -75,8 +75,8 @@ export default function StudentCabinet() {
     'document:deleted': () => load(),
   });
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (showSpinner = false) => {
+    if (showSpinner) setLoading(true);
     try {
       const data = await studentMe();
       setMe(data);
@@ -84,7 +84,7 @@ export default function StudentCabinet() {
       clearToken();
       navigate('/login', { replace: true });
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   };
 
