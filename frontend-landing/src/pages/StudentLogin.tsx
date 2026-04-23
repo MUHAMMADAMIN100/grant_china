@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { studentLogin, getToken } from '../studentApi';
@@ -11,10 +11,9 @@ export default function StudentLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (getToken()) {
-    navigate('/cabinet', { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (getToken()) navigate('/cabinet', { replace: true });
+  }, [navigate]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

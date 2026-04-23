@@ -7,16 +7,19 @@ const SOCKET_URL = API_URL.replace(/\/api$/, '');
 let socket: Socket | null = null;
 
 export function connectRealtime(token: string) {
-  if (socket) {
-    socket.disconnect();
+  try {
+    if (socket) socket.disconnect();
+    socket = io(SOCKET_URL, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+    });
+    return socket;
+  } catch (err) {
+    console.error('[realtime] connect failed:', err);
+    return null;
   }
-  socket = io(SOCKET_URL, {
-    auth: { token },
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionDelay: 1000,
-  });
-  return socket;
 }
 
 export function disconnectRealtime() {
