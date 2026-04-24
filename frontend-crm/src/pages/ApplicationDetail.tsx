@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { assignApplicationManager, deleteApplication, getApplication, updateApplication } from '../api/applications';
 import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import type { Application, ApplicationStatus, Direction, Student, StudentStatus } from '../api/types';
-import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
+import { APPLICATION_STAGES, DIRECTION_LABEL, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -150,17 +150,21 @@ export default function ApplicationDetail() {
   const assigned = !!app.managerId || !!app.chinaManagerId;
   const isMine = !assigned || app.managerId === me?.id || app.chinaManagerId === me?.id;
   const canAct = isAdmin || isMine;
-  const canEdit = app.status === 'IN_PROGRESS' && student && canAct;
+  const currentIdx = STAGE_INDEX[app.status] ?? 0;
+  const canEdit = currentIdx >= 1 && currentIdx <= 4 && student && canAct;
   const uploadedTypes = new Set((student?.documents || []).map((d) => d.type).filter((t) => t && t !== 'OTHER'));
   const missingDocs = REQUIRED_DOCUMENTS.filter((r) => !uploadedTypes.has(r.type));
-  const canComplete = missingDocs.length === 0;
+  const nextStage = APPLICATION_STAGES[currentIdx + 1];
+  const prevStage = currentIdx > 0 ? APPLICATION_STAGES[currentIdx - 1] : null;
 
-  const handleComplete = () => {
-    if (!canComplete) {
+  const handleNext = async () => {
+    if (!nextStage) return;
+    // Гейт на "Подача документов" — нужны все 10 файлов
+    if (nextStage === 'DOCS_SUBMITTED' && missingDocs.length > 0) {
       toast(`Загрузите все документы (не хватает: ${missingDocs.length})`, 'error');
       return;
     }
-    onStatus('COMPLETED');
+    await onStatus(nextStage);
   };
 
   return (
@@ -168,23 +172,6 @@ export default function ApplicationDetail() {
       <div className="card-header">
         <h2 className="card-title">{app.fullName}</h2>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span className={`badge ${STATUS_BADGE[app.status]}`}>{STATUS_LABEL[app.status]}</span>
-          {isNew && canAct && (
-            <button className="btn btn-sm btn-primary" onClick={() => onStatus('IN_PROGRESS')}>
-              Взять в работу
-            </button>
-          )}
-          {app.status === 'IN_PROGRESS' && canAct && (
-            <button
-              className="btn btn-sm btn-secondary"
-              onClick={handleComplete}
-              disabled={!canComplete}
-              title={canComplete ? 'Завершить заявку' : `Загрузите все документы (не хватает: ${missingDocs.length})`}
-              style={!canComplete ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
-            >
-              {canComplete ? 'Завершить' : `Завершить (${10 - missingDocs.length}/10)`}
-            </button>
-          )}
           {canEdit && !edit && (
             <button className="btn btn-sm btn-secondary" onClick={() => setEdit(true)}>
               Редактировать
@@ -200,6 +187,56 @@ export default function ApplicationDetail() {
             <button className="btn btn-sm btn-danger" onClick={onDeleteApp}>Удалить</button>
           )}
         </div>
+      </div>
+
+      {/* Пошаговая воронка статусов */}
+      <div className="stage-bar">
+        <div className="stage-bar-track">
+          {APPLICATION_STAGES.map((stage, i) => {
+            const done = i < currentIdx;
+            const current = i === currentIdx;
+            return (
+              <div
+                key={stage}
+                className={`stage-step${done ? ' done' : ''}${current ? ' current' : ''}`}
+              >
+                <div className="stage-dot">
+                  {done ? <Icon name="check" size={16} /> : <span>{i + 1}</span>}
+                </div>
+                <div className="stage-label">{STATUS_SHORT[stage]}</div>
+                {i < APPLICATION_STAGES.length - 1 && <div className="stage-connector" />}
+              </div>
+            );
+          })}
+        </div>
+        {canAct && (
+          <div className="stage-actions">
+            {prevStage && (
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={() => onStatus(prevStage)}
+                title="Вернуться на предыдущий этап"
+              >
+                <Icon name="arrow_back" size={16} style={{ marginRight: 4 }} />
+                Назад
+              </button>
+            )}
+            {nextStage && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={handleNext}
+                title={
+                  nextStage === 'DOCS_SUBMITTED' && missingDocs.length > 0
+                    ? `Сначала загрузите все документы (не хватает: ${missingDocs.length})`
+                    : `Перейти: ${STATUS_LABEL[nextStage]}`
+                }
+              >
+                {STATUS_LABEL[nextStage]}
+                <Icon name="arrow_forward" size={16} style={{ marginLeft: 4 }} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="card-body">

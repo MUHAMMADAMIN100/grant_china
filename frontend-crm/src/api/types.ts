@@ -1,6 +1,35 @@
 export type Role = 'ADMIN' | 'EMPLOYEE';
 export type Direction = 'BACHELOR' | 'MASTER' | 'LANGUAGE';
-export type ApplicationStatus = 'NEW' | 'IN_PROGRESS' | 'COMPLETED';
+export type ApplicationStatus =
+  | 'NEW'
+  | 'DOCS_REVIEW'
+  | 'DOCS_SUBMITTED'
+  | 'PRE_ADMISSION'
+  | 'AWAITING_PAYMENT'
+  | 'ENROLLED'
+  // legacy (migrated automatically)
+  | 'IN_PROGRESS'
+  | 'COMPLETED';
+
+export const APPLICATION_STAGES: ApplicationStatus[] = [
+  'NEW',
+  'DOCS_REVIEW',
+  'DOCS_SUBMITTED',
+  'PRE_ADMISSION',
+  'AWAITING_PAYMENT',
+  'ENROLLED',
+];
+
+export const STAGE_INDEX: Record<ApplicationStatus, number> = {
+  NEW: 0,
+  DOCS_REVIEW: 1,
+  IN_PROGRESS: 1, // legacy
+  DOCS_SUBMITTED: 2,
+  PRE_ADMISSION: 3,
+  AWAITING_PAYMENT: 4,
+  ENROLLED: 5,
+  COMPLETED: 5, // legacy
+};
 export type StudentStatus = 'ACTIVE' | 'PAUSED' | 'GRADUATED' | 'ARCHIVED';
 
 export interface User {
@@ -109,9 +138,25 @@ export const DIRECTION_LABEL: Record<Direction, string> = {
 };
 
 export const STATUS_LABEL: Record<ApplicationStatus, string> = {
+  NEW: 'Новая заявка',
+  DOCS_REVIEW: 'Документы на проверке',
+  DOCS_SUBMITTED: 'Подача документов',
+  PRE_ADMISSION: 'Предварительное зачисление',
+  AWAITING_PAYMENT: 'Ожидание оплаты',
+  ENROLLED: 'Зачислен',
+  IN_PROGRESS: 'Документы на проверке',
+  COMPLETED: 'Зачислен',
+};
+
+export const STATUS_SHORT: Record<ApplicationStatus, string> = {
   NEW: 'Новая',
-  IN_PROGRESS: 'В работе',
-  COMPLETED: 'Завершена',
+  DOCS_REVIEW: 'Проверка',
+  DOCS_SUBMITTED: 'Подача',
+  PRE_ADMISSION: 'Предв. зачисление',
+  AWAITING_PAYMENT: 'Оплата',
+  ENROLLED: 'Зачислен',
+  IN_PROGRESS: 'Проверка',
+  COMPLETED: 'Зачислен',
 };
 
 export const STUDENT_STATUS_LABEL: Record<StudentStatus, string> = {
@@ -123,6 +168,11 @@ export const STUDENT_STATUS_LABEL: Record<StudentStatus, string> = {
 
 export const STATUS_BADGE: Record<ApplicationStatus, string> = {
   NEW: 'badge-info',
+  DOCS_REVIEW: 'badge-warning',
+  DOCS_SUBMITTED: 'badge-warning',
+  PRE_ADMISSION: 'badge-info',
+  AWAITING_PAYMENT: 'badge-warning',
+  ENROLLED: 'badge-success',
   IN_PROGRESS: 'badge-warning',
   COMPLETED: 'badge-success',
 };

@@ -20,11 +20,11 @@ export default function Header() {
           <img src="/logo.png" alt="Grant China" className="logo-image" />
         </motion.a>
         <nav className="nav">
-          <motion.a href="#services" whileHover={{ y: -2 }}>Программы</motion.a>
-          <motion.a href="#directions" whileHover={{ y: -2 }}>Направления</motion.a>
-          <motion.a href="#advantages" whileHover={{ y: -2 }}>Преимущества</motion.a>
-          <motion.a href="#testimonials" whileHover={{ y: -2 }}>Отзывы</motion.a>
-          <motion.a href="#contacts" whileHover={{ y: -2 }}>Контакты</motion.a>
+          <Link to="/programs" className="nav-link">Каталог</Link>
+          <motion.a href="/#directions" whileHover={{ y: -2 }}>Направления</motion.a>
+          <motion.a href="/#advantages" whileHover={{ y: -2 }}>Преимущества</motion.a>
+          <motion.a href="/#testimonials" whileHover={{ y: -2 }}>Отзывы</motion.a>
+          <motion.a href="/#contacts" whileHover={{ y: -2 }}>Контакты</motion.a>
         </nav>
         <div className="header-actions">
           <Link to="/login" className="header-login">

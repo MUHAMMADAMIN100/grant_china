@@ -20,8 +20,13 @@ enum Direction {
 
 enum ApplicationStatus {
   NEW
-  IN_PROGRESS
-  COMPLETED
+  IN_PROGRESS      // legacy → DOCS_REVIEW
+  COMPLETED        // legacy → ENROLLED
+  DOCS_REVIEW
+  DOCS_SUBMITTED
+  PRE_ADMISSION
+  AWAITING_PAYMENT
+  ENROLLED
 }
 
 enum StudentStatus {
@@ -69,6 +74,8 @@ model Application {
   manager         User?             @relation("ApplicationManager", fields: [managerId], references: [id], onDelete: SetNull)
   chinaManagerId  String?
   chinaManager    User?             @relation("ApplicationChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
+  programId       String?
+  program         Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
 
@@ -76,6 +83,7 @@ model Application {
   @@index([direction])
   @@index([managerId])
   @@index([chinaManagerId])
+  @@index([programId])
 }
 
 model Student {
@@ -94,6 +102,8 @@ model Student {
   manager           User?         @relation("StudentManager", fields: [managerId], references: [id], onDelete: SetNull)
   chinaManagerId    String?
   chinaManager      User?         @relation("StudentChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
+  programId         String?
+  program           Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -105,6 +115,7 @@ model Student {
   @@index([status])
   @@index([managerId])
   @@index([chinaManagerId])
+  @@index([programId])
 }
 
 model Document {
@@ -136,6 +147,32 @@ model Task {
 
   @@index([assignedToId])
   @@index([status])
+}
+
+model Program {
+  id           String    @id @default(uuid())
+  name         String
+  university   String
+  city         String
+  major        String
+  direction    Direction
+  cost         Float
+  currency     String    @default("CNY")
+  duration     String?
+  language     String?
+  description  String?
+  imageUrl     String?
+  published    Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  applications Application[]
+  students     Student[]
+
+  @@index([city])
+  @@index([major])
+  @@index([direction])
+  @@index([published])
 }
 
 model Notification {

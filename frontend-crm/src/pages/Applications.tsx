@@ -74,9 +74,12 @@ export default function Applications() {
           <input placeholder="Поиск по ФИО, телефону, email..." value={search} onChange={(e) => setSearch(e.target.value)} />
           <select value={status} onChange={(e) => setStatus(e.target.value as any)}>
             <option value="">Все статусы</option>
-            <option value="NEW">Новые</option>
-            <option value="IN_PROGRESS">В работе</option>
-            <option value="COMPLETED">Завершённые</option>
+            <option value="NEW">Новая заявка</option>
+            <option value="DOCS_REVIEW">Документы на проверке</option>
+            <option value="DOCS_SUBMITTED">Подача документов</option>
+            <option value="PRE_ADMISSION">Предварительное зачисление</option>
+            <option value="AWAITING_PAYMENT">Ожидание оплаты</option>
+            <option value="ENROLLED">Зачислен</option>
           </select>
           <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
             <option value="">Все направления</option>

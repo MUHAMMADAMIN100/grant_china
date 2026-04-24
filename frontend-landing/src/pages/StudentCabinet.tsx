@@ -12,6 +12,7 @@ import {
 } from '../studentApi';
 import { connectStudentRealtime, useStudentRealtime, getSocket } from '../realtime';
 import ApplicationFormSection from '../components/ApplicationFormSection';
+import EnrollmentProgress from '../components/EnrollmentProgress';
 import Icon from '../Icon';
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -161,12 +162,23 @@ export default function StudentCabinet() {
           )}
         </AnimatePresence>
 
+        {/* Прогресс поступления */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          <EnrollmentProgress
+            currentStatus={me.applications?.[0]?.status}
+          />
+        </motion.div>
+
         {/* Профиль */}
         <motion.section
           className="stu-card"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.4, delay: 0.05 }}
         >
           <div className="stu-profile">
             <div className="stu-photo">

@@ -576,6 +576,74 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .stu-toast-err .material-symbols-rounded { color: #ef4444; }
 .stu-toast-ok .material-symbols-rounded { color: #10b981; }
 
+/* ============ Enrollment Progress (6 этапов) ============ */
+.ep-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 16px; padding: 24px;
+}
+.ep-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 18px; gap: 12px;
+}
+.ep-title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-soft); font-weight: 700; margin-bottom: 4px;
+}
+.ep-current {
+  font-size: 18px; font-weight: 800; color: var(--primary);
+}
+.ep-percent {
+  font-size: 28px; font-weight: 800; color: var(--primary);
+  flex-shrink: 0;
+}
+.ep-track {
+  display: flex; justify-content: space-between;
+  position: relative; gap: 4px;
+}
+.ep-step {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  position: relative; min-width: 0;
+}
+.ep-dot {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: white; border: 2.5px solid #e3e7ef;
+  color: #9ca3af; font-weight: 700; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2; position: relative; transition: all 0.3s;
+}
+.ep-step.done .ep-dot {
+  background: #10b981; border-color: #10b981; color: white;
+}
+.ep-step.current .ep-dot {
+  background: var(--primary); border-color: var(--primary); color: white;
+  box-shadow: 0 0 0 5px rgba(213, 43, 43, 0.18);
+}
+.ep-label {
+  font-size: 11px; font-weight: 600; color: #9ca3af;
+  margin-top: 8px; text-align: center; line-height: 1.3;
+  max-width: 90px;
+}
+.ep-step.current .ep-label { color: var(--primary); font-weight: 700; }
+.ep-step.done .ep-label { color: #10b981; }
+.ep-connector {
+  position: absolute; top: 17px;
+  left: calc(50% + 18px); right: calc(-50% + 18px);
+  height: 3px; background: #e3e7ef;
+  z-index: 1; overflow: hidden;
+}
+.ep-connector-fill {
+  height: 100%; background: #10b981;
+}
+
+@media (max-width: 720px) {
+  .ep-card { padding: 18px; }
+  .ep-head { flex-direction: column; gap: 8px; }
+  .ep-percent { font-size: 22px; }
+  .ep-label { font-size: 9px; max-width: 60px; }
+  .ep-dot { width: 28px; height: 28px; font-size: 11px; }
+  .ep-connector { top: 13px; left: calc(50% + 14px); right: calc(-50% + 14px); }
+}
+
 /* ============ Application Form (анкета) ============ */
 .af-card { padding: 0; overflow: hidden; }
 
@@ -782,6 +850,117 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .stu-card { padding: 18px; }
   .stu-photo { width: 100px; height: 100px; }
 }
+
+/* ============ Programs catalog (лендинг) ============ */
+.pc-main { padding: 40px 0 80px; background: var(--bg-soft); min-height: 80vh; }
+.nav-link {
+  color: var(--text-soft); font-weight: 500;
+  transition: color .2s;
+}
+.nav-link:hover { color: var(--primary); }
+
+.pc-filters {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px; margin: 30px 0;
+  background: white; padding: 18px; border-radius: 14px;
+  border: 1px solid var(--border);
+}
+.pc-filter { display: flex; flex-direction: column; gap: 4px; }
+.pc-filter label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px;
+  font-weight: 700; color: var(--text-soft);
+}
+.pc-filter input, .pc-filter select {
+  padding: 8px 10px; border: 1.5px solid var(--border);
+  border-radius: 8px; font-family: inherit; font-size: 13px;
+  background: white;
+}
+.pc-filter input:focus, .pc-filter select:focus {
+  outline: none; border-color: var(--primary);
+}
+.pc-range { display: flex; gap: 6px; }
+.pc-range input { width: 50%; }
+.pc-reset {
+  grid-column: 1 / -1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 8px 14px; background: none; color: var(--primary);
+  border: 1.5px dashed var(--primary); border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  align-self: center; justify-self: end;
+  max-width: 180px;
+}
+
+.pc-empty {
+  text-align: center; padding: 80px 20px;
+  color: var(--text-soft); font-size: 16px;
+}
+.pc-empty .material-symbols-rounded { color: var(--text-soft); }
+
+.pc-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
+}
+.pc-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 16px; padding: 22px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: box-shadow 0.2s;
+}
+.pc-card:hover { box-shadow: var(--shadow); }
+.pc-card-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 10px; margin-bottom: 4px;
+}
+.pc-badge {
+  background: var(--primary); color: white;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.pc-card-cost {
+  text-align: right;
+  font-size: 18px; font-weight: 800; color: var(--primary);
+  line-height: 1.1;
+}
+.pc-card-cost span { font-size: 11px; color: var(--text-soft); font-weight: 500; }
+.pc-card-name {
+  font-size: 17px; font-weight: 700; line-height: 1.3;
+}
+.pc-card-uni {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px; color: var(--text-soft);
+}
+.pc-card-meta {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  font-size: 12px; color: var(--text-soft);
+  padding: 8px 0; border-top: 1px solid var(--border);
+}
+.pc-card-meta span { display: flex; align-items: center; gap: 4px; }
+.pc-card-meta .material-symbols-rounded { color: var(--primary); }
+.pc-card-desc {
+  font-size: 13px; color: var(--text); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pc-card-cta {
+  margin-top: auto; justify-content: center;
+}
+
+/* Preselected program badge в форме */
+.form-program-badge {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--primary); color: white;
+  padding: 14px 18px; border-radius: 12px;
+  margin-bottom: 18px;
+}
+.form-program-badge > div:nth-child(2) { flex: 1; min-width: 0; }
+.form-program-clear {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(255,255,255,0.2); color: white;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; cursor: pointer; border: none;
+}
+.form-program-clear:hover { background: rgba(255,255,255,0.35); }
 
 /* Footer */
 .footer {

@@ -15,6 +15,7 @@ import { MailModule } from './mail/mail.module';
 import { TasksModule } from './tasks/tasks.module';
 import { StudentAuthModule } from './student-auth/student-auth.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { ProgramsModule } from './programs/programs.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     TasksModule,
     StudentAuthModule,
     RealtimeModule,
+    ProgramsModule,
   ],
 })
 export class AppModule {}

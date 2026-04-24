@@ -23,6 +23,7 @@ const STUDENT_INCLUDE = {
   documents: true,
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
+  program: true,
 } as const;
 
 type CurrentUser = { id: string; role: Role };

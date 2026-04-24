@@ -7,6 +7,7 @@ const STUDENT_INCLUDE = {
   documents: true,
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
+  applications: { select: { id: true, status: true, createdAt: true } },
 } as const;
 
 @Injectable()

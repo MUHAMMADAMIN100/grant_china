@@ -47,6 +47,7 @@ export type StudentMe = {
   documents: StudentDoc[];
   manager: { id: string; fullName: string; email: string } | null;
   chinaManager: { id: string; fullName: string; email: string } | null;
+  applications?: { id: string; status: string; createdAt: string }[];
   createdAt: string;
 };
 

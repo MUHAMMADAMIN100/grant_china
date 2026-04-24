@@ -23,4 +23,8 @@ export class CreateApplicationDto {
   @IsString()
   @MaxLength(2000)
   comment?: string;
+
+  @IsOptional()
+  @IsString()
+  programId?: string;
 }

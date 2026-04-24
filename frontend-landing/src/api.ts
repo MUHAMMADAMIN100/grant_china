@@ -8,6 +8,7 @@ export interface ApplicationPayload {
   email?: string;
   direction: Direction;
   comment?: string;
+  programId?: string;
 }
 
 export async function submitApplication(payload: ApplicationPayload) {

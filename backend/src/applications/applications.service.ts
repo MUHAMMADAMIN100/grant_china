@@ -38,10 +38,12 @@ const MANAGER_INCLUDE = {
     include: {
       manager: { select: { id: true, fullName: true, email: true } },
       chinaManager: { select: { id: true, fullName: true, email: true } },
+      program: true,
     },
   },
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
+  program: true,
 };
 
 type CurrentUser = { id: string; role: Role };
@@ -64,6 +66,7 @@ export class ApplicationsService {
         email: dto.email?.trim() || null,
         direction: dto.direction,
         comment: dto.comment?.trim() || null,
+        programId: dto.programId || null,
       },
     });
 
@@ -161,40 +164,51 @@ export class ApplicationsService {
     const existing = await this.findOne(id);
     this.ensureCanEdit(existing, user);
 
-    // Авто-создание студента при переводе в работу (БЕЗ авто-назначения менеджеров)
+    // Авто-создание студента при переходе NEW → DOCS_REVIEW (если ещё не создан)
     if (
-      dto.status === ApplicationStatus.IN_PROGRESS &&
+      dto.status === ApplicationStatus.DOCS_REVIEW &&
       existing.status === ApplicationStatus.NEW &&
       !existing.studentId
     ) {
-      const student = await this.prisma.student.create({
-        data: {
+      // Создаём студента только если email уникален (он обязателен для ЛК)
+      // Старый флоу (без email) — пропускаем, студент создастся при отдельном действии
+      let studentId = existing.studentId;
+      try {
+        const studentData: any = {
           fullName: existing.fullName,
           phones: [existing.phone],
           email: existing.email,
           direction: existing.direction,
           cabinet: CABINET_BY_DIRECTION[existing.direction],
           comment: existing.comment,
-        },
-      });
+        };
+        const student = await this.prisma.student.create({ data: studentData });
+        studentId = student.id;
+      } catch {
+        // Если студент с таким email уже есть — просто переводим статус без создания
+      }
       const updated = await this.prisma.application.update({
         where: { id },
-        data: { ...dto, studentId: student.id },
+        data: { ...dto, ...(studentId ? { studentId } : {}) },
         include: MANAGER_INCLUDE,
       });
       this.realtime.emitStaff('application:updated', { application: updated });
+      if (updated.studentId) {
+        this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
+      }
       return updated;
     }
 
+    // Гейт: нельзя переходить в DOCS_SUBMITTED пока не загружены все 10 документов
     if (
-      dto.status === ApplicationStatus.COMPLETED &&
-      existing.status !== ApplicationStatus.COMPLETED &&
+      dto.status === ApplicationStatus.DOCS_SUBMITTED &&
+      existing.status !== ApplicationStatus.DOCS_SUBMITTED &&
       existing.studentId
     ) {
       const missing = await this.missingRequiredDocs(existing.studentId);
       if (missing.length > 0) {
         throw new BadRequestException(
-          `Невозможно завершить: не загружены документы (${missing.length}): ${missing.join(', ')}`,
+          `Невозможно подать документы: не загружены (${missing.length}): ${missing.join(', ')}`,
         );
       }
     }

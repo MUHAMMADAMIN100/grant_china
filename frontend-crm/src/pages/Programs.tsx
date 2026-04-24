@@ -1,0 +1,262 @@
+import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { createProgram, deleteProgram, listPrograms, updateProgram, type Program } from '../api/programs';
+import type { Direction } from '../api/types';
+import { DIRECTION_LABEL } from '../api/types';
+import { useAuth } from '../store/auth';
+import { useUI } from '../ui/Dialogs';
+import Icon from '../Icon';
+
+const emptyForm: Partial<Program> = {
+  name: '',
+  university: '',
+  city: '',
+  major: '',
+  direction: 'BACHELOR',
+  cost: 0,
+  currency: 'CNY',
+  duration: '',
+  language: '',
+  description: '',
+  published: true,
+};
+
+export default function Programs() {
+  const me = useAuth((s) => s.user);
+  const { confirm, toast } = useUI();
+  const isAdmin = me?.role === 'ADMIN';
+  const [items, setItems] = useState<Program[]>([]);
+  const [search, setSearch] = useState('');
+  const [city, setCity] = useState('');
+  const [major, setMajor] = useState('');
+  const [direction, setDirection] = useState<Direction | ''>('');
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Partial<Program> | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    listPrograms({
+      search: search || undefined,
+      city: city || undefined,
+      major: major || undefined,
+      direction: direction || undefined,
+    })
+      .then(setItems)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    const t = setTimeout(load, 300);
+    return () => clearTimeout(t);
+  }, [search, city, major, direction]);
+
+  const onSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const payload = {
+        ...editing,
+        cost: typeof editing.cost === 'string' ? parseFloat(editing.cost) : editing.cost,
+      };
+      if (editing.id) {
+        await updateProgram(editing.id, payload);
+        toast('Программа обновлена', 'success');
+      } else {
+        await createProgram(payload);
+        toast('Программа создана', 'success');
+      }
+      setEditing(null);
+      load();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onDelete = async (p: Program) => {
+    const ok = await confirm({
+      title: 'Удалить программу',
+      message: `«${p.name}» будет удалена. Студенты, привязанные к ней, останутся без программы.`,
+      confirmText: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteProgram(p.id);
+      toast('Программа удалена', 'success');
+      load();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка', 'error');
+    }
+  };
+
+  return (
+    <motion.div className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="card-header">
+        <h2 className="card-title">Программы обучения</h2>
+        {isAdmin && (
+          <motion.button
+            className="btn btn-primary"
+            onClick={() => setEditing({ ...emptyForm })}
+            whileHover={{ scale: 1.05, y: -2 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Icon name="add" size={16} style={{ marginRight: 4 }} /> Новая программа
+          </motion.button>
+        )}
+      </div>
+      <div className="card-body">
+        <div className="filters">
+          <input placeholder="Поиск..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input placeholder="Город" value={city} onChange={(e) => setCity(e.target.value)} />
+          <input placeholder="Специальность" value={major} onChange={(e) => setMajor(e.target.value)} />
+          <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
+            <option value="">Все направления</option>
+            <option value="BACHELOR">Бакалавриат</option>
+            <option value="MASTER">Магистратура</option>
+            <option value="LANGUAGE">Языковые курсы</option>
+          </select>
+        </div>
+
+        <AnimatePresence mode="wait">
+          {loading ? (
+            <motion.div key="l" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              Загрузка...
+            </motion.div>
+          ) : items.length === 0 ? (
+            <motion.div key="e" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <div className="empty-icon"><Icon name="school" size={48} /></div>
+              Программ пока нет
+            </motion.div>
+          ) : (
+            <motion.div key="g" className="programs-grid" initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}>
+              {items.map((p) => (
+                <motion.div
+                  key={p.id}
+                  className={`program-card${!p.published ? ' unpublished' : ''}`}
+                  variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
+                  whileHover={{ y: -4 }}
+                >
+                  <div className="program-card-head">
+                    <div>
+                      <div className="program-card-name">{p.name}</div>
+                      <div className="program-card-uni">{p.university}</div>
+                    </div>
+                    {isAdmin && (
+                      <div className="program-card-actions">
+                        <button className="btn btn-sm btn-secondary" onClick={() => setEditing({ ...p })}>
+                          <Icon name="edit" size={14} />
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => onDelete(p)}>
+                          <Icon name="delete" size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="program-card-meta">
+                    <span><Icon name="location_on" size={14} /> {p.city}</span>
+                    <span><Icon name="menu_book" size={14} /> {DIRECTION_LABEL[p.direction]}</span>
+                    <span><Icon name="school" size={14} /> {p.major}</span>
+                    {p.duration && <span><Icon name="schedule" size={14} /> {p.duration}</span>}
+                    {p.language && <span><Icon name="translate" size={14} /> {p.language}</span>}
+                  </div>
+                  <div className="program-card-cost">
+                    {p.cost.toLocaleString('ru-RU')} {p.currency} <span>/ год</span>
+                  </div>
+                  {!p.published && <div className="program-card-draft">Скрыто на лендинге</div>}
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Модалка редактирования */}
+      <AnimatePresence>
+        {editing && (
+          <motion.div className="dialog-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !saving && setEditing(null)}>
+            <motion.form
+              className="dialog-card"
+              style={{ maxWidth: 640, textAlign: 'left' }}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={onSave}
+            >
+              <div className="dialog-title" style={{ textAlign: 'left', marginBottom: 14 }}>
+                {editing.id ? 'Редактировать программу' : 'Новая программа'}
+              </div>
+              <div className="form-group">
+                <label>Название программы *</label>
+                <input value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} required />
+              </div>
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label>Университет *</label>
+                  <input value={editing.university || ''} onChange={(e) => setEditing({ ...editing, university: e.target.value })} required />
+                </div>
+                <div className="form-group">
+                  <label>Город *</label>
+                  <input value={editing.city || ''} onChange={(e) => setEditing({ ...editing, city: e.target.value })} required />
+                </div>
+                <div className="form-group">
+                  <label>Специальность *</label>
+                  <input value={editing.major || ''} onChange={(e) => setEditing({ ...editing, major: e.target.value })} required />
+                </div>
+                <div className="form-group">
+                  <label>Направление *</label>
+                  <select value={editing.direction} onChange={(e) => setEditing({ ...editing, direction: e.target.value as Direction })}>
+                    <option value="BACHELOR">Бакалавриат</option>
+                    <option value="MASTER">Магистратура</option>
+                    <option value="LANGUAGE">Языковые курсы</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Стоимость / год *</label>
+                  <input type="number" min={0} value={editing.cost as any || ''} onChange={(e) => setEditing({ ...editing, cost: Number(e.target.value) })} required />
+                </div>
+                <div className="form-group">
+                  <label>Валюта</label>
+                  <select value={editing.currency || 'CNY'} onChange={(e) => setEditing({ ...editing, currency: e.target.value })}>
+                    <option value="CNY">CNY (юань)</option>
+                    <option value="USD">USD</option>
+                    <option value="RUB">RUB</option>
+                    <option value="TJS">TJS</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Длительность</label>
+                  <input value={editing.duration || ''} placeholder="4 года" onChange={(e) => setEditing({ ...editing, duration: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Язык обучения</label>
+                  <input value={editing.language || ''} placeholder="English / Chinese" onChange={(e) => setEditing({ ...editing, language: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Описание</label>
+                <textarea rows={4} value={editing.description || ''} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexDirection: 'row' }}>
+                  <input type="checkbox" checked={editing.published !== false} onChange={(e) => setEditing({ ...editing, published: e.target.checked })} />
+                  Показывать на лендинге
+                </label>
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditing(null)} disabled={saving}>Отмена</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? 'Сохраняем...' : 'Сохранить'}
+                </button>
+              </div>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
