@@ -13,6 +13,7 @@ import {
 import { connectStudentRealtime, useStudentRealtime, getSocket } from '../realtime';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import EnrollmentProgress from '../components/EnrollmentProgress';
+import ProgramsSection from '../components/ProgramsSection';
 import Icon from '../Icon';
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -171,6 +172,15 @@ export default function StudentCabinet() {
           <EnrollmentProgress
             currentStatus={me.applications?.[0]?.status}
           />
+        </motion.div>
+
+        {/* Каталог программ */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.05 }}
+        >
+          <ProgramsSection />
         </motion.div>
 
         {/* Профиль */}

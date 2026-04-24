@@ -1,14 +1,28 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Direction, Prisma, Role } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { Direction, Prisma, Program, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProgramDto } from './dto/create-program.dto';
 import { UpdateProgramDto } from './dto/update-program.dto';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { TelegramService } from '../telegram/telegram.service';
 
 type CurrentUser = { id: string; role: Role };
 
+const DIRECTION_LABEL: Record<Direction, string> = {
+  BACHELOR: 'Бакалавриат',
+  MASTER: 'Магистратура',
+  LANGUAGE: 'Языковые курсы',
+};
+
 @Injectable()
 export class ProgramsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private realtime: RealtimeGateway,
+    private telegram: TelegramService,
+    private config: ConfigService,
+  ) {}
 
   async findAll(filters: {
     city?: string;
@@ -53,7 +67,7 @@ export class ProgramsService {
     if (user.role !== 'ADMIN') {
       throw new ForbiddenException('Только администратор может создавать программы');
     }
-    return this.prisma.program.create({
+    const program = await this.prisma.program.create({
       data: {
         name: dto.name.trim(),
         university: dto.university.trim(),
@@ -69,6 +83,11 @@ export class ProgramsService {
         published: dto.published ?? true,
       },
     });
+
+    this.realtime.emitStaff('program:new', { program });
+    this.notifyChannelNew(program).catch(() => undefined);
+
+    return program;
   }
 
   async update(id: string, dto: UpdateProgramDto, user: CurrentUser) {
@@ -76,7 +95,9 @@ export class ProgramsService {
       throw new ForbiddenException('Только администратор может редактировать программы');
     }
     await this.findOne(id);
-    return this.prisma.program.update({ where: { id }, data: dto });
+    const updated = await this.prisma.program.update({ where: { id }, data: dto });
+    this.realtime.emitStaff('program:updated', { program: updated });
+    return updated;
   }
 
   async remove(id: string, user: CurrentUser) {
@@ -85,6 +106,7 @@ export class ProgramsService {
     }
     await this.findOne(id);
     await this.prisma.program.delete({ where: { id } });
+    this.realtime.emitStaff('program:deleted', { id });
     return { ok: true };
   }
 
@@ -107,5 +129,39 @@ export class ProgramsService {
       cities: cities.map((c) => c.city),
       majors: majors.map((m) => m.major),
     };
+  }
+
+  private async notifyChannelNew(program: Program) {
+    if (!program.published) return;
+    const caption =
+      `🎓 *Новая программа в GrantChina*\n\n` +
+      `📚 *${this.escape(program.name)}*\n` +
+      `🏛 ${this.escape(program.university)}\n` +
+      `📍 ${this.escape(program.city)}\n` +
+      `🎯 ${this.escape(program.major)} · ${DIRECTION_LABEL[program.direction]}\n` +
+      (program.duration ? `⏱ ${this.escape(program.duration)}\n` : '') +
+      (program.language ? `🌐 ${this.escape(program.language)}\n` : '') +
+      `\n💰 Стоимость: *${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год\n` +
+      (program.description ? `\n${this.escape(program.description.slice(0, 600))}` : '');
+
+    const publicBase = this.config.get<string>('PUBLIC_API_BASE');
+    const photoUrl = program.imageUrl
+      ? program.imageUrl.startsWith('http')
+        ? program.imageUrl
+        : publicBase
+          ? `${publicBase}${program.imageUrl}`
+          : null
+      : null;
+
+    if (photoUrl) {
+      await this.telegram.sendPhotoToChannel(photoUrl, caption);
+    } else {
+      await this.telegram.sendToChannel(caption);
+    }
+  }
+
+  private escape(s: string): string {
+    // Экранируем Markdown-символы, ломающие parse_mode=Markdown
+    return s.replace(/([_*[\]`])/g, '\\$1');
   }
 }

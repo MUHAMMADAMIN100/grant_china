@@ -89,3 +89,37 @@ export async function saveStudentForm(form: ApplicationFormData) {
   const { data } = await client.patch<{ form: ApplicationFormData }>('/student-auth/form', form);
   return data.form;
 }
+
+export interface StudentProgram {
+  id: string;
+  name: string;
+  university: string;
+  city: string;
+  major: string;
+  direction: 'BACHELOR' | 'MASTER' | 'LANGUAGE';
+  cost: number;
+  currency: string;
+  duration: string | null;
+  language: string | null;
+  description: string | null;
+  imageUrl: string | null;
+  published: boolean;
+  createdAt: string;
+}
+
+export async function listStudentPrograms(filters: {
+  city?: string;
+  major?: string;
+  direction?: string;
+  minCost?: number;
+  maxCost?: number;
+  search?: string;
+} = {}) {
+  const { data } = await client.get<StudentProgram[]>('/student-auth/programs', { params: filters });
+  return data;
+}
+
+export async function getStudentProgramFilters() {
+  const { data } = await client.get<{ cities: string[]; majors: string[] }>('/student-auth/programs/filters');
+  return data;
+}

@@ -5,6 +5,7 @@ import type { Direction } from '../api/types';
 import { DIRECTION_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
+import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 
 const emptyForm: Partial<Program> = {
@@ -50,6 +51,12 @@ export default function Programs() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
   }, [search, city, major, direction]);
+
+  useRealtime({
+    'program:new': () => load(),
+    'program:updated': () => load(),
+    'program:deleted': () => load(),
+  });
 
   const onSave = async (e: React.FormEvent) => {
     e.preventDefault();

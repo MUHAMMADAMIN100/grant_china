@@ -7,10 +7,12 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Direction } from '@prisma/client';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -105,6 +107,63 @@ export class StudentAuthController {
     this.realtime.emitStudentAndStaff(user.id, 'document:uploaded', { studentId: user.id, doc });
     this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
     return doc;
+  }
+
+  // Программы — доступны студенту (только опубликованные)
+  @UseGuards(StudentJwtGuard)
+  @Get('programs')
+  async listPrograms(
+    @Query('city') city?: string,
+    @Query('major') major?: string,
+    @Query('direction') direction?: Direction,
+    @Query('minCost') minCost?: string,
+    @Query('maxCost') maxCost?: string,
+    @Query('search') search?: string,
+  ) {
+    const where: any = { published: true };
+    if (city) where.city = { contains: city, mode: 'insensitive' };
+    if (major) where.major = { contains: major, mode: 'insensitive' };
+    if (direction) where.direction = direction;
+    if (minCost || maxCost) {
+      where.cost = {};
+      if (minCost) where.cost.gte = Number(minCost);
+      if (maxCost) where.cost.lte = Number(maxCost);
+    }
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { university: { contains: search, mode: 'insensitive' } },
+        { major: { contains: search, mode: 'insensitive' } },
+        { city: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    return this.prisma.program.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  @UseGuards(StudentJwtGuard)
+  @Get('programs/filters')
+  async programFilters() {
+    const [cities, majors] = await Promise.all([
+      this.prisma.program.findMany({
+        where: { published: true },
+        select: { city: true },
+        distinct: ['city'],
+        orderBy: { city: 'asc' },
+      }),
+      this.prisma.program.findMany({
+        where: { published: true },
+        select: { major: true },
+        distinct: ['major'],
+        orderBy: { major: 'asc' },
+      }),
+    ]);
+    return {
+      cities: cities.map((c) => c.city),
+      majors: majors.map((m) => m.major),
+    };
   }
 
   @UseGuards(StudentJwtGuard)

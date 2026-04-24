@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { submitApplication, type Direction } from '../api';
 import { fadeUp, staggerContainer, viewportOnce } from '../motion';
-import { getPublicProgram, type Program } from '../programs';
 import Icon from '../Icon';
 
 const MAX_NAME = 100;
@@ -39,20 +38,6 @@ export default function ApplicationForm() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [preselectedProgram, setPreselectedProgram] = useState<Program | null>(null);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const pid = params.get('program');
-    if (pid) {
-      getPublicProgram(pid)
-        .then((p) => {
-          setPreselectedProgram(p);
-          setDirection(p.direction);
-        })
-        .catch(() => {});
-    }
-  }, []);
 
   const validateField = (field: keyof Errors, value: string): string | undefined => {
     if (field === 'fullName') {
@@ -137,7 +122,6 @@ export default function ApplicationForm() {
         email: email.trim() || undefined,
         direction,
         comment: comment.trim() || undefined,
-        programId: preselectedProgram?.id,
       });
       setSuccess(true);
       // Аналитика: событие конверсии
@@ -184,30 +168,6 @@ export default function ApplicationForm() {
           viewport={viewportOnce}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
         >
-          {preselectedProgram && (
-            <motion.div
-              className="form-program-badge"
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <Icon name="school" size={20} />
-              <div>
-                <div style={{ fontWeight: 700 }}>{preselectedProgram.name}</div>
-                <div style={{ fontSize: 12, opacity: 0.8 }}>
-                  {preselectedProgram.university} · {preselectedProgram.city}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="form-program-clear"
-                onClick={() => setPreselectedProgram(null)}
-                title="Убрать программу"
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </motion.div>
-          )}
-
           <AnimatePresence>
             {success && (
               <motion.div
