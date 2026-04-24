@@ -218,9 +218,21 @@ function findImageFile(key: string): string | null {
   return null;
 }
 
+function detectExt(srcPath: string): string {
+  const fd = fs.openSync(srcPath, 'r');
+  const buf = Buffer.alloc(12);
+  fs.readSync(fd, buf, 0, 12, 0);
+  fs.closeSync(fd);
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return '.png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
+  if (buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') return '.webp';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return '.gif';
+  return path.extname(srcPath).toLowerCase() || '.bin';
+}
+
 function copyToUploads(srcPath: string): string {
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  const ext = path.extname(srcPath).toLowerCase();
+  const ext = detectExt(srcPath);
   const dstName = `${randomUUID()}${ext}`;
   const dstPath = path.join(UPLOADS_DIR, dstName);
   fs.copyFileSync(srcPath, dstPath);
