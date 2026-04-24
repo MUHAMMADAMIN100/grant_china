@@ -1,20 +1,35 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { Direction } from '@prisma/client';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
+import { randomUUID } from 'crypto';
 import { ProgramsService } from './programs.service';
 import { CreateProgramDto } from './dto/create-program.dto';
 import { UpdateProgramDto } from './dto/update-program.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+
+const programImageStorage = diskStorage({
+  destination: process.env.UPLOADS_DIR || './uploads',
+  filename: (_req, file, cb) => {
+    cb(null, `${randomUUID()}${extname(file.originalname)}`);
+  },
+});
 
 @Controller('programs')
 export class ProgramsController {
@@ -85,5 +100,32 @@ export class ProgramsController {
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: any) {
     return this.programs.remove(id, user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/image')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: programImageStorage,
+      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
+      fileFilter: (_req, file, cb) => {
+        if (!/^image\//.test(file.mimetype)) {
+          return cb(new BadRequestException('Нужен файл-картинка'), false);
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async uploadImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: any,
+  ) {
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException('Только администратор');
+    }
+    if (!file) throw new BadRequestException('Файл не передан');
+    const imageUrl = `/uploads/${file.filename}`;
+    return this.programs.update(id, { imageUrl } as any, user);
   }
 }

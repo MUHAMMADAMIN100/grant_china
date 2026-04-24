@@ -9,6 +9,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "prisma db push --accept-data-loss && node dist/main",
     "seed": "ts-node prisma/seed.ts",
+    "seed:programs": "ts-node prisma/seed-programs.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "postinstall": "prisma generate"

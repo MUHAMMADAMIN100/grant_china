@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { createProgram, deleteProgram, listPrograms, updateProgram, type Program } from '../api/programs';
+import { createProgram, deleteProgram, listPrograms, programImageUrl, updateProgram, uploadProgramImage, type Program } from '../api/programs';
 import type { Direction } from '../api/types';
 import { DIRECTION_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
@@ -34,6 +34,8 @@ export default function Programs() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Partial<Program> | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -80,6 +82,25 @@ export default function Programs() {
       toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onUploadImage = async (file: File) => {
+    if (!editing?.id) {
+      toast('Сначала сохраните программу, затем загрузите картинку', 'info');
+      return;
+    }
+    setUploadingImage(true);
+    try {
+      const updated = await uploadProgramImage(editing.id, file);
+      setEditing({ ...editing, imageUrl: updated.imageUrl });
+      toast('Картинка загружена', 'success');
+      load();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка загрузки', 'error');
+    } finally {
+      setUploadingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
     }
   };
 
@@ -147,6 +168,11 @@ export default function Programs() {
                   variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
                   whileHover={{ y: -4 }}
                 >
+                  {p.imageUrl && (
+                    <div className="program-card-img">
+                      <img src={programImageUrl(p.imageUrl)!} alt="" />
+                    </div>
+                  )}
                   <div className="program-card-head">
                     <div>
                       <div className="program-card-name">{p.name}</div>
@@ -247,6 +273,41 @@ export default function Programs() {
               <div className="form-group">
                 <label>Описание</label>
                 <textarea rows={4} value={editing.description || ''} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Картинка программы</label>
+                {editing.id ? (
+                  <div className="program-image-uploader">
+                    {editing.imageUrl && (
+                      <div className="program-image-preview">
+                        <img src={programImageUrl(editing.imageUrl)!} alt="" />
+                      </div>
+                    )}
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) onUploadImage(f);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={uploadingImage}
+                      onClick={() => imageInputRef.current?.click()}
+                    >
+                      <Icon name="image" size={16} style={{ marginRight: 6 }} />
+                      {uploadingImage ? 'Загружаем...' : editing.imageUrl ? 'Заменить' : 'Загрузить'}
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: '#64748b' }}>
+                    Сначала сохраните программу — картинку можно будет загрузить после.
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexDirection: 'row' }}>

@@ -42,3 +42,20 @@ export async function deleteProgram(id: string) {
   const { data } = await api.delete(`/programs/${id}`);
   return data;
 }
+
+export async function uploadProgramImage(id: string, file: File) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const { data } = await api.post<Program>(`/programs/${id}/image`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+const apiRoot = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
+
+export function programImageUrl(imageUrl: string | null | undefined): string | null {
+  if (!imageUrl) return null;
+  if (imageUrl.startsWith('http')) return imageUrl;
+  return `${apiRoot}${imageUrl}`;
+}
