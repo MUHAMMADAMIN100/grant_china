@@ -28,7 +28,19 @@ export async function getProgram(id: string) {
   return data;
 }
 
-export async function createProgram(payload: Partial<Program>) {
+export async function createProgram(payload: Partial<Program>, file?: File | null) {
+  if (file) {
+    const fd = new FormData();
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v === undefined || v === null) return;
+      fd.append(k, typeof v === 'boolean' ? String(v) : String(v));
+    });
+    fd.append('file', file);
+    const { data } = await api.post<Program>('/programs', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  }
   const { data } = await api.post<Program>('/programs', payload);
   return data;
 }

@@ -86,7 +86,50 @@ export class ProgramsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  create(@Body() dto: CreateProgramDto, @CurrentUser() user: any) {
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: programImageStorage,
+      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
+      fileFilter: (_req, file, cb) => {
+        if (!/^image\//.test(file.mimetype)) {
+          return cb(new BadRequestException('Нужен файл-картинка'), false);
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async create(
+    @Body() body: any,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() user: any,
+  ) {
+    // multipart-поля приходят строками — приводим к нужным типам
+    const dto: CreateProgramDto = {
+      name: String(body.name ?? ''),
+      university: String(body.university ?? ''),
+      city: String(body.city ?? ''),
+      major: String(body.major ?? ''),
+      direction: body.direction as Direction,
+      cost: body.cost !== undefined ? Number(body.cost) : 0,
+      currency: body.currency || undefined,
+      duration: body.duration || undefined,
+      language: body.language || undefined,
+      description: body.description || undefined,
+      imageUrl: body.imageUrl || undefined,
+      published:
+        typeof body.published === 'string'
+          ? body.published === 'true'
+          : body.published,
+    };
+    if (file) {
+      dto.imageUrl = `/uploads/${file.filename}`;
+    }
+    if (!dto.name || !dto.university || !dto.city || !dto.major || !dto.direction) {
+      throw new BadRequestException('Заполните обязательные поля программы');
+    }
+    if (!Number.isFinite(dto.cost)) {
+      throw new BadRequestException('Стоимость должна быть числом');
+    }
     return this.programs.create(dto, user);
   }
 

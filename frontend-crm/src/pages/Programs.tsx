@@ -35,7 +35,30 @@ export default function Programs() {
   const [editing, setEditing] = useState<Partial<Program> | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pendingPreview) URL.revokeObjectURL(pendingPreview);
+    };
+  }, [pendingPreview]);
+
+  const openCreate = () => {
+    setPendingImage(null);
+    setPendingPreview(null);
+    setEditing({ ...emptyForm });
+  };
+
+  const closeEditor = () => {
+    setEditing(null);
+    setPendingImage(null);
+    if (pendingPreview) {
+      URL.revokeObjectURL(pendingPreview);
+      setPendingPreview(null);
+    }
+  };
 
   const load = () => {
     setLoading(true);
@@ -73,15 +96,27 @@ export default function Programs() {
         await updateProgram(editing.id, payload);
         toast('Программа обновлена', 'success');
       } else {
-        await createProgram(payload);
+        await createProgram(payload, pendingImage);
         toast('Программа создана', 'success');
       }
-      setEditing(null);
+      closeEditor();
       load();
     } catch (e: any) {
       toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onPickImage = (file: File) => {
+    if (editing?.id) {
+      // существующая программа — грузим сразу через отдельный endpoint
+      onUploadImage(file);
+    } else {
+      // новая — держим в памяти, отправим вместе с создания
+      setPendingImage(file);
+      if (pendingPreview) URL.revokeObjectURL(pendingPreview);
+      setPendingPreview(URL.createObjectURL(file));
     }
   };
 
@@ -128,7 +163,7 @@ export default function Programs() {
         {isAdmin && (
           <motion.button
             className="btn btn-primary"
-            onClick={() => setEditing({ ...emptyForm })}
+            onClick={openCreate}
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
           >
@@ -210,7 +245,7 @@ export default function Programs() {
       {/* Модалка редактирования */}
       <AnimatePresence>
         {editing && (
-          <motion.div className="dialog-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !saving && setEditing(null)}>
+          <motion.div className="dialog-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !saving && closeEditor()}>
             <motion.form
               className="dialog-card"
               style={{ maxWidth: 640, textAlign: 'left' }}
@@ -276,38 +311,45 @@ export default function Programs() {
               </div>
               <div className="form-group">
                 <label>Картинка программы</label>
-                {editing.id ? (
-                  <div className="program-image-uploader">
-                    {editing.imageUrl && (
-                      <div className="program-image-preview">
-                        <img src={programImageUrl(editing.imageUrl)!} alt="" />
-                      </div>
-                    )}
-                    <input
-                      ref={imageInputRef}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) onUploadImage(f);
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={uploadingImage}
-                      onClick={() => imageInputRef.current?.click()}
-                    >
-                      <Icon name="image" size={16} style={{ marginRight: 6 }} />
-                      {uploadingImage ? 'Загружаем...' : editing.imageUrl ? 'Заменить' : 'Загрузить'}
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13, color: '#64748b' }}>
-                    Сначала сохраните программу — картинку можно будет загрузить после.
-                  </div>
-                )}
+                <div className="program-image-uploader">
+                  {(pendingPreview || editing.imageUrl) && (
+                    <div className="program-image-preview">
+                      <img
+                        src={pendingPreview || programImageUrl(editing.imageUrl)!}
+                        alt=""
+                      />
+                    </div>
+                  )}
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onPickImage(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={uploadingImage}
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    <Icon name="image" size={16} style={{ marginRight: 6 }} />
+                    {uploadingImage
+                      ? 'Загружаем...'
+                      : pendingPreview || editing.imageUrl
+                        ? 'Заменить'
+                        : 'Загрузить'}
+                  </button>
+                  {!editing.id && pendingImage && (
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+                      Картинка отправится вместе с программой при сохранении.
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="form-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexDirection: 'row' }}>
@@ -316,7 +358,7 @@ export default function Programs() {
                 </label>
               </div>
               <div className="form-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setEditing(null)} disabled={saving}>Отмена</button>
+                <button type="button" className="btn btn-secondary" onClick={closeEditor} disabled={saving}>Отмена</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   {saving ? 'Сохраняем...' : 'Сохранить'}
                 </button>
