@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-type Provider = 'smsru' | 'twilio' | 'none';
+type Provider = 'smsru' | 'twilio' | 'payom' | 'none';
 
 @Injectable()
 export class SmsService {
@@ -16,6 +16,11 @@ export class SmsService {
   private twilioSid: string | null = null;
   private twilioToken: string | null = null;
   private twilioFrom: string | null = null;
+
+  // Payom.tj
+  private payomUrl: string | null = null;
+  private payomToken: string | null = null;
+  private payomSender: string | null = null;
 
   constructor(private config: ConfigService) {
     const raw = (config.get<string>('SMS_PROVIDER') || '').toLowerCase().trim();
@@ -41,8 +46,20 @@ export class SmsService {
           'SMS_PROVIDER=twilio but TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_FROM missing — SMS disabled',
         );
       }
+    } else if (raw === 'payom') {
+      this.payomUrl = (config.get<string>('PAYOM_API_URL') || 'https://payom.tj').replace(/\/+$/, '');
+      this.payomToken = config.get<string>('PAYOM_TOKEN') || null;
+      this.payomSender = config.get<string>('PAYOM_SENDER') || null;
+      if (this.payomToken && this.payomSender) {
+        this.provider = 'payom';
+        this.logger.log(`SMS enabled (Payom.tj, sender=${this.payomSender})`);
+      } else {
+        this.logger.warn(
+          'SMS_PROVIDER=payom but PAYOM_TOKEN/PAYOM_SENDER missing — SMS disabled',
+        );
+      }
     } else {
-      this.logger.warn('SMS disabled (SMS_PROVIDER not set; expected smsru | twilio)');
+      this.logger.warn('SMS disabled (SMS_PROVIDER not set; expected smsru | twilio | payom)');
     }
   }
 
@@ -66,6 +83,9 @@ export class SmsService {
       if (this.provider === 'twilio') {
         return await this.sendTwilio(to, message);
       }
+      if (this.provider === 'payom') {
+        return await this.sendPayom(to, message);
+      }
     } catch (err) {
       this.logger.error(`SMS send failed (${this.provider}): ${(err as Error).message}`);
     }
@@ -88,6 +108,41 @@ export class SmsService {
       return true;
     }
     this.logger.warn(`SMS.ru → ${to}: ${JSON.stringify(data)}`);
+    return false;
+  }
+
+  /**
+   * Payom.tj — таджикский SMS-шлюз. POST {PAYOM_API_URL}/api/message
+   * Bearer token, JSON body { telephone, text, senderName, type: "SMS" }.
+   * Успех: HTTP 201 + JSON c deliveryStatus.
+   */
+  private async sendPayom(to: string, text: string): Promise<boolean> {
+    const url = `${this.payomUrl}/api/message`;
+    const phone = to.startsWith('+') ? to : `+${to}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.payomToken}`,
+      },
+      body: JSON.stringify({
+        telephone: phone,
+        text,
+        senderName: this.payomSender,
+        type: 'SMS',
+      }),
+    });
+
+    if (res.status === 201 || res.ok) {
+      const data: any = await res.json().catch(() => ({}));
+      this.logger.log(
+        `Payom.tj → ${phone}: ${data?.deliveryStatusLabel || data?.deliveryStatus || 'ok'} (${data?.id || '—'})`,
+      );
+      return true;
+    }
+    const errBody = await res.text().catch(() => '');
+    this.logger.warn(`Payom.tj → ${phone}: ${res.status} ${errBody}`);
     return false;
   }
 
