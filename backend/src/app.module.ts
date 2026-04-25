@@ -12,6 +12,7 @@ import { FilesModule } from './files/files.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { MailModule } from './mail/mail.module';
+import { SmsModule } from './sms/sms.module';
 import { TasksModule } from './tasks/tasks.module';
 import { StudentAuthModule } from './student-auth/student-auth.module';
 import { RealtimeModule } from './realtime/realtime.module';
@@ -33,6 +34,7 @@ import { ProgramsModule } from './programs/programs.module';
     NotificationsModule,
     TelegramModule,
     MailModule,
+    SmsModule,
     TasksModule,
     StudentAuthModule,
     RealtimeModule,

@@ -6,6 +6,7 @@ import { UpdateApplicationDto } from './dto/update-application.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MailService } from '../mail/mail.service';
+import { SmsService } from '../sms/sms.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
@@ -55,8 +56,20 @@ export class ApplicationsService {
     private notifications: NotificationsService,
     private telegram: TelegramService,
     private mail: MailService,
+    private sms: SmsService,
     private realtime: RealtimeGateway,
   ) {}
+
+  private static STATUS_LABEL: Record<ApplicationStatus, string> = {
+    NEW: 'Новая заявка',
+    IN_PROGRESS: 'В работе',
+    COMPLETED: 'Завершена',
+    DOCS_REVIEW: 'Документы на проверке',
+    DOCS_SUBMITTED: 'Документы поданы',
+    PRE_ADMISSION: 'Предварительное зачисление',
+    AWAITING_PAYMENT: 'Ожидание оплаты',
+    ENROLLED: 'Зачислен',
+  };
 
   async create(dto: CreateApplicationDto) {
     const app = await this.prisma.application.create({
@@ -95,6 +108,14 @@ export class ApplicationsService {
          ${app.email ? `<p><b>Email:</b> ${app.email}</p>` : ''}
          <p><b>Направление:</b> ${DIRECTION_LABEL[app.direction]}</p>
          ${app.comment ? `<p><b>Комментарий:</b> ${app.comment}</p>` : ''}`,
+      )
+      .catch(() => undefined);
+
+    // SMS студенту: подтверждение получения заявки
+    this.sms
+      .send(
+        app.phone,
+        `GrantChina: Ваша заявка получена. Менеджер свяжется с Вами в ближайшее время.`,
       )
       .catch(() => undefined);
 
@@ -196,6 +217,13 @@ export class ApplicationsService {
       if (updated.studentId) {
         this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
       }
+      // SMS студенту: статус изменился на «Документы на проверке»
+      if (updated.phone) {
+        const label = ApplicationsService.STATUS_LABEL[ApplicationStatus.DOCS_REVIEW];
+        this.sms
+          .send(updated.phone, `GrantChina: Статус Вашей заявки изменён → «${label}».`)
+          .catch(() => undefined);
+      }
       return updated;
     }
 
@@ -222,6 +250,15 @@ export class ApplicationsService {
     if (updated.studentId) {
       this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
     }
+
+    // SMS студенту при смене статуса
+    if (dto.status && dto.status !== existing.status && updated.phone) {
+      const label = ApplicationsService.STATUS_LABEL[dto.status] || dto.status;
+      this.sms
+        .send(updated.phone, `GrantChina: Статус Вашей заявки изменён → «${label}».`)
+        .catch(() => undefined);
+    }
+
     return updated;
   }
 
