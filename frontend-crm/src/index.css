@@ -631,6 +631,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   border-radius: 12px; padding: 16px;
   display: flex; flex-direction: column; gap: 10px;
   transition: all 0.2s;
+  height: 100%;
 }
 .program-card:hover { box-shadow: var(--shadow); }
 .program-card.unpublished { opacity: 0.6; border-style: dashed; }
@@ -671,6 +672,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .program-card-cost {
   font-size: 18px; font-weight: 700; color: var(--primary);
   padding-top: 8px; border-top: 1px solid var(--border);
+  margin-top: auto;
 }
 .program-card-cost span { font-size: 12px; color: var(--text-soft); font-weight: 500; }
 .program-card-draft {
