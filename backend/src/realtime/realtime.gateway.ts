@@ -51,6 +51,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         client.join(`user:${id}`);
       } else if (role === 'STUDENT') {
         client.join(`student:${id}`);
+        client.join('students');
       }
       this.logger.log(`Connected: ${role} ${id}`);
     } catch (err) {
@@ -77,6 +78,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   /** Конкретному студенту (в его ЛК) */
   emitStudent(studentId: string, event: string, payload: any) {
     this.server?.to(`student:${studentId}`).emit(event, payload);
+  }
+
+  /** Всем подключённым студентам сразу (для каталога программ и т.п.) */
+  emitAllStudents(event: string, payload: any) {
+    this.server?.to('students').emit(event, payload);
   }
 
   /** Всем кто касается этого студента — и сам студент, и staff */

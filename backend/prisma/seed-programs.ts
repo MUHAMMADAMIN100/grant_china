@@ -16,12 +16,12 @@ function escMd(s: string): string {
   return s.replace(/([_*[\]`])/g, '\\$1');
 }
 
-async function postToChannel(program: Program) {
+async function postToChannel(program: Program): Promise<{ messageId: number; hasPhoto: boolean } | null> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   if (!token || !channelId) {
     console.log('  (TELEGRAM_BOT_TOKEN/TELEGRAM_CHANNEL_ID не заданы — пропускаем пост в канал)');
-    return;
+    return null;
   }
 
   const caption =
@@ -47,16 +47,20 @@ async function postToChannel(program: Program) {
   const bot = new Telegraf(token);
   try {
     if (photoUrl) {
-      await bot.telegram.sendPhoto(channelId, photoUrl, {
+      const res = await bot.telegram.sendPhoto(channelId, photoUrl, {
         caption,
         parse_mode: 'Markdown',
       });
+      console.log(`  📡 Пост в Telegram-канал отправлен (с фото, msg ${res.message_id})`);
+      return { messageId: res.message_id, hasPhoto: true };
     } else {
-      await bot.telegram.sendMessage(channelId, caption, { parse_mode: 'Markdown' });
+      const res = await bot.telegram.sendMessage(channelId, caption, { parse_mode: 'Markdown' });
+      console.log(`  📡 Пост в Telegram-канал отправлен (текст, msg ${res.message_id})`);
+      return { messageId: res.message_id, hasPhoto: false };
     }
-    console.log(`  📡 Пост в Telegram-канал отправлен`);
   } catch (e: any) {
     console.log(`  ⚠️  Не удалось отправить в канал: ${e?.message || e}`);
+    return null;
   }
 }
 
@@ -356,7 +360,13 @@ async function main() {
         },
       });
       console.log(`  ➕ Создано:   ${p.name}`);
-      await postToChannel(created);
+      const tg = await postToChannel(created);
+      if (tg) {
+        await prisma.program.update({
+          where: { id: created.id },
+          data: { telegramMessageId: tg.messageId, telegramHasPhoto: tg.hasPhoto },
+        });
+      }
     }
   }
 

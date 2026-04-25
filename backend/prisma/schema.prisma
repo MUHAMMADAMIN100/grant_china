@@ -150,21 +150,23 @@ model Task {
 }
 
 model Program {
-  id           String    @id @default(uuid())
-  name         String
-  university   String
-  city         String
-  major        String
-  direction    Direction
-  cost         Float
-  currency     String    @default("CNY")
-  duration     String?
-  language     String?
-  description  String?
-  imageUrl     String?
-  published    Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  name               String
+  university         String
+  city               String
+  major              String
+  direction          Direction
+  cost               Float
+  currency           String    @default("CNY")
+  duration           String?
+  language           String?
+  description        String?
+  imageUrl           String?
+  published          Boolean   @default(true)
+  telegramMessageId  Int?
+  telegramHasPhoto   Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   applications Application[]
   students     Student[]

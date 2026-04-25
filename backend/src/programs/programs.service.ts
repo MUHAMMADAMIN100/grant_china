@@ -85,6 +85,9 @@ export class ProgramsService {
     });
 
     this.realtime.emitStaff('program:new', { program });
+    this.realtime.emitAllStudents('program:new', { program });
+
+    // Шлём в канал и сохраняем message_id для последующего edit/delete
     this.notifyChannelNew(program).catch(() => undefined);
 
     return program;
@@ -94,9 +97,20 @@ export class ProgramsService {
     if (user.role !== 'ADMIN') {
       throw new ForbiddenException('Только администратор может редактировать программы');
     }
-    await this.findOne(id);
+    const existing = await this.findOne(id);
     const updated = await this.prisma.program.update({ where: { id }, data: dto });
+
     this.realtime.emitStaff('program:updated', { program: updated });
+    this.realtime.emitAllStudents('program:updated', { program: updated });
+
+    // Если у программы был пост в канале — обновляем его
+    if (existing.telegramMessageId) {
+      this.notifyChannelUpdate(updated).catch(() => undefined);
+    } else if (updated.published) {
+      // Если поста ещё не было (например, программа была не published) — создаём сейчас
+      this.notifyChannelNew(updated).catch(() => undefined);
+    }
+
     return updated;
   }
 
@@ -104,9 +118,18 @@ export class ProgramsService {
     if (user.role !== 'ADMIN') {
       throw new ForbiddenException('Только администратор может удалять программы');
     }
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+
+    // Сначала пытаемся удалить пост в канале (пока запись ещё есть, есть message_id)
+    if (existing.telegramMessageId) {
+      await this.notifyChannelDelete(existing).catch(() => undefined);
+    }
+
     await this.prisma.program.delete({ where: { id } });
+
     this.realtime.emitStaff('program:deleted', { id });
+    this.realtime.emitAllStudents('program:deleted', { id });
+
     return { ok: true };
   }
 
@@ -131,10 +154,9 @@ export class ProgramsService {
     };
   }
 
-  private async notifyChannelNew(program: Program) {
-    if (!program.published) return;
-    const caption =
-      `🎓 *Новая программа в GrantChina*\n\n` +
+  private buildCaption(program: Program, header = '🎓 *Новая программа в GrantChina*'): string {
+    return (
+      `${header}\n\n` +
       `📚 *${this.escape(program.name)}*\n` +
       `🏛 ${this.escape(program.university)}\n` +
       `📍 ${this.escape(program.city)}\n` +
@@ -142,21 +164,96 @@ export class ProgramsService {
       (program.duration ? `⏱ ${this.escape(program.duration)}\n` : '') +
       (program.language ? `🌐 ${this.escape(program.language)}\n` : '') +
       `\n💰 Стоимость: *${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год\n` +
-      (program.description ? `\n${this.escape(program.description.slice(0, 600))}` : '');
+      (program.description ? `\n${this.escape(program.description.slice(0, 600))}` : '')
+    );
+  }
 
+  private buildPhotoUrl(program: Program): string | null {
+    if (!program.imageUrl) return null;
+    if (program.imageUrl.startsWith('http')) return program.imageUrl;
     const publicBase = this.config.get<string>('PUBLIC_API_BASE');
-    const photoUrl = program.imageUrl
-      ? program.imageUrl.startsWith('http')
-        ? program.imageUrl
-        : publicBase
-          ? `${publicBase}${program.imageUrl}`
-          : null
-      : null;
+    return publicBase ? `${publicBase}${program.imageUrl}` : null;
+  }
+
+  private async notifyChannelNew(program: Program) {
+    if (!program.published) return;
+    const caption = this.buildCaption(program);
+    const photoUrl = this.buildPhotoUrl(program);
+
+    let messageId: number | null = null;
+    let hasPhoto = false;
 
     if (photoUrl) {
-      await this.telegram.sendPhotoToChannel(photoUrl, caption);
+      const res = await this.telegram.sendPhotoToChannel(photoUrl, caption);
+      if (res) {
+        messageId = res.messageId;
+        hasPhoto = res.hasPhoto;
+      }
     } else {
-      await this.telegram.sendToChannel(caption);
+      messageId = await this.telegram.sendToChannel(caption);
+      hasPhoto = false;
+    }
+
+    if (messageId) {
+      await this.prisma.program.update({
+        where: { id: program.id },
+        data: { telegramMessageId: messageId, telegramHasPhoto: hasPhoto },
+      });
+    }
+  }
+
+  private async notifyChannelUpdate(program: Program) {
+    if (!program.telegramMessageId) return;
+    const caption = this.buildCaption(program, '🎓 *Программа GrantChina*');
+    const photoUrl = this.buildPhotoUrl(program);
+
+    if (program.telegramHasPhoto) {
+      // Сообщение с фото
+      if (photoUrl) {
+        // Пробуем перезалить media (если фото поменялось) — это и текст обновит
+        const ok = await this.telegram.editChannelMedia(program.telegramMessageId, photoUrl, caption);
+        if (!ok) {
+          // Если media не поменялась — просто обновим caption
+          await this.telegram.editChannelCaption(program.telegramMessageId, caption);
+        }
+      } else {
+        // Фото убрали → editMessageMedia не умеет менять тип; редактируем только подпись
+        await this.telegram.editChannelCaption(program.telegramMessageId, caption);
+      }
+    } else {
+      // Сообщение текстовое
+      if (photoUrl) {
+        // Хочется добавить фото к текстовому посту, но Telegram такое не умеет.
+        // Удаляем текстовое и публикуем новое с фото.
+        const deleted = await this.telegram.deleteChannelMessage(program.telegramMessageId);
+        if (deleted) {
+          const res = await this.telegram.sendPhotoToChannel(photoUrl, caption);
+          if (res) {
+            await this.prisma.program.update({
+              where: { id: program.id },
+              data: { telegramMessageId: res.messageId, telegramHasPhoto: res.hasPhoto },
+            });
+          }
+        } else {
+          await this.telegram.editChannelText(program.telegramMessageId, caption);
+        }
+      } else {
+        await this.telegram.editChannelText(program.telegramMessageId, caption);
+      }
+    }
+  }
+
+  private async notifyChannelDelete(program: Program) {
+    if (!program.telegramMessageId) return;
+    const ok = await this.telegram.deleteChannelMessage(program.telegramMessageId);
+    if (ok) return;
+    // Не получилось удалить (старше 48 часов / нет прав) — помечаем пост
+    const cancelled =
+      `~${this.escape(program.name)}~\n\n❌ *Программа снята с публикации*`;
+    if (program.telegramHasPhoto) {
+      await this.telegram.editChannelCaption(program.telegramMessageId, cancelled);
+    } else {
+      await this.telegram.editChannelText(program.telegramMessageId, cancelled);
     }
   }
 

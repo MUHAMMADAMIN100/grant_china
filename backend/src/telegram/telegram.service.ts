@@ -40,28 +40,97 @@ export class TelegramService {
     }
   }
 
-  async sendToChannel(message: string) {
-    if (!this.bot || !this.channelId) return;
+  /** Возвращает message_id или null */
+  async sendToChannel(message: string): Promise<number | null> {
+    if (!this.bot || !this.channelId) return null;
     try {
-      await this.bot.telegram.sendMessage(this.channelId, message, {
+      const res = await this.bot.telegram.sendMessage(this.channelId, message, {
         parse_mode: 'Markdown',
       });
+      return res.message_id;
     } catch (err) {
       this.logger.error('Telegram channel send failed', err as Error);
+      return null;
     }
   }
 
-  async sendPhotoToChannel(photoUrl: string, caption: string) {
-    if (!this.bot || !this.channelId) return;
+  /** Возвращает message_id или null. Если фото не ушло — фоллбэк на текст. */
+  async sendPhotoToChannel(
+    photoUrl: string,
+    caption: string,
+  ): Promise<{ messageId: number; hasPhoto: boolean } | null> {
+    if (!this.bot || !this.channelId) return null;
     try {
-      await this.bot.telegram.sendPhoto(this.channelId, photoUrl, {
+      const res = await this.bot.telegram.sendPhoto(this.channelId, photoUrl, {
         caption,
         parse_mode: 'Markdown',
       });
+      return { messageId: res.message_id, hasPhoto: true };
     } catch (err) {
       this.logger.error('Telegram channel photo send failed', err as Error);
-      // Фоллбэк: отправим текстом без фото
-      await this.sendToChannel(caption).catch(() => undefined);
+      const id = await this.sendToChannel(caption);
+      return id ? { messageId: id, hasPhoto: false } : null;
+    }
+  }
+
+  async editChannelText(messageId: number, message: string) {
+    if (!this.bot || !this.channelId) return false;
+    try {
+      await this.bot.telegram.editMessageText(
+        this.channelId,
+        messageId,
+        undefined,
+        message,
+        { parse_mode: 'Markdown' },
+      );
+      return true;
+    } catch (err) {
+      this.logger.warn(`Telegram editText failed: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  async editChannelCaption(messageId: number, caption: string) {
+    if (!this.bot || !this.channelId) return false;
+    try {
+      await this.bot.telegram.editMessageCaption(
+        this.channelId,
+        messageId,
+        undefined,
+        caption,
+        { parse_mode: 'Markdown' },
+      );
+      return true;
+    } catch (err) {
+      this.logger.warn(`Telegram editCaption failed: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  async editChannelMedia(messageId: number, photoUrl: string, caption: string) {
+    if (!this.bot || !this.channelId) return false;
+    try {
+      await this.bot.telegram.editMessageMedia(this.channelId, messageId, undefined, {
+        type: 'photo',
+        media: photoUrl,
+        caption,
+        parse_mode: 'Markdown',
+      });
+      return true;
+    } catch (err) {
+      this.logger.warn(`Telegram editMedia failed: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  async deleteChannelMessage(messageId: number) {
+    if (!this.bot || !this.channelId) return false;
+    try {
+      await this.bot.telegram.deleteMessage(this.channelId, messageId);
+      return true;
+    } catch (err) {
+      this.logger.warn(`Telegram deleteMessage failed: ${(err as Error).message}`);
+      return false;
     }
   }
 }
