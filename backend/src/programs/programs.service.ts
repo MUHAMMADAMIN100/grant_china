@@ -105,7 +105,8 @@ export class ProgramsService {
 
     // Если у программы был пост в канале — обновляем его
     if (existing.telegramMessageId) {
-      this.notifyChannelUpdate(updated).catch(() => undefined);
+      const imageChanged = existing.imageUrl !== updated.imageUrl;
+      this.notifyChannelUpdate(updated, imageChanged).catch(() => undefined);
     } else if (updated.published) {
       // Если поста ещё не было (например, программа была не published) — создаём сейчас
       this.notifyChannelNew(updated).catch(() => undefined);
@@ -202,44 +203,50 @@ export class ProgramsService {
     }
   }
 
-  private async notifyChannelUpdate(program: Program) {
+  private async notifyChannelUpdate(program: Program, imageChanged: boolean) {
     if (!program.telegramMessageId) return;
     const caption = this.buildCaption(program, '🎓 *Программа GrantChina*');
     const photoUrl = this.buildPhotoUrl(program);
 
-    if (program.telegramHasPhoto) {
-      // Сообщение с фото
-      if (photoUrl) {
-        // Пробуем перезалить media (если фото поменялось) — это и текст обновит
-        const ok = await this.telegram.editChannelMedia(program.telegramMessageId, photoUrl, caption);
-        if (!ok) {
-          // Если media не поменялась — просто обновим caption
-          await this.telegram.editChannelCaption(program.telegramMessageId, caption);
-        }
-      } else {
-        // Фото убрали → editMessageMedia не умеет менять тип; редактируем только подпись
+    // Если картинка не менялась — просто обновляем подпись/текст и выходим.
+    // editMessageMedia с тем же URL Telegram ругает "message is not modified".
+    if (!imageChanged) {
+      if (program.telegramHasPhoto) {
         await this.telegram.editChannelCaption(program.telegramMessageId, caption);
-      }
-    } else {
-      // Сообщение текстовое
-      if (photoUrl) {
-        // Хочется добавить фото к текстовому посту, но Telegram такое не умеет.
-        // Удаляем текстовое и публикуем новое с фото.
-        const deleted = await this.telegram.deleteChannelMessage(program.telegramMessageId);
-        if (deleted) {
-          const res = await this.telegram.sendPhotoToChannel(photoUrl, caption);
-          if (res) {
-            await this.prisma.program.update({
-              where: { id: program.id },
-              data: { telegramMessageId: res.messageId, telegramHasPhoto: res.hasPhoto },
-            });
-          }
-        } else {
-          await this.telegram.editChannelText(program.telegramMessageId, caption);
-        }
       } else {
         await this.telegram.editChannelText(program.telegramMessageId, caption);
       }
+      return;
+    }
+
+    // Картинка поменялась. Самый надёжный путь — удалить старое сообщение и
+    // отправить новое (Telegram editMessageMedia плохо работает с разной
+    // топологией: текст<->фото, подмена URL, etc.). Сохраняем новый messageId.
+    await this.repostChannel(program, caption, photoUrl);
+  }
+
+  private async repostChannel(program: Program, caption: string, photoUrl: string | null) {
+    if (!program.telegramMessageId) return;
+    await this.telegram.deleteChannelMessage(program.telegramMessageId);
+
+    let newId: number | null = null;
+    let hasPhoto = false;
+    if (photoUrl) {
+      const res = await this.telegram.sendPhotoToChannel(photoUrl, caption);
+      if (res) {
+        newId = res.messageId;
+        hasPhoto = res.hasPhoto;
+      }
+    } else {
+      newId = await this.telegram.sendToChannel(caption);
+      hasPhoto = false;
+    }
+
+    if (newId) {
+      await this.prisma.program.update({
+        where: { id: program.id },
+        data: { telegramMessageId: newId, telegramHasPhoto: hasPhoto },
+      });
     }
   }
 

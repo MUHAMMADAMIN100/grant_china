@@ -73,6 +73,18 @@ export class TelegramService {
     }
   }
 
+  private describeErr(err: unknown): string {
+    const e = err as any;
+    return [
+      e?.code,
+      e?.response?.error_code,
+      e?.response?.description,
+      e?.message,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+  }
+
   async editChannelText(messageId: number, message: string) {
     if (!this.bot || !this.channelId) return false;
     try {
@@ -85,7 +97,7 @@ export class TelegramService {
       );
       return true;
     } catch (err) {
-      this.logger.warn(`Telegram editText failed: ${(err as Error).message}`);
+      this.logger.warn(`Telegram editText failed: ${this.describeErr(err)}`);
       return false;
     }
   }
@@ -102,7 +114,7 @@ export class TelegramService {
       );
       return true;
     } catch (err) {
-      this.logger.warn(`Telegram editCaption failed: ${(err as Error).message}`);
+      this.logger.warn(`Telegram editCaption failed: ${this.describeErr(err)}`);
       return false;
     }
   }
@@ -118,7 +130,7 @@ export class TelegramService {
       });
       return true;
     } catch (err) {
-      this.logger.warn(`Telegram editMedia failed: ${(err as Error).message}`);
+      this.logger.warn(`Telegram editMedia failed: ${this.describeErr(err)}`);
       return false;
     }
   }
@@ -129,7 +141,7 @@ export class TelegramService {
       await this.bot.telegram.deleteMessage(this.channelId, messageId);
       return true;
     } catch (err) {
-      this.logger.warn(`Telegram deleteMessage failed: ${(err as Error).message}`);
+      this.logger.warn(`Telegram deleteMessage failed: ${this.describeErr(err)}`);
       return false;
     }
   }
