@@ -47,7 +47,7 @@ export class SmsService {
         );
       }
     } else if (raw === 'payom') {
-      this.payomUrl = (config.get<string>('PAYOM_API_URL') || 'https://payom.tj').replace(/\/+$/, '');
+      this.payomUrl = (config.get<string>('PAYOM_API_URL') || 'https://gateway.payom.tj').replace(/\/+$/, '');
       this.payomToken = config.get<string>('PAYOM_TOKEN') || null;
       this.payomSender = config.get<string>('PAYOM_SENDER') || null;
       if (this.payomToken && this.payomSender) {
