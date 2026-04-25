@@ -1,9 +1,64 @@
-import { PrismaClient, Direction } from '@prisma/client';
+import { PrismaClient, Direction, Program } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { Telegraf } from 'telegraf';
 
 const prisma = new PrismaClient();
+
+const DIRECTION_LABEL: Record<Direction, string> = {
+  BACHELOR: 'Бакалавриат',
+  MASTER: 'Магистратура',
+  LANGUAGE: 'Языковые курсы',
+};
+
+function escMd(s: string): string {
+  return s.replace(/([_*[\]`])/g, '\\$1');
+}
+
+async function postToChannel(program: Program) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const channelId = process.env.TELEGRAM_CHANNEL_ID;
+  if (!token || !channelId) {
+    console.log('  (TELEGRAM_BOT_TOKEN/TELEGRAM_CHANNEL_ID не заданы — пропускаем пост в канал)');
+    return;
+  }
+
+  const caption =
+    `🎓 *Новая программа в GrantChina*\n\n` +
+    `📚 *${escMd(program.name)}*\n` +
+    `🏛 ${escMd(program.university)}\n` +
+    `📍 ${escMd(program.city)}\n` +
+    `🎯 ${escMd(program.major)} · ${DIRECTION_LABEL[program.direction]}\n` +
+    (program.duration ? `⏱ ${escMd(program.duration)}\n` : '') +
+    (program.language ? `🌐 ${escMd(program.language)}\n` : '') +
+    `\n💰 Стоимость: *${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год\n` +
+    (program.description ? `\n${escMd(program.description.slice(0, 600))}` : '');
+
+  const publicBase = process.env.PUBLIC_API_BASE;
+  const photoUrl = program.imageUrl
+    ? program.imageUrl.startsWith('http')
+      ? program.imageUrl
+      : publicBase
+        ? `${publicBase}${program.imageUrl}`
+        : null
+    : null;
+
+  const bot = new Telegraf(token);
+  try {
+    if (photoUrl) {
+      await bot.telegram.sendPhoto(channelId, photoUrl, {
+        caption,
+        parse_mode: 'Markdown',
+      });
+    } else {
+      await bot.telegram.sendMessage(channelId, caption, { parse_mode: 'Markdown' });
+    }
+    console.log(`  📡 Пост в Telegram-канал отправлен`);
+  } catch (e: any) {
+    console.log(`  ⚠️  Не удалось отправить в канал: ${e?.message || e}`);
+  }
+}
 
 type SeedProgram = {
   name: string;
@@ -240,7 +295,16 @@ function copyToUploads(srcPath: string): string {
 }
 
 async function main() {
-  console.log('🌱 Seeding programs...');
+  if (process.env.SEED_IF_EMPTY === '1') {
+    const count = await prisma.program.count();
+    if (count > 0) {
+      console.log(`✓ Программ в БД: ${count}. Пропускаем seed.`);
+      return;
+    }
+    console.log('🌱 Программ нет — запускаю первичный seed...');
+  } else {
+    console.log('🌱 Seeding programs...');
+  }
 
   for (const p of PROGRAMS) {
     const existing = await prisma.program.findFirst({ where: { name: p.name } });
@@ -275,7 +339,7 @@ async function main() {
       });
       console.log(`  ✏️  Обновлено: ${p.name}`);
     } else {
-      await prisma.program.create({
+      const created = await prisma.program.create({
         data: {
           name: p.name,
           university: p.university,
@@ -292,6 +356,7 @@ async function main() {
         },
       });
       console.log(`  ➕ Создано:   ${p.name}`);
+      await postToChannel(created);
     }
   }
 
