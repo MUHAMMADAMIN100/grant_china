@@ -75,6 +75,7 @@ export default function StudentCabinet() {
     'student:updated': () => load(),
     'document:uploaded': () => load(),
     'document:deleted': () => load(),
+    'application:updated': () => load(),
   });
 
   const load = async (showSpinner = false) => {

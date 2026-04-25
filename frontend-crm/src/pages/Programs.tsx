@@ -27,7 +27,6 @@ export default function Programs() {
   const { confirm, toast } = useUI();
   const isAdmin = me?.role === 'ADMIN';
   const [items, setItems] = useState<Program[]>([]);
-  const [search, setSearch] = useState('');
   const [city, setCity] = useState('');
   const [major, setMajor] = useState('');
   const [direction, setDirection] = useState<Direction | ''>('');
@@ -63,7 +62,6 @@ export default function Programs() {
   const load = () => {
     setLoading(true);
     listPrograms({
-      search: search || undefined,
       city: city || undefined,
       major: major || undefined,
       direction: direction || undefined,
@@ -75,7 +73,7 @@ export default function Programs() {
   useEffect(() => {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
-  }, [search, city, major, direction]);
+  }, [city, major, direction]);
 
   useRealtime({
     'program:new': () => load(),
@@ -173,7 +171,6 @@ export default function Programs() {
       </div>
       <div className="card-body">
         <div className="filters">
-          <input placeholder="Поиск..." value={search} onChange={(e) => setSearch(e.target.value)} />
           <input placeholder="Город" value={city} onChange={(e) => setCity(e.target.value)} />
           <input placeholder="Специальность" value={major} onChange={(e) => setMajor(e.target.value)} />
           <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>

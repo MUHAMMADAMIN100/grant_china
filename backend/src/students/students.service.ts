@@ -24,6 +24,7 @@ const STUDENT_INCLUDE = {
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
   program: true,
+  applications: { orderBy: { createdAt: 'desc' as const } },
 } as const;
 
 type CurrentUser = { id: string; role: Role };

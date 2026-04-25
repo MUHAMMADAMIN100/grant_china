@@ -249,6 +249,7 @@ export class ApplicationsService {
     this.realtime.emitStaff('application:updated', { application: updated });
     if (updated.studentId) {
       this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
+      this.realtime.emitStudent(updated.studentId, 'application:updated', { application: updated });
     }
 
     // SMS студенту при смене статуса

@@ -82,6 +82,69 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .nav { display: flex; gap: 28px; }
 .nav a { color: var(--text-soft); font-weight: 500; transition: color .2s; }
 .nav a:hover { color: var(--primary); }
+
+/* Бургер: скрыт на десктопе, виден на планшетах/мобиле */
+.header-burger {
+  display: none;
+  align-items: center; justify-content: center;
+  width: 44px; height: 44px;
+  border: none; background: transparent;
+  color: var(--text); cursor: pointer;
+  border-radius: 10px; transition: background .2s;
+}
+.header-burger:hover { background: rgba(15, 19, 32, 0.05); }
+
+/* Мобильная панель */
+.header-mobile-backdrop {
+  position: fixed; inset: 0; z-index: 980;
+  background: rgba(15, 19, 32, 0.55);
+  backdrop-filter: blur(4px);
+}
+.header-mobile-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 990;
+  width: min(360px, 88vw);
+  background: white;
+  display: flex; flex-direction: column;
+  box-shadow: -25px 0 60px rgba(0,0,0,0.18);
+  overflow-y: auto;
+}
+.header-mobile-top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.header-mobile-top .logo-image { height: 40px; width: auto; }
+.header-mobile-close {
+  width: 40px; height: 40px; border: none; background: transparent;
+  color: var(--text); cursor: pointer; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.header-mobile-close:hover { background: rgba(15, 19, 32, 0.05); }
+.header-mobile-nav {
+  display: flex; flex-direction: column;
+  padding: 12px 8px;
+}
+.header-mobile-nav a {
+  display: block; padding: 14px 18px; border-radius: 10px;
+  color: var(--text); font-weight: 500; font-size: 16px;
+  transition: background .2s, color .2s;
+}
+.header-mobile-nav a:hover {
+  background: rgba(231, 39, 39, 0.06); color: var(--primary);
+}
+.header-mobile-actions {
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 18px 22px 22px;
+  border-top: 1px solid var(--border);
+}
+.header-mobile-actions .btn {
+  width: 100%; justify-content: center;
+}
+.header-mobile-actions .btn-secondary {
+  background: transparent; color: var(--text);
+  border: 1.5px solid var(--border);
+}
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 12px 22px;
@@ -1202,7 +1265,15 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   }
   .footer-bottom { flex-direction: column; align-items: center; text-align: center; }
   .footer-tags { text-align: center; }
-  .nav { display: none; }
+  .nav-desktop { display: none; }
+  .header-actions-desktop { display: none; }
+  .header-burger { display: inline-flex; }
+  /* Touch target на мобиле */
+  input, select, textarea, button { min-height: 44px; }
+  .container { padding-left: 16px; padding-right: 16px; }
+  /* Заголовки h1/h2 — уменьшаем на мобиле для перелива */
+  h1 { font-size: clamp(28px, 7vw, 40px); line-height: 1.15; }
+  h2 { font-size: clamp(22px, 5vw, 32px); line-height: 1.2; }
   .section { padding: 60px 0; }
   .testimonial-stage { height: 720px; }
   .testimonial-card {
