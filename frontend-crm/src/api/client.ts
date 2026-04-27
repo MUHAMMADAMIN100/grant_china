@@ -15,7 +15,11 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('grantchina_token');
-      if (location.pathname !== '/login') location.href = '/login';
+      // Учитываем basename CRM (/admin) — после basename идёт /login
+      const loginPath = '/admin/login';
+      if (!location.pathname.endsWith('/login')) {
+        location.href = loginPath;
+      }
     }
     return Promise.reject(err);
   },
