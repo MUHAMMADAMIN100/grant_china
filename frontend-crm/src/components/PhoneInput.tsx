@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 export type Country = {
-  cc: string;     // ISO-2 lowercase, например 'tj' — для flagcdn.com
-  code: string;   // dial code, например '+992'
+  cc: string;
+  code: string;
   label: string;
   minDigits: number;
   maxDigits: number;
 };
 
-// Полный список стран для подачи заявки/анкеты студента.
-// minDigits / maxDigits = 9 для всех (по требованию: 9 цифр везде).
 export const COUNTRIES: Country[] = [
   { cc: 'tj', code: '+992', label: 'Таджикистан', minDigits: 9, maxDigits: 9 },
   { cc: 'ru', code: '+7',   label: 'Россия',      minDigits: 9, maxDigits: 9 },
@@ -53,7 +51,6 @@ const flagUrl = (cc: string, size: 20 | 40 | 80 = 40) =>
 const findCountryByPhone = (phone: string): { idx: number; rest: string } => {
   if (!phone) return { idx: 0, rest: '' };
   const normalized = phone.startsWith('+') ? phone : `+${phone}`;
-  // Сортируем по длине кода — длинные сначала, чтобы +998 не падал в +9
   const sorted = COUNTRIES.map((c, i) => ({ c, i })).sort(
     (a, b) => b.c.code.length - a.c.code.length,
   );
@@ -66,21 +63,12 @@ const findCountryByPhone = (phone: string): { idx: number; rest: string } => {
 };
 
 interface Props {
-  /** Полный номер с кодом, например "+992123456789" */
   value: string;
-  /** Возвращает полный номер с кодом */
   onChange: (fullPhone: string) => void;
   error?: boolean;
   placeholder?: string;
 }
 
-/**
- * Поле телефона с кастомным dropdown стран:
- *  - реальные флаги (PNG с flagcdn.com)
- *  - поле поиска внутри списка
- *  - dial-code и название страны
- * По умолчанию подставляет +992 🇹🇯.
- */
 export default function PhoneInput({ value, onChange, error, placeholder }: Props) {
   const initial = useMemo(() => findCountryByPhone(value || '+992'), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [countryIdx, setCountryIdx] = useState(initial.idx);
@@ -103,7 +91,6 @@ export default function PhoneInput({ value, onChange, error, placeholder }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  // Закрытие dropdown по клику вне или Escape
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -115,7 +102,6 @@ export default function PhoneInput({ value, onChange, error, placeholder }: Prop
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    // фокусируем поиск
     setTimeout(() => searchRef.current?.focus(), 30);
     return () => {
       document.removeEventListener('mousedown', onDown);

@@ -6,6 +6,7 @@ import type { Direction } from '../api/types';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, phoneRule, required, validateAll } from '../utils/validators';
+import PhoneInput from '../components/PhoneInput';
 
 export default function StudentNew() {
   const navigate = useNavigate();
@@ -94,13 +95,10 @@ export default function StudentNew() {
           <div className="form-grid-2">
             <div className="form-group">
               <label>Телефон</label>
-              <input
+              <PhoneInput
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                onBlur={() => setTouched((t) => ({ ...t, phone: true }))}
-                className={showErr('phone') ? 'input-error' : ''}
-                placeholder="+992 ..."
-                inputMode="tel"
+                onChange={(v) => setPhone(v)}
+                error={!!showErr('phone')}
               />
               {showErr('phone') && <div className="form-error-text">{errors.phone}</div>}
             </div>
