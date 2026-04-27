@@ -1,6 +1,21 @@
 const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
 
-export type Direction = 'BACHELOR' | 'MASTER' | 'LANGUAGE';
+export type Direction =
+  | 'BACHELOR'
+  | 'MASTER'
+  | 'LANGUAGE'
+  | 'LANGUAGE_COLLEGE'
+  | 'LANGUAGE_BACHELOR'
+  | 'COLLEGE';
+
+export const DIRECTION_LABEL: Record<Direction, string> = {
+  BACHELOR: 'Бакалавриат',
+  MASTER: 'Магистратура',
+  LANGUAGE: 'Языковые курсы',
+  LANGUAGE_COLLEGE: 'Языковой + колледж',
+  LANGUAGE_BACHELOR: 'Языковой + бакалавриат',
+  COLLEGE: 'Колледж',
+};
 
 export interface ApplicationPayload {
   fullName: string;

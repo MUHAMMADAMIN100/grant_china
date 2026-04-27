@@ -7,6 +7,7 @@ import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
+import DirectionOptions from '../components/DirectionOptions';
 
 type Scope = 'all' | 'mine';
 
@@ -83,9 +84,7 @@ export default function Applications() {
           </select>
           <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
             <option value="">Все направления</option>
-            <option value="BACHELOR">Бакалавриат</option>
-            <option value="MASTER">Магистратура</option>
-            <option value="LANGUAGE">Языковые курсы</option>
+            <DirectionOptions />
           </select>
         </div>
 

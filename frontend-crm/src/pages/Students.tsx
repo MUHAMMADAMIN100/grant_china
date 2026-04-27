@@ -8,6 +8,7 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { generateStudentsReport } from '../utils/studentsReport';
+import DirectionOptions from '../components/DirectionOptions';
 import Icon from '../Icon';
 
 type Scope = 'all' | 'mine';
@@ -145,9 +146,7 @@ export default function Students() {
           <input placeholder="Поиск по ФИО или телефону..." value={search} onChange={(e) => setSearch(e.target.value)} />
           <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
             <option value="">Все направления</option>
-            <option value="BACHELOR">Бакалавриат</option>
-            <option value="MASTER">Магистратура</option>
-            <option value="LANGUAGE">Языковые курсы</option>
+            <DirectionOptions />
           </select>
           <select value={status} onChange={(e) => setStatus(e.target.value as any)}>
             <option value="">Все статусы</option>

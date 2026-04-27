@@ -13,6 +13,7 @@ import StudentNew from './pages/StudentNew';
 import Users from './pages/Users';
 import Tasks from './pages/Tasks';
 import Programs from './pages/Programs';
+import Activity from './pages/Activity';
 
 export default function App() {
   const init = useAuth((s) => s.init);
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/programs" element={<Programs />} />
         <Route path="/users" element={<Users />} />
+        <Route path="/activity" element={<Activity />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

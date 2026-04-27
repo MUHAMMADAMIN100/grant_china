@@ -16,6 +16,9 @@ enum Direction {
   BACHELOR
   MASTER
   LANGUAGE
+  LANGUAGE_COLLEGE
+  LANGUAGE_BACHELOR
+  COLLEGE
 }
 
 enum ApplicationStatus {
@@ -190,4 +193,21 @@ model Notification {
 
   @@index([userId, read])
   @@index([createdAt])
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  actorId     String?
+  actorName   String
+  actorRole   String   // ADMIN | EMPLOYEE
+  action      String   // "STATUS_CHANGE" | "STUDENT_UPDATE" | "MANAGER_CHANGE" | "STUDENT_CREATE" | "STUDENT_DELETE"
+  studentId   String?
+  studentName String?
+  details     String   // human-readable: "Статус: NEW → DOCS_REVIEW", "Менеджер TJ: A → B"
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([studentId])
+  @@index([actorId])
 }

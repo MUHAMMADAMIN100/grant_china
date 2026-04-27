@@ -1,5 +1,11 @@
 export type Role = 'ADMIN' | 'EMPLOYEE';
-export type Direction = 'BACHELOR' | 'MASTER' | 'LANGUAGE';
+export type Direction =
+  | 'BACHELOR'
+  | 'MASTER'
+  | 'LANGUAGE'
+  | 'LANGUAGE_COLLEGE'
+  | 'LANGUAGE_BACHELOR'
+  | 'COLLEGE';
 export type ApplicationStatus =
   | 'NEW'
   | 'DOCS_REVIEW'
@@ -135,6 +141,9 @@ export const DIRECTION_LABEL: Record<Direction, string> = {
   BACHELOR: 'Бакалавриат',
   MASTER: 'Магистратура',
   LANGUAGE: 'Языковые курсы',
+  LANGUAGE_COLLEGE: 'Языковой + колледж',
+  LANGUAGE_BACHELOR: 'Языковой + бакалавриат',
+  COLLEGE: 'Колледж',
 };
 
 export const STATUS_LABEL: Record<ApplicationStatus, string> = {

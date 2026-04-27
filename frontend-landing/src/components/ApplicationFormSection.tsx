@@ -4,6 +4,7 @@ import {
   FORM_SECTIONS,
   countProgress,
   emptyForm,
+  LATIN_RE,
   type FieldDef,
   type SectionDef,
 } from '../formSchema';
@@ -43,6 +44,8 @@ function useDebouncedSave(form: any, onSave: (form: any) => Promise<void>) {
   return state;
 }
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 function Field({
   def,
   value,
@@ -52,6 +55,8 @@ function Field({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const isInvalidLatin = def.latin && value && !LATIN_RE.test(value);
+
   const common = {
     value: value ?? '',
     onChange: (e: any) => onChange(e.target.value),
@@ -86,8 +91,26 @@ function Field({
       <div className="af-field af-field-wide">
         <label className="af-label">
           {def.label} <span className="af-label-en">{def.labelEn}</span>
+          {def.optional && <span className="af-optional">— необязательно</span>}
         </label>
-        <textarea {...common} rows={3} />
+        <textarea {...common} rows={3} className={isInvalidLatin ? 'af-input-error' : ''} />
+        {isInvalidLatin && <div className="af-field-error">Только латиница</div>}
+      </div>
+    );
+  }
+
+  if (def.kind === 'year') {
+    return (
+      <div className="af-field">
+        <label className="af-label">
+          {def.label} <span className="af-label-en">{def.labelEn}</span>
+        </label>
+        <select {...common}>
+          <option value="">—</option>
+          {Array.from({ length: 60 }, (_, i) => CURRENT_YEAR + 5 - i).map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
       </div>
     );
   }
@@ -96,8 +119,14 @@ function Field({
     <div className="af-field">
       <label className="af-label">
         {def.label} <span className="af-label-en">{def.labelEn}</span>
+        {def.optional && <span className="af-optional">— необязательно</span>}
       </label>
-      <input type={def.kind || 'text'} {...common} />
+      <input
+        type={def.kind || 'text'}
+        {...common}
+        className={isInvalidLatin ? 'af-input-error' : ''}
+      />
+      {isInvalidLatin && <div className="af-field-error">Только латиница</div>}
     </div>
   );
 }
@@ -164,16 +193,12 @@ function TableSection({
             {rowLabels && <div className="af-row-label">{rowLabels[ri] || `Строка ${ri + 1}`}</div>}
             <div className="af-row-cells">
               {columns.map((c) => (
-                <div className="af-field" key={c.key}>
-                  <label className="af-label">
-                    {c.label} <span className="af-label-en">{c.labelEn}</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={row?.[c.key] ?? ''}
-                    onChange={(e) => updateCell(ri, c.key, e.target.value)}
-                  />
-                </div>
+                <Field
+                  key={c.key}
+                  def={c}
+                  value={row?.[c.key] ?? ''}
+                  onChange={(v) => updateCell(ri, c.key, v)}
+                />
               ))}
             </div>
             {!fixedRows && rows.length > (minRows || 1) && (
@@ -201,6 +226,8 @@ function TableSection({
 export default function ApplicationFormSection() {
   const [form, setForm] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualSaved, setManualSaved] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     personal: true,
   });
@@ -209,6 +236,21 @@ export default function ApplicationFormSection() {
     await saveStudentForm(data);
   };
   const saveState = useDebouncedSave(form, save);
+
+  const onManualSave = async () => {
+    if (!form || manualSaving) return;
+    setManualSaving(true);
+    setManualSaved(false);
+    try {
+      await saveStudentForm(form);
+      setManualSaved(true);
+      setTimeout(() => setManualSaved(false), 2500);
+    } catch {
+      // silent
+    } finally {
+      setManualSaving(false);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -294,6 +336,22 @@ export default function ApplicationFormSection() {
       </div>
 
       <div className="af-sections">
+        {/* Большая кнопка Сохранить — на случай, если автосохранение тревожит */}
+        <div className="af-save-bar">
+          <button
+            type="button"
+            className="btn btn-primary af-save-btn"
+            onClick={onManualSave}
+            disabled={manualSaving}
+          >
+            <Icon name="save" size={18} />
+            {manualSaving ? 'Сохраняем...' : manualSaved ? 'Сохранено ✓' : 'Сохранить анкету'}
+          </button>
+          <div className="af-save-hint">
+            Анкета также сохраняется автоматически при каждом изменении
+          </div>
+        </div>
+
         {FORM_SECTIONS.map((section) => {
           const isOpen = openSections[section.key] ?? false;
           return (
@@ -348,6 +406,18 @@ export default function ApplicationFormSection() {
             </div>
           );
         })}
+
+        <div className="af-save-bar af-save-bar-bottom">
+          <button
+            type="button"
+            className="btn btn-primary af-save-btn"
+            onClick={onManualSave}
+            disabled={manualSaving}
+          >
+            <Icon name="save" size={18} />
+            {manualSaving ? 'Сохраняем...' : manualSaved ? 'Сохранено ✓' : 'Сохранить анкету'}
+          </button>
+        </div>
       </div>
     </section>
   );

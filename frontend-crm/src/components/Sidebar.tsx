@@ -14,7 +14,10 @@ export default function Sidebar() {
     { to: '/students', icon: 'school', label: 'Студенты' },
     { to: '/programs', icon: 'menu_book', label: 'Программы' },
     { to: '/tasks', icon: 'task_alt', label: 'Задачи' },
-    ...(user?.role === 'ADMIN' ? [{ to: '/users', icon: 'group', label: 'Пользователи' }] : []),
+    ...(user?.role === 'ADMIN' ? [
+      { to: '/activity', icon: 'history', label: 'Активность' },
+      { to: '/users', icon: 'group', label: 'Пользователи' },
+    ] : []),
   ];
 
   return (

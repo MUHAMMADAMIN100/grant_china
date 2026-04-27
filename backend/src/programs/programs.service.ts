@@ -13,6 +13,9 @@ const DIRECTION_LABEL: Record<Direction, string> = {
   BACHELOR: 'Бакалавриат',
   MASTER: 'Магистратура',
   LANGUAGE: 'Языковые курсы',
+  LANGUAGE_COLLEGE: 'Языковой + колледж',
+  LANGUAGE_BACHELOR: 'Языковой + бакалавриат',
+  COLLEGE: 'Колледж',
 };
 
 @Injectable()

@@ -21,11 +21,28 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(0);
   const [items, setItems] = useState<Notification[]>([]);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [onlyUnread, setOnlyUnread] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const refreshCount = async () => {
     try { setCount(await unreadCount()); } catch {}
   };
+
+  const filtered = items.filter((n) => {
+    if (onlyUnread && n.read) return false;
+    const t = new Date(n.createdAt).getTime();
+    if (from) {
+      const f = new Date(from).getTime();
+      if (t < f) return false;
+    }
+    if (to) {
+      const tt = new Date(to + 'T23:59:59').getTime();
+      if (t > tt) return false;
+    }
+    return true;
+  });
 
   useEffect(() => {
     refreshCount();
@@ -136,29 +153,72 @@ export default function NotificationBell() {
                 </motion.button>
               )}
             </div>
-            {items.length === 0 ? (
-              <div className="notif-empty">Уведомлений пока нет</div>
+
+            <div className="notif-filters">
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                placeholder="От"
+              />
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                placeholder="До"
+              />
+              <label className="notif-only-unread">
+                <input
+                  type="checkbox"
+                  checked={onlyUnread}
+                  onChange={(e) => setOnlyUnread(e.target.checked)}
+                />
+                <span>Только непрочитанные</span>
+              </label>
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="notif-empty">
+                {items.length === 0 ? 'Уведомлений пока нет' : 'По фильтру ничего нет'}
+              </div>
             ) : (
               <motion.div
                 initial="hidden"
                 animate="show"
                 variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
               >
-                {items.map((n) => (
+                {filtered.map((n) => (
                   <motion.div
                     key={n.id}
                     className={`notif-item${n.read ? '' : ' unread'}`}
-                    onClick={() => onItemClick(n)}
                     variants={{
                       hidden: { opacity: 0, x: -10 },
                       show: { opacity: 1, x: 0 },
                     }}
                     whileHover={{ x: 4 }}
-                    style={{ cursor: 'pointer' }}
                   >
-                    <div className="notif-item-title">{n.title}</div>
-                    <div className="notif-item-msg">{n.message}</div>
-                    <div className="notif-item-time">{new Date(n.createdAt).toLocaleString('ru-RU')}</div>
+                    <div className="notif-item-body" onClick={() => onItemClick(n)}>
+                      <div className="notif-item-title">
+                        {!n.read && <span className="notif-dot" />}
+                        {n.title}
+                      </div>
+                      <div className="notif-item-msg">{n.message}</div>
+                      <div className="notif-item-time">{new Date(n.createdAt).toLocaleString('ru-RU')}</div>
+                    </div>
+                    {!n.read && (
+                      <button
+                        className="notif-item-read"
+                        title="Отметить прочитанным"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await markRead(n.id).catch(() => {});
+                          setItems((prev) => prev.map((i) => (i.id === n.id ? { ...i, read: true } : i)));
+                          refreshCount();
+                        }}
+                      >
+                        <Icon name="done" size={16} />
+                      </button>
+                    )}
                   </motion.div>
                 ))}
               </motion.div>

@@ -17,6 +17,9 @@ const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
   MASTER: 2,
   LANGUAGE: 3,
+  LANGUAGE_COLLEGE: 4,
+  LANGUAGE_BACHELOR: 5,
+  COLLEGE: 6,
 };
 
 const STUDENT_INCLUDE = {

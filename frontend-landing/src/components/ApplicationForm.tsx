@@ -1,35 +1,30 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { submitApplication, type Direction } from '../api';
+import { submitApplication, type Direction, DIRECTION_LABEL } from '../api';
 import { fadeUp, staggerContainer, viewportOnce } from '../motion';
 import Icon from '../Icon';
 
 const MAX_NAME = 100;
 const MAX_EMAIL = 120;
 const MAX_COMMENT = 500;
-const MAX_PHONE_DIGITS = 15;
 
-const formatPhone = (raw: string) => {
-  const cleaned = raw.replace(/[^\d+]/g, '');
-  const hasPlus = cleaned.startsWith('+');
-  const digits = cleaned.replace(/\D/g, '').slice(0, MAX_PHONE_DIGITS);
-  if (!digits) return hasPlus ? '+' : '';
-  const parts: string[] = [];
-  parts.push(digits.slice(0, 3));
-  if (digits.length > 3) parts.push(digits.slice(3, 6));
-  if (digits.length > 6) parts.push(digits.slice(6, 8));
-  if (digits.length > 8) parts.push(digits.slice(8, 10));
-  if (digits.length > 10) parts.push(digits.slice(10));
-  return (hasPlus ? '+' : '') + parts.filter(Boolean).join(' ');
-};
+type Country = { code: string; flag: string; label: string; minDigits: number; maxDigits: number };
 
-const countPhoneDigits = (phone: string) => phone.replace(/\D/g, '').length;
+const COUNTRIES: Country[] = [
+  { code: '+992', flag: '🇹🇯', label: 'Таджикистан', minDigits: 9, maxDigits: 9 },
+  { code: '+7',   flag: '🇷🇺', label: 'Россия',      minDigits: 10, maxDigits: 10 },
+  { code: '+7',   flag: '🇰🇿', label: 'Казахстан',   minDigits: 10, maxDigits: 10 },
+  { code: '+998', flag: '🇺🇿', label: 'Узбекистан',  minDigits: 9, maxDigits: 9 },
+  { code: '+996', flag: '🇰🇬', label: 'Кыргызстан',  minDigits: 9, maxDigits: 9 },
+  { code: '+86',  flag: '🇨🇳', label: 'Китай',       minDigits: 11, maxDigits: 11 },
+];
 
 type Errors = Partial<Record<'fullName' | 'phone' | 'email' | 'comment', string>>;
 
 export default function ApplicationForm() {
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [countryIdx, setCountryIdx] = useState(0);
+  const [phoneLocal, setPhoneLocal] = useState('');
   const [email, setEmail] = useState('');
   const [direction, setDirection] = useState<Direction>('BACHELOR');
   const [comment, setComment] = useState('');
@@ -38,6 +33,10 @@ export default function ApplicationForm() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  const country = COUNTRIES[countryIdx];
+  const phoneDigits = phoneLocal.replace(/\D/g, '');
+  const fullPhone = `${country.code}${phoneDigits}`;
 
   const validateField = (field: keyof Errors, value: string): string | undefined => {
     if (field === 'fullName') {
@@ -50,12 +49,10 @@ export default function ApplicationForm() {
       return;
     }
     if (field === 'phone') {
-      const v = value.trim();
-      if (v.length === 0) return 'Укажите номер телефона';
-      const digits = countPhoneDigits(v);
-      if (digits < 9) return 'Телефон слишком короткий';
-      if (digits > MAX_PHONE_DIGITS) return 'Телефон слишком длинный';
-      if (!/^[+\d\s\-()]+$/.test(v)) return 'Недопустимые символы';
+      const digits = (value || '').replace(/\D/g, '');
+      if (digits.length === 0) return 'Укажите номер телефона';
+      if (digits.length < country.minDigits) return `Слишком короткий номер для ${country.label} (нужно ${country.minDigits} цифр)`;
+      if (digits.length > country.maxDigits) return `Слишком длинный номер для ${country.label}`;
       return;
     }
     if (field === 'email') {
@@ -74,7 +71,7 @@ export default function ApplicationForm() {
 
   const checkAll = (): Errors => ({
     fullName: validateField('fullName', fullName),
-    phone: validateField('phone', phone),
+    phone: validateField('phone', phoneLocal),
     email: validateField('email', email),
     comment: validateField('comment', comment),
   });
@@ -89,19 +86,26 @@ export default function ApplicationForm() {
 
   const handleBlur = (field: keyof Errors) => {
     setTouched((t) => ({ ...t, [field]: true }));
-    const value = field === 'fullName' ? fullName : field === 'phone' ? phone : field === 'email' ? email : comment;
+    const value = field === 'fullName' ? fullName : field === 'phone' ? phoneLocal : field === 'email' ? email : comment;
     const err = validateField(field, value);
     setErrors((prev) => ({ ...prev, [field]: err }));
   };
 
   const handleFieldChange = (field: keyof Errors, value: string) => {
     if (field === 'fullName') setFullName(value);
-    else if (field === 'phone') setPhone(formatPhone(value));
+    else if (field === 'phone') {
+      const digits = value.replace(/\D/g, '').slice(0, country.maxDigits);
+      setPhoneLocal(digits);
+      if (touched.phone || errors.phone) {
+        const err = validateField('phone', digits);
+        setErrors((prev) => ({ ...prev, phone: err }));
+      }
+      return;
+    }
     else if (field === 'email') setEmail(value);
     else if (field === 'comment') setComment(value);
-    // Если поле уже тронуто или есть ошибка — переоцениваем на лету
     if (touched[field] || errors[field]) {
-      const err = validateField(field, field === 'phone' ? formatPhone(value) : value);
+      const err = validateField(field, value);
       setErrors((prev) => ({ ...prev, [field]: err }));
     }
   };
@@ -118,18 +122,17 @@ export default function ApplicationForm() {
     try {
       await submitApplication({
         fullName: fullName.trim(),
-        phone: phone.trim(),
+        phone: fullPhone,
         email: email.trim() || undefined,
         direction,
         comment: comment.trim() || undefined,
       });
       setSuccess(true);
-      // Аналитика: событие конверсии
       try {
         (window as any).gtag?.('event', 'submit_application', { direction });
         (window as any).ym?.((window as any).__YM_ID__, 'reachGoal', 'APPLICATION_SUBMIT');
       } catch {}
-      setFullName(''); setPhone(''); setEmail(''); setComment('');
+      setFullName(''); setPhoneLocal(''); setEmail(''); setComment('');
       setDirection('BACHELOR');
       setErrors({});
       setTouched({});
@@ -223,16 +226,35 @@ export default function ApplicationForm() {
 
           <div className="form-row">
             <label>Номер телефона *</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => handleFieldChange('phone', e.target.value)}
-              onBlur={() => handleBlur('phone')}
-              placeholder="+992 900 00 00 00"
-              className={invalid('phone') ? 'input-error' : ''}
-              autoComplete="tel"
-              inputMode="tel"
-            />
+            <div className={`phone-input-wrap${invalid('phone') ? ' input-error' : ''}`}>
+              <select
+                className="phone-country"
+                value={countryIdx}
+                onChange={(e) => {
+                  setCountryIdx(Number(e.target.value));
+                  if (touched.phone || errors.phone) {
+                    const err = validateField('phone', phoneLocal);
+                    setErrors((prev) => ({ ...prev, phone: err }));
+                  }
+                }}
+              >
+                {COUNTRIES.map((c, i) => (
+                  <option key={`${c.code}-${c.label}`} value={i}>
+                    {c.flag} {c.code} ({c.label})
+                  </option>
+                ))}
+              </select>
+              <input
+                type="tel"
+                value={phoneLocal}
+                onChange={(e) => handleFieldChange('phone', e.target.value)}
+                onBlur={() => handleBlur('phone')}
+                placeholder={'9'.repeat(country.minDigits)}
+                autoComplete="tel-national"
+                inputMode="numeric"
+                maxLength={country.maxDigits}
+              />
+            </div>
             <AnimatePresence>
               {invalid('phone') && (
                 <motion.div
@@ -276,9 +298,9 @@ export default function ApplicationForm() {
           <div className="form-row">
             <label>Направление *</label>
             <select value={direction} onChange={(e) => setDirection(e.target.value as Direction)}>
-              <option value="BACHELOR">Бакалавриат</option>
-              <option value="MASTER">Магистратура</option>
-              <option value="LANGUAGE">Языковые курсы</option>
+              {(Object.keys(DIRECTION_LABEL) as Direction[]).map((d) => (
+                <option key={d} value={d}>{DIRECTION_LABEL[d]}</option>
+              ))}
             </select>
           </div>
 

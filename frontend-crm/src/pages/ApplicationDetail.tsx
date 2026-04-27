@@ -8,6 +8,7 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsChecklist';
+import DirectionOptions from '../components/DirectionOptions';
 import ManagerBar from '../components/ManagerBar';
 import ApplicationFormView from '../components/ApplicationFormView';
 import Icon from '../Icon';
@@ -303,9 +304,7 @@ export default function ApplicationDetail() {
                       <div className="form-group">
                         <label>Направление</label>
                         <select value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value as Direction })}>
-                          <option value="BACHELOR">Бакалавриат</option>
-                          <option value="MASTER">Магистратура</option>
-                          <option value="LANGUAGE">Языковые курсы</option>
+                          <DirectionOptions />
                         </select>
                       </div>
                       <div className="form-group">

@@ -13,6 +13,9 @@ const DIRECTION_LABEL: Record<string, string> = {
   BACHELOR: 'Бакалавриат',
   MASTER: 'Магистратура',
   LANGUAGE: 'Языковые курсы',
+  LANGUAGE_COLLEGE: 'Языковой + колледж',
+  LANGUAGE_BACHELOR: 'Языковой + бакалавриат',
+  COLLEGE: 'Колледж',
 };
 
 export default function ProgramsSection() {
@@ -137,9 +140,9 @@ export default function ProgramsSection() {
               <label>Направление</label>
               <select value={direction} onChange={(e) => setDirection(e.target.value)}>
                 <option value="">Все</option>
-                <option value="BACHELOR">Бакалавриат</option>
-                <option value="MASTER">Магистратура</option>
-                <option value="LANGUAGE">Языковые курсы</option>
+                {Object.entries(DIRECTION_LABEL).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
               </select>
             </div>
             <div className="sp-filter">

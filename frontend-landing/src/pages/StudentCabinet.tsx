@@ -20,6 +20,9 @@ const DIRECTION_LABEL: Record<string, string> = {
   BACHELOR: 'Бакалавриат',
   MASTER: 'Магистратура',
   LANGUAGE: 'Языковые курсы',
+  LANGUAGE_COLLEGE: 'Языковой + колледж',
+  LANGUAGE_BACHELOR: 'Языковой + бакалавриат',
+  COLLEGE: 'Колледж',
 };
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'Активный',
@@ -163,6 +166,25 @@ export default function StudentCabinet() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Поздравление при зачислении */}
+        {me.applications?.[0]?.status === 'ENROLLED' && (
+          <motion.div
+            className="stu-celebrate"
+            initial={{ opacity: 0, scale: 0.9, y: -20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 18 }}
+          >
+            <div className="stu-celebrate-icon">🎉</div>
+            <div>
+              <div className="stu-celebrate-title">Поздравляем с зачислением!</div>
+              <div className="stu-celebrate-sub">
+                Вы официально зачислены в университет. Поздравляем с поступлением — следующий шаг
+                ваш менеджер обсудит с вами лично.
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Прогресс поступления */}
         <motion.div

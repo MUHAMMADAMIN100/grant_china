@@ -83,6 +83,9 @@ export default function StudentNew() {
               <option value="BACHELOR">Бакалавриат → каб. 1</option>
               <option value="MASTER">Магистратура → каб. 2</option>
               <option value="LANGUAGE">Языковые курсы → каб. 3</option>
+              <option value="LANGUAGE_COLLEGE">Языковой + колледж → каб. 4</option>
+              <option value="LANGUAGE_BACHELOR">Языковой + бакалавриат → каб. 5</option>
+              <option value="COLLEGE">Колледж → каб. 6</option>
             </select>
           </div>
           <div className="form-group">

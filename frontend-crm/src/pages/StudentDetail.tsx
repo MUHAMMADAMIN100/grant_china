@@ -11,6 +11,7 @@ import DocumentsChecklist from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
 import ApplicationFormView from '../components/ApplicationFormView';
 import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
+import DirectionOptions from '../components/DirectionOptions';
 import Icon from '../Icon';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
@@ -240,9 +241,7 @@ export default function StudentDetail() {
                   <div className="form-group">
                     <label>Направление</label>
                     <select value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value as Direction })}>
-                      <option value="BACHELOR">Бакалавриат</option>
-                      <option value="MASTER">Магистратура</option>
-                      <option value="LANGUAGE">Языковые курсы</option>
+                      <DirectionOptions />
                     </select>
                   </div>
                   <div className="form-group">

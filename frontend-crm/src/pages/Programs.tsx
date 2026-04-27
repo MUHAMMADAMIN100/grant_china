@@ -7,6 +7,7 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
+import DirectionOptions from '../components/DirectionOptions';
 
 const emptyForm: Partial<Program> = {
   name: '',
@@ -175,9 +176,7 @@ export default function Programs() {
           <input placeholder="Специальность" value={major} onChange={(e) => setMajor(e.target.value)} />
           <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
             <option value="">Все направления</option>
-            <option value="BACHELOR">Бакалавриат</option>
-            <option value="MASTER">Магистратура</option>
-            <option value="LANGUAGE">Языковые курсы</option>
+            <DirectionOptions />
           </select>
         </div>
 
@@ -275,9 +274,7 @@ export default function Programs() {
                 <div className="form-group">
                   <label>Направление *</label>
                   <select value={editing.direction} onChange={(e) => setEditing({ ...editing, direction: e.target.value as Direction })}>
-                    <option value="BACHELOR">Бакалавриат</option>
-                    <option value="MASTER">Магистратура</option>
-                    <option value="LANGUAGE">Языковые курсы</option>
+                    <DirectionOptions />
                   </select>
                 </div>
                 <div className="form-group">

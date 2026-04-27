@@ -7,18 +7,25 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MailService } from '../mail/mail.service';
 import { SmsService } from '../sms/sms.service';
+import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
   MASTER: 2,
   LANGUAGE: 3,
+  LANGUAGE_COLLEGE: 4,
+  LANGUAGE_BACHELOR: 5,
+  COLLEGE: 6,
 };
 
 const DIRECTION_LABEL: Record<Direction, string> = {
   BACHELOR: 'Бакалавриат',
   MASTER: 'Магистратура',
   LANGUAGE: 'Языковые курсы',
+  LANGUAGE_COLLEGE: 'Языковой + колледж',
+  LANGUAGE_BACHELOR: 'Языковой + бакалавриат',
+  COLLEGE: 'Колледж',
 };
 
 const REQUIRED_DOCUMENT_TYPES: { type: string; label: string }[] = [
@@ -57,8 +64,36 @@ export class ApplicationsService {
     private telegram: TelegramService,
     private mail: MailService,
     private sms: SmsService,
+    private activity: ActivityService,
     private realtime: RealtimeGateway,
   ) {}
+
+  // Порядок этапов воронки — для определения, "понизили" или "продвинули" заявку
+  private static STAGE_ORDER: ApplicationStatus[] = [
+    'NEW',
+    'DOCS_REVIEW',
+    'DOCS_SUBMITTED',
+    'PRE_ADMISSION',
+    'AWAITING_PAYMENT',
+    'ENROLLED',
+  ];
+
+  private isDowngrade(prev: ApplicationStatus, next: ApplicationStatus): boolean {
+    const a = ApplicationsService.STAGE_ORDER.indexOf(prev);
+    const b = ApplicationsService.STAGE_ORDER.indexOf(next);
+    return a >= 0 && b >= 0 && b < a;
+  }
+
+  private smsTextForStatus(prev: ApplicationStatus, next: ApplicationStatus): string {
+    const label = ApplicationsService.STATUS_LABEL[next] || next;
+    if (next === 'ENROLLED') {
+      return `🎉 GrantChina: Поздравляем! Вы зачислены. Подробности в личном кабинете.`;
+    }
+    if (this.isDowngrade(prev, next)) {
+      return `GrantChina: Заявка возвращена на этап «${label}». Свяжитесь с менеджером для уточнений.`;
+    }
+    return `GrantChina: Статус Вашей заявки изменён → «${label}».`;
+  }
 
   private static STATUS_LABEL: Record<ApplicationStatus, string> = {
     NEW: 'Новая заявка',
@@ -219,11 +254,21 @@ export class ApplicationsService {
       }
       // SMS студенту: статус изменился на «Документы на проверке»
       if (updated.phone) {
-        const label = ApplicationsService.STATUS_LABEL[ApplicationStatus.DOCS_REVIEW];
-        this.sms
-          .send(updated.phone, `GrantChina: Статус Вашей заявки изменён → «${label}».`)
-          .catch(() => undefined);
+        const text = this.smsTextForStatus(existing.status, ApplicationStatus.DOCS_REVIEW);
+        this.sms.send(updated.phone, text).catch(() => undefined);
       }
+      // ActivityLog
+      this.activity
+        .log({
+          actorId: user.id,
+          actorName: '',
+          actorRole: user.role,
+          action: 'STATUS_CHANGE',
+          studentId: updated.studentId,
+          studentName: updated.fullName,
+          details: `Статус: ${existing.status} → ${updated.status}`,
+        })
+        .catch(() => undefined);
       return updated;
     }
 
@@ -254,9 +299,22 @@ export class ApplicationsService {
 
     // SMS студенту при смене статуса
     if (dto.status && dto.status !== existing.status && updated.phone) {
-      const label = ApplicationsService.STATUS_LABEL[dto.status] || dto.status;
-      this.sms
-        .send(updated.phone, `GrantChina: Статус Вашей заявки изменён → «${label}».`)
+      const text = this.smsTextForStatus(existing.status, dto.status);
+      this.sms.send(updated.phone, text).catch(() => undefined);
+    }
+
+    // ActivityLog для смены статуса
+    if (dto.status && dto.status !== existing.status) {
+      this.activity
+        .log({
+          actorId: user.id,
+          actorName: '',
+          actorRole: user.role,
+          action: 'STATUS_CHANGE',
+          studentId: updated.studentId,
+          studentName: updated.fullName,
+          details: `Статус: ${existing.status} → ${dto.status}`,
+        })
         .catch(() => undefined);
     }
 
@@ -306,6 +364,43 @@ export class ApplicationsService {
     if (updated.studentId) {
       this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
     }
+
+    // ActivityLog + уведомление о смене менеджера
+    const beforeManager = existing.manager?.fullName || '—';
+    const afterManager = updated.manager?.fullName || '—';
+    const beforeChina = existing.chinaManager?.fullName || '—';
+    const afterChina = updated.chinaManager?.fullName || '—';
+    const detailsParts: string[] = [];
+    if (patch.managerId !== undefined && existing.managerId !== updated.managerId) {
+      detailsParts.push(`Менеджер 🇹🇯: ${beforeManager} → ${afterManager}`);
+    }
+    if (patch.chinaManagerId !== undefined && existing.chinaManagerId !== updated.chinaManagerId) {
+      detailsParts.push(`Менеджер 🇨🇳: ${beforeChina} → ${afterChina}`);
+    }
+    if (detailsParts.length > 0) {
+      const details = detailsParts.join('; ');
+      this.activity
+        .log({
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'MANAGER_CHANGE',
+          studentId: updated.studentId,
+          studentName: updated.fullName,
+          details,
+        })
+        .catch(() => undefined);
+
+      // Уведомления staff (всем) о переназначении
+      this.notifications
+        .notifyAllStaff({
+          type: 'MANAGER_CHANGE',
+          title: 'Менеджер изменён',
+          message: `${updated.fullName}: ${details}`,
+          payload: { applicationId: updated.id, studentId: updated.studentId },
+        })
+        .catch(() => undefined);
+    }
+
     return updated;
   }
 
