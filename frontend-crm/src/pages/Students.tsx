@@ -106,7 +106,7 @@ export default function Students() {
     >
       <div className="card-header">
         <h2 className="card-title">База студентов</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="card-header-actions" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {isAdmin && (
             <div className="scope-switch">
               <button

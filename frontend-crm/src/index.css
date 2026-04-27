@@ -929,32 +929,44 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 
 /* Компактные кнопки в шапках карточек на узких экранах */
 @media (max-width: 720px) {
-  .card-header { gap: 8px; padding: 12px 14px 6px !important; }
+  .card-header {
+    gap: 8px; padding: 12px 14px 8px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .card-header-actions {
+    width: 100%; justify-content: flex-start;
+    flex-wrap: wrap; gap: 6px !important;
+  }
   .card-header .btn,
   .card-header .btn-primary,
   .card-header .btn-secondary {
-    padding: 7px 12px;
-    font-size: 13px;
-    min-height: 36px;
+    padding: 7px 10px;
+    font-size: 12px;
+    min-height: 34px;
     line-height: 1.1;
     white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
   }
-  .card-header .btn .material-symbols-rounded { font-size: 16px; }
+  .card-header .btn .material-symbols-rounded { font-size: 15px; }
   .card-title { font-size: 16px; }
-  /* Scope-switch (Мои/Все) — компактный */
-  .scope-switch { gap: 0; }
+  /* Scope-switch (Мои/Все) — компактный, не растягиваем */
+  .scope-switch { gap: 0; flex: 0 0 auto; }
   .scope-btn {
-    padding: 7px 10px; font-size: 12px;
-    min-height: 36px;
+    padding: 6px 10px; font-size: 12px;
+    min-height: 34px;
   }
   .scope-btn .material-symbols-rounded { font-size: 14px; }
 }
 
 @media (max-width: 480px) {
-  .card-header { flex-wrap: wrap; }
-  .card-header .btn { padding: 6px 10px; font-size: 12px; min-height: 32px; }
-  .card-header .btn .material-symbols-rounded { font-size: 14px; }
-  .scope-btn { padding: 6px 8px; font-size: 11px; min-height: 32px; }
+  .card-header .btn { padding: 6px 8px; font-size: 11px; min-height: 32px; }
+  .card-header .btn .material-symbols-rounded { font-size: 13px; }
+  .scope-btn { padding: 5px 8px; font-size: 11px; min-height: 32px; }
+  /* Каждая кнопка на свою строку при сильно узком экране */
+  .card-header-actions { gap: 4px !important; }
 }
 
 /* ===== MOBILE (до 720) — sidebar становится верхней горизонтальной навигацией ===== */
