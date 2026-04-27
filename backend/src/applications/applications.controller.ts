@@ -40,6 +40,7 @@ export class ApplicationsController {
       search,
       mine: mine === 'true',
       currentUserId: user?.id,
+      currentUserRole: user?.role,
     });
   }
 

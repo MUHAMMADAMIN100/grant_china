@@ -18,7 +18,9 @@ export default function Applications() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ApplicationStatus | ''>('');
   const [direction, setDirection] = useState<Direction | ''>('');
-  const [scope, setScope] = useState<Scope>('all');
+  const isAdmin = me?.role === 'ADMIN';
+  // Менеджер видит только свои заявки; админ может переключать.
+  const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
   const [loading, setLoading] = useState(true);
 
   const load = () => {
@@ -53,22 +55,24 @@ export default function Applications() {
     >
       <div className="card-header">
         <h2 className="card-title">Заявки</h2>
-        <div className="scope-switch">
-          <button
-            className={`scope-btn${scope === 'mine' ? ' active' : ''}`}
-            onClick={() => setScope('mine')}
-          >
-            <Icon name="person" size={16} />
-            Мои
-          </button>
-          <button
-            className={`scope-btn${scope === 'all' ? ' active' : ''}`}
-            onClick={() => setScope('all')}
-          >
-            <Icon name="groups" size={16} />
-            Все
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="scope-switch">
+            <button
+              className={`scope-btn${scope === 'mine' ? ' active' : ''}`}
+              onClick={() => setScope('mine')}
+            >
+              <Icon name="person" size={16} />
+              Мои
+            </button>
+            <button
+              className={`scope-btn${scope === 'all' ? ' active' : ''}`}
+              onClick={() => setScope('all')}
+            >
+              <Icon name="groups" size={16} />
+              Все
+            </button>
+          </div>
+        )}
       </div>
       <div className="card-body">
         <div className="filters">

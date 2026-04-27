@@ -22,7 +22,9 @@ export default function Students() {
   const [direction, setDirection] = useState<Direction | ''>('');
   const [status, setStatus] = useState<StudentStatus | ''>('');
   const [cabinet, setCabinet] = useState('');
-  const [scope, setScope] = useState<Scope>('all');
+  const isAdmin = me?.role === 'ADMIN';
+  // Менеджер видит только своих студентов; админ может переключать.
+  const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
   const [loading, setLoading] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportFrom, setReportFrom] = useState('');
@@ -105,22 +107,24 @@ export default function Students() {
       <div className="card-header">
         <h2 className="card-title">База студентов</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div className="scope-switch">
-            <button
-              className={`scope-btn${scope === 'mine' ? ' active' : ''}`}
-              onClick={() => setScope('mine')}
-            >
-              <Icon name="person" size={16} />
-              Мои
-            </button>
-            <button
-              className={`scope-btn${scope === 'all' ? ' active' : ''}`}
-              onClick={() => setScope('all')}
-            >
-              <Icon name="groups" size={16} />
-              Все
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="scope-switch">
+              <button
+                className={`scope-btn${scope === 'mine' ? ' active' : ''}`}
+                onClick={() => setScope('mine')}
+              >
+                <Icon name="person" size={16} />
+                Мои
+              </button>
+              <button
+                className={`scope-btn${scope === 'all' ? ' active' : ''}`}
+                onClick={() => setScope('all')}
+              >
+                <Icon name="groups" size={16} />
+                Все
+              </button>
+            </div>
+          )}
           <motion.button
             className="btn btn-secondary"
             onClick={() => setReportOpen(true)}

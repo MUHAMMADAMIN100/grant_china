@@ -927,37 +927,46 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .form-grid-2 { grid-template-columns: 1fr !important; gap: 0; }
 }
 
-/* ===== MOBILE (до 720) — sidebar становится нижней навигацией ===== */
+/* ===== MOBILE (до 720) — sidebar становится верхней горизонтальной навигацией ===== */
 @media (max-width: 720px) {
-  .app-layout { flex-direction: column; }
+  body { background: #f5f7fb; }
+  .app-layout { flex-direction: column; min-height: 100vh; }
   .sidebar {
-    width: 100%; height: auto; position: fixed;
-    bottom: 0; left: 0; right: 0; z-index: 50;
-    flex-direction: row;
-    border-top: 1px solid rgba(255,255,255,0.08);
+    width: 100%; height: auto; position: sticky;
+    top: 0; left: 0; right: 0; z-index: 50;
+    flex-direction: row; align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .sidebar-logo, .sidebar-user { display: none; }
   .sidebar-nav {
     flex: 1; padding: 6px 4px;
     display: flex; justify-content: space-around;
+    min-width: max-content;
   }
+  .sidebar-nav > div { flex: 1; min-width: 60px; }
   .sidebar-nav a {
     flex: 1; flex-direction: column; gap: 2px;
-    padding: 6px 4px; font-size: 10px; border-radius: 6px;
-    text-align: center; margin-bottom: 0; min-width: 0;
+    padding: 8px 4px; font-size: 10px; border-radius: 6px;
+    text-align: center; margin-bottom: 0; min-width: 60px;
   }
   .sidebar-nav a span:not(.sidebar-nav-icon) {
     display: block !important; font-size: 10px; line-height: 1.1;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }
   .sidebar-nav-icon { font-size: 20px; }
-  .main { padding-bottom: 72px; min-height: 100vh; }
+  .main {
+    padding-bottom: 16px; min-height: calc(100vh - 60px);
+    background: #f5f7fb; flex: 1;
+  }
   .topbar {
     padding: 0 14px; height: 56px;
-    position: sticky; top: 0;
+    position: sticky; top: 60px; background: white;
   }
   .topbar-title { font-size: 17px; }
-  .content { padding: 12px; }
+  .content { padding: 12px; background: #f5f7fb; min-height: 50vh; }
+  .card { background: white; }
 
   /* Card header — название + кнопки в колонку */
   .card-header {

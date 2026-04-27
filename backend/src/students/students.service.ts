@@ -169,13 +169,18 @@ export class StudentsService {
     search?: string;
     mine?: boolean;
     currentUserId?: string;
+    currentUserRole?: Role;
   }) {
     const where: Prisma.StudentWhereInput = {};
     if (filters.direction) where.direction = filters.direction;
     if (filters.status) where.status = filters.status;
     if (filters.cabinet) where.cabinet = filters.cabinet;
     const and: Prisma.StudentWhereInput[] = [];
-    if (filters.mine && filters.currentUserId) {
+    // Менеджеры (EMPLOYEE) всегда видят только своих, независимо от mine.
+    const restrictToMine =
+      (filters.mine && filters.currentUserId) ||
+      (filters.currentUserRole === 'EMPLOYEE' && filters.currentUserId);
+    if (restrictToMine) {
       and.push({
         OR: [
           { managerId: filters.currentUserId },

@@ -164,12 +164,17 @@ export class ApplicationsService {
     search?: string;
     mine?: boolean;
     currentUserId?: string;
+    currentUserRole?: Role;
   }) {
     const where: Prisma.ApplicationWhereInput = {};
     const and: Prisma.ApplicationWhereInput[] = [];
     if (filters.status) where.status = filters.status;
     if (filters.direction) where.direction = filters.direction;
-    if (filters.mine && filters.currentUserId) {
+    // EMPLOYEE всегда видит только свои заявки (даже если mine=false на фронте).
+    const restrictToMine =
+      (filters.mine && filters.currentUserId) ||
+      (filters.currentUserRole === 'EMPLOYEE' && filters.currentUserId);
+    if (restrictToMine) {
       and.push({
         OR: [
           { managerId: filters.currentUserId },

@@ -75,7 +75,7 @@ export default function Footer() {
               </li>
               <li>
                 <Icon name="schedule" size={16} />
-                <span>Пн–Пт: 9:00–18:00<br />Сб: 10:00–15:00</span>
+                <span>Пн–Сб: 12:00–18:00<br />Вс — выходной</span>
               </li>
             </ul>
           </div>

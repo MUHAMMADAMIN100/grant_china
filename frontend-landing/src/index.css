@@ -465,8 +465,8 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   max-width: 1000px; margin: 0 auto;
 }
 .testimonial-stage {
-  flex: 1; overflow: hidden; border-radius: 24px;
-  height: 560px; position: relative;
+  flex: 1; overflow: visible; border-radius: 24px;
+  min-height: 620px; height: auto; position: relative;
 }
 .testimonial-card {
   background: white;
@@ -477,6 +477,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   align-items: start;
   box-shadow: var(--shadow);
   position: absolute; inset: 0;
+  overflow-y: auto;
 }
 .testimonial-photo-col {
   display: flex; justify-content: center; align-items: flex-start;
@@ -1412,7 +1413,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   h1 { font-size: clamp(28px, 7vw, 40px); line-height: 1.15; }
   h2 { font-size: clamp(22px, 5vw, 32px); line-height: 1.2; }
   .section { padding: 60px 0; }
-  .testimonial-stage { height: 720px; }
+  .testimonial-stage { min-height: 820px; height: auto; }
   .testimonial-card {
     grid-template-columns: 1fr; gap: 20px; padding: 24px 18px; text-align: center;
     align-items: start;

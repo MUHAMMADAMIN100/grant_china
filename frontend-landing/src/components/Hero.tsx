@@ -64,10 +64,10 @@ export default function Hero() {
           viewport={{ once: true, amount: 0.3 }}
         >
           {[
-            { num: '800+', label: 'студентов отправили' },
-            { num: '50+', label: 'вузов-партнёров' },
-            { num: '10', label: 'лет на рынке' },
-            { num: '98%', label: 'успешных зачислений' },
+            { num: '823', label: 'студентов отправили' },
+            { num: '100+', label: 'вузов-партнёров' },
+            { num: '6', label: 'лет на рынке' },
+            { num: '100%', label: 'успешных зачислений' },
           ].map((s) => (
             <motion.div key={s.label} variants={fadeUp}>
               <div className="stat-num">{s.num}</div>
