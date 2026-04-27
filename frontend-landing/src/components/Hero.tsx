@@ -21,8 +21,8 @@ export default function Hero() {
               Обучение в <span className="accent">лучших вузах Китая</span> — без посредников
             </motion.h1>
             <motion.p variants={fadeUp}>
-              Помогаем студентам поступить на бакалавриат, в магистратуру и
-              на языковые курсы в топ-университеты Китая. Полное сопровождение:
+              Помогаем студентам поступить на языковые курсы, колледж, бакалавриат
+              и в магистратуру, в топ-университеты Китая. Полное сопровождение:
               от выбора программы до зачисления.
             </motion.p>
             <motion.div className="hero-cta" variants={fadeUp}>
@@ -64,10 +64,10 @@ export default function Hero() {
           viewport={{ once: true, amount: 0.3 }}
         >
           {[
-            { num: '823', label: 'студентов отправили' },
-            { num: '100+', label: 'вузов-партнёров' },
-            { num: '6', label: 'лет на рынке' },
-            { num: '100%', label: 'успешных зачислений' },
+            { num: '800+', label: 'студентов отправили' },
+            { num: '50+', label: 'вузов-партнёров' },
+            { num: '10', label: 'лет на рынке' },
+            { num: '98%', label: 'успешных зачислений' },
           ].map((s) => (
             <motion.div key={s.label} variants={fadeUp}>
               <div className="stat-num">{s.num}</div>
