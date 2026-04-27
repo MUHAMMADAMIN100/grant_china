@@ -85,14 +85,29 @@ export class ApplicationsService {
   }
 
   private smsTextForStatus(prev: ApplicationStatus, next: ApplicationStatus): string {
-    const label = ApplicationsService.STATUS_LABEL[next] || next;
+    const labelNext = ApplicationsService.STATUS_LABEL[next] || next;
+    const labelPrev = ApplicationsService.STATUS_LABEL[prev] || prev;
     if (next === 'ENROLLED') {
       return `🎉 GrantChina: Поздравляем! Вы зачислены. Подробности в личном кабинете.`;
     }
     if (this.isDowngrade(prev, next)) {
-      return `GrantChina: Заявка возвращена на этап «${label}». Свяжитесь с менеджером для уточнений.`;
+      return `GrantChina: Заявка возвращена с «${labelPrev}» на «${labelNext}». Свяжитесь с менеджером для уточнений.`;
     }
-    return `GrantChina: Статус Вашей заявки изменён → «${label}».`;
+    return `GrantChina: Статус Вашей заявки изменён: «${labelPrev}» → «${labelNext}».`;
+  }
+
+  /** Возвращает первый непустой номер телефона: из заявки, потом из связанного студента. */
+  private async resolvePhone(app: { phone: string | null; studentId?: string | null }): Promise<string | null> {
+    if (app.phone && app.phone.trim()) return app.phone.trim();
+    if (app.studentId) {
+      const s = await this.prisma.student.findUnique({
+        where: { id: app.studentId },
+        select: { phones: true },
+      });
+      const first = s?.phones?.[0];
+      if (first && first.trim()) return first.trim();
+    }
+    return null;
   }
 
   private static STATUS_LABEL: Record<ApplicationStatus, string> = {
@@ -258,10 +273,11 @@ export class ApplicationsService {
         this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
       }
       // SMS студенту: статус изменился на «Документы на проверке»
-      if (updated.phone) {
-        const text = this.smsTextForStatus(existing.status, ApplicationStatus.DOCS_REVIEW);
-        this.sms.send(updated.phone, text).catch(() => undefined);
-      }
+      const text = this.smsTextForStatus(existing.status, ApplicationStatus.DOCS_REVIEW);
+      this.resolvePhone(updated).then((phone) => {
+        if (phone) this.sms.send(phone, text).catch(() => undefined);
+      }).catch(() => undefined);
+
       // ActivityLog
       this.activity
         .log({
@@ -277,11 +293,13 @@ export class ApplicationsService {
       return updated;
     }
 
-    // Гейт: нельзя переходить в DOCS_SUBMITTED пока не загружены все 10 документов
+    // Гейт: нельзя переходить в DOCS_SUBMITTED пока не загружены все 10 документов.
+    // Гейт срабатывает только при движении ВПЕРЁД (с этапа ниже), но не при откате назад.
     if (
       dto.status === ApplicationStatus.DOCS_SUBMITTED &&
       existing.status !== ApplicationStatus.DOCS_SUBMITTED &&
-      existing.studentId
+      existing.studentId &&
+      !this.isDowngrade(existing.status, ApplicationStatus.DOCS_SUBMITTED)
     ) {
       const missing = await this.missingRequiredDocs(existing.studentId);
       if (missing.length > 0) {
@@ -302,10 +320,12 @@ export class ApplicationsService {
       this.realtime.emitStudent(updated.studentId, 'application:updated', { application: updated });
     }
 
-    // SMS студенту при смене статуса
-    if (dto.status && dto.status !== existing.status && updated.phone) {
+    // SMS студенту при ЛЮБОЙ смене статуса (вперёд/назад/на ENROLLED)
+    if (dto.status && dto.status !== existing.status) {
       const text = this.smsTextForStatus(existing.status, dto.status);
-      this.sms.send(updated.phone, text).catch(() => undefined);
+      this.resolvePhone(updated).then((phone) => {
+        if (phone) this.sms.send(phone, text).catch(() => undefined);
+      }).catch(() => undefined);
     }
 
     // ActivityLog для смены статуса
