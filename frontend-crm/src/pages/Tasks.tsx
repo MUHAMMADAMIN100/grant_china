@@ -8,6 +8,7 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
+import { compose, hasErrors, maxLen, minLen, required, validateAll } from '../utils/validators';
 
 type Scope = 'all' | 'mine';
 
@@ -51,10 +52,20 @@ export default function Tasks() {
     }
   }, [isAdmin]);
 
+  const formErrors = validateAll(
+    { title: form.title, description: form.description, assignedToId: form.assignedToId },
+    {
+      title: compose(required('Введите заголовок'), minLen(3, 'Минимум 3 символа'), maxLen(200)),
+      description: compose(required('Опишите задачу'), minLen(5, 'Минимум 5 символов'), maxLen(2000)),
+      assignedToId: required('Выберите сотрудника'),
+    },
+  );
+  const formInvalid = hasErrors(formErrors);
+
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.title.trim() || !form.description.trim() || !form.assignedToId) {
-      toast('Заполните все поля', 'error');
+    if (formInvalid) {
+      toast('Заполните все поля корректно', 'error');
       return;
     }
     setSubmitting(true);
@@ -159,26 +170,30 @@ export default function Tasks() {
               style={{ marginBottom: 20, padding: 18, background: 'var(--bg)', borderRadius: 10, overflow: 'hidden' }}
             >
               <div className="form-group">
-                <label>Заголовок</label>
+                <label>Заголовок *</label>
                 <input
                   type="text"
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                   placeholder="Например: Собрать документы для Иванова"
                   maxLength={200}
+                  className={formErrors.title ? 'input-error' : ''}
                   required
                 />
+                {formErrors.title && <div className="form-error-text">{formErrors.title}</div>}
               </div>
               <div className="form-group">
-                <label>Описание</label>
+                <label>Описание *</label>
                 <textarea
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   placeholder="Что именно нужно сделать..."
                   maxLength={2000}
+                  className={formErrors.description ? 'input-error' : ''}
                   required
                   rows={4}
                 />
+                {formErrors.description && <div className="form-error-text">{formErrors.description}</div>}
               </div>
               <div className="form-group">
                 <label>Назначить сотрудника</label>
@@ -203,7 +218,12 @@ export default function Tasks() {
                 >
                   Отмена
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submitting || formInvalid}
+                  title={formInvalid ? 'Исправьте ошибки в форме' : ''}
+                >
                   {submitting ? 'Создаём...' : 'Создать'}
                 </button>
               </div>

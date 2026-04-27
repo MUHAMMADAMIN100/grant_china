@@ -8,6 +8,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import DirectionOptions from '../components/DirectionOptions';
+import { compose, hasErrors, maxLen, minLen, positive, required, validateAll } from '../utils/validators';
 
 const emptyForm: Partial<Program> = {
   name: '',
@@ -82,9 +83,29 @@ export default function Programs() {
     'program:deleted': () => load(),
   });
 
+  const formErrors = editing
+    ? validateAll(
+        {
+          name: editing.name || '',
+          university: editing.university || '',
+          city: editing.city || '',
+          major: editing.major || '',
+          cost: editing.cost ?? '',
+        },
+        {
+          name: compose(required('Введите название'), minLen(2), maxLen(200)),
+          university: compose(required('Введите университет'), minLen(2), maxLen(200)),
+          city: compose(required('Укажите город'), minLen(2), maxLen(100)),
+          major: compose(required('Укажите специальность'), minLen(2), maxLen(200)),
+          cost: compose(required('Укажите стоимость'), positive('Стоимость должна быть больше 0')),
+        },
+      )
+    : {};
+  const formInvalid = hasErrors(formErrors);
+
   const onSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editing) return;
+    if (!editing || formInvalid) return;
     setSaving(true);
     try {
       const payload = {
@@ -256,20 +277,48 @@ export default function Programs() {
               </div>
               <div className="form-group">
                 <label>Название программы *</label>
-                <input value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} required />
+                <input
+                  value={editing.name || ''}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  className={formErrors.name ? 'input-error' : ''}
+                  maxLength={200}
+                  required
+                />
+                {formErrors.name && <div className="form-error-text">{formErrors.name}</div>}
               </div>
               <div className="form-grid-2">
                 <div className="form-group">
                   <label>Университет *</label>
-                  <input value={editing.university || ''} onChange={(e) => setEditing({ ...editing, university: e.target.value })} required />
+                  <input
+                    value={editing.university || ''}
+                    onChange={(e) => setEditing({ ...editing, university: e.target.value })}
+                    className={formErrors.university ? 'input-error' : ''}
+                    maxLength={200}
+                    required
+                  />
+                  {formErrors.university && <div className="form-error-text">{formErrors.university}</div>}
                 </div>
                 <div className="form-group">
                   <label>Город *</label>
-                  <input value={editing.city || ''} onChange={(e) => setEditing({ ...editing, city: e.target.value })} required />
+                  <input
+                    value={editing.city || ''}
+                    onChange={(e) => setEditing({ ...editing, city: e.target.value })}
+                    className={formErrors.city ? 'input-error' : ''}
+                    maxLength={100}
+                    required
+                  />
+                  {formErrors.city && <div className="form-error-text">{formErrors.city}</div>}
                 </div>
                 <div className="form-group">
                   <label>Специальность *</label>
-                  <input value={editing.major || ''} onChange={(e) => setEditing({ ...editing, major: e.target.value })} required />
+                  <input
+                    value={editing.major || ''}
+                    onChange={(e) => setEditing({ ...editing, major: e.target.value })}
+                    className={formErrors.major ? 'input-error' : ''}
+                    maxLength={200}
+                    required
+                  />
+                  {formErrors.major && <div className="form-error-text">{formErrors.major}</div>}
                 </div>
                 <div className="form-group">
                   <label>Направление *</label>
@@ -279,7 +328,16 @@ export default function Programs() {
                 </div>
                 <div className="form-group">
                   <label>Стоимость / год *</label>
-                  <input type="number" min={0} value={editing.cost as any || ''} onChange={(e) => setEditing({ ...editing, cost: Number(e.target.value) })} required />
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={editing.cost as any || ''}
+                    onChange={(e) => setEditing({ ...editing, cost: Number(e.target.value) })}
+                    className={formErrors.cost ? 'input-error' : ''}
+                    required
+                  />
+                  {formErrors.cost && <div className="form-error-text">{formErrors.cost}</div>}
                 </div>
                 <div className="form-group">
                   <label>Валюта</label>
@@ -353,7 +411,12 @@ export default function Programs() {
               </div>
               <div className="form-actions">
                 <button type="button" className="btn btn-secondary" onClick={closeEditor} disabled={saving}>Отмена</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={saving || formInvalid}
+                  title={formInvalid ? 'Исправьте ошибки в форме' : ''}
+                >
                   {saving ? 'Сохраняем...' : 'Сохранить'}
                 </button>
               </div>

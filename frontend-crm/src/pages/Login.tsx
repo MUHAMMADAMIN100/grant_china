@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../store/auth';
+import { compose, email as emailRule, hasErrors, minLen, required, validateAll } from '../utils/validators';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -10,9 +11,21 @@ export default function Login() {
   const [password, setPassword] = useState('admin123');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
+
+  const errors = validateAll(
+    { email, password },
+    {
+      email: compose(required('Введите email'), emailRule()),
+      password: compose(required('Введите пароль'), minLen(4, 'Минимум 4 символа')),
+    },
+  );
+  const showErr = (k: 'email' | 'password') => touched[k] && errors[k];
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setTouched({ email: true, password: true });
+    if (hasErrors(errors)) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -63,7 +76,16 @@ export default function Login() {
           transition={{ delay: 0.3, duration: 0.3 }}
         >
           <label>Email</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+            className={showErr('email') ? 'input-error' : ''}
+            required
+            autoComplete="email"
+          />
+          {showErr('email') && <div className="form-error-text">{errors.email}</div>}
         </motion.div>
         <motion.div
           className="form-group"
@@ -72,7 +94,16 @@ export default function Login() {
           transition={{ delay: 0.4, duration: 0.3 }}
         >
           <label>Пароль</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+            className={showErr('password') ? 'input-error' : ''}
+            required
+            autoComplete="current-password"
+          />
+          {showErr('password') && <div className="form-error-text">{errors.password}</div>}
         </motion.div>
         <motion.button
           type="submit"

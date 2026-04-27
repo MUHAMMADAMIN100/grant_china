@@ -3,6 +3,7 @@ import { createUser, deleteUser, listUsers, updateUser } from '../api/users';
 import type { Role, User } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
+import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, required, validateAll } from '../utils/validators';
 
 export default function Users() {
   const me = useAuth((s) => s.user);
@@ -10,18 +11,33 @@ export default function Users() {
   const [items, setItems] = useState<User[]>([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ email: '', fullName: '', password: '', role: 'EMPLOYEE' as Role });
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+
+  const formErrors = validateAll(
+    form,
+    {
+      email: compose(required('Введите email'), emailRule()),
+      fullName: compose(required('Введите ФИО'), minLen(2), maxLen(100)),
+      password: compose(required('Введите пароль'), passwordRule()),
+    },
+  );
+  const showErr = (k: keyof typeof formErrors) => touched[k] && formErrors[k];
+  const formInvalid = hasErrors(formErrors);
 
   const load = () => listUsers().then(setItems).catch(() => {});
   useEffect(() => { load(); }, []);
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    setTouched({ email: true, fullName: true, password: true });
+    if (formInvalid) return;
     setError(null);
     try {
       await createUser(form);
       setCreating(false);
       setForm({ email: '', fullName: '', password: '', role: 'EMPLOYEE' });
+      setTouched({});
       load();
     } catch (e: any) {
       setError(e.response?.data?.message?.toString() || 'Ошибка создания');
@@ -61,9 +77,43 @@ export default function Users() {
           <form onSubmit={onCreate} style={{ marginBottom: 22, padding: 18, background: '#f5f7fb', borderRadius: 10 }}>
             {error && <div className="error-banner">{error}</div>}
             <div className="form-grid-2">
-              <div className="form-group"><label>ФИО</label><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} required /></div>
-              <div className="form-group"><label>Email</label><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></div>
-              <div className="form-group"><label>Пароль</label><input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={6} /></div>
+              <div className="form-group">
+                <label>ФИО *</label>
+                <input
+                  value={form.fullName}
+                  onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+                  onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
+                  className={showErr('fullName') ? 'input-error' : ''}
+                  maxLength={100}
+                  required
+                />
+                {showErr('fullName') && <div className="form-error-text">{formErrors.fullName}</div>}
+              </div>
+              <div className="form-group">
+                <label>Email *</label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                  className={showErr('email') ? 'input-error' : ''}
+                  required
+                />
+                {showErr('email') && <div className="form-error-text">{formErrors.email}</div>}
+              </div>
+              <div className="form-group">
+                <label>Пароль * <span style={{ fontWeight: 400, color: 'var(--text-soft)', fontSize: 12 }}>— мин. 8 симв., буквы и цифры</span></label>
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+                  className={showErr('password') ? 'input-error' : ''}
+                  minLength={8}
+                  required
+                />
+                {showErr('password') && <div className="form-error-text">{formErrors.password}</div>}
+              </div>
               <div className="form-group">
                 <label>Роль</label>
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
@@ -74,7 +124,12 @@ export default function Users() {
             </div>
             <div className="form-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setCreating(false)}>Отмена</button>
-              <button type="submit" className="btn btn-primary">Создать</button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={formInvalid}
+                title={formInvalid ? 'Исправьте ошибки в форме' : ''}
+              >Создать</button>
             </div>
           </form>
         )}

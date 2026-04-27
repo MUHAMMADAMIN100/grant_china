@@ -1017,7 +1017,23 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .task-delete-btn { align-self: flex-end; }
 
   /* Диалог */
-  .enrolled-badge {
+  .input-error,
+input.input-error,
+textarea.input-error,
+select.input-error {
+  border-color: var(--danger) !important;
+  background: #fef2f2;
+}
+.form-error-text {
+  color: var(--danger); font-size: 12px; margin-top: 4px;
+  display: flex; align-items: center; gap: 4px;
+}
+.form-error-text::before {
+  content: 'error_outline'; font-family: 'Material Symbols Rounded';
+  font-size: 14px;
+}
+
+.enrolled-badge {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 12px; border-radius: 20px;
   background: #dcfce7; color: #166534;

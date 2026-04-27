@@ -5,6 +5,7 @@ import { createStudent } from '../api/students';
 import type { Direction } from '../api/types';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
+import { compose, email as emailRule, hasErrors, maxLen, minLen, phoneRule, required, validateAll } from '../utils/validators';
 
 export default function StudentNew() {
   const navigate = useNavigate();
@@ -21,8 +22,23 @@ export default function StudentNew() {
     | null
   >(null);
 
+  const errors = validateAll(
+    { fullName, phone, email, comment },
+    {
+      fullName: compose(required('Введите ФИО'), minLen(2), maxLen(100)),
+      phone: phoneRule(),
+      email: compose(required('Введите email'), emailRule()),
+      comment: maxLen(1000),
+    },
+  );
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const showErr = (k: keyof typeof errors) => touched[k] && errors[k];
+  const isInvalid = hasErrors(errors);
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setTouched({ fullName: true, phone: true, email: true, comment: true });
+    if (isInvalid) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -65,16 +81,40 @@ export default function StudentNew() {
         <form onSubmit={onSubmit}>
           <div className="form-group">
             <label>ФИО *</label>
-            <input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+            <input
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
+              className={showErr('fullName') ? 'input-error' : ''}
+              maxLength={100}
+              required
+            />
+            {showErr('fullName') && <div className="form-error-text">{errors.fullName}</div>}
           </div>
           <div className="form-grid-2">
             <div className="form-group">
               <label>Телефон</label>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+992 ..." />
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                onBlur={() => setTouched((t) => ({ ...t, phone: true }))}
+                className={showErr('phone') ? 'input-error' : ''}
+                placeholder="+992 ..."
+                inputMode="tel"
+              />
+              {showErr('phone') && <div className="form-error-text">{errors.phone}</div>}
             </div>
             <div className="form-group">
               <label>Email * <span style={{ fontWeight: 400, color: 'var(--text-soft)', fontSize: 12 }}>— станет логином студента</span></label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                className={showErr('email') ? 'input-error' : ''}
+                required
+              />
+              {showErr('email') && <div className="form-error-text">{errors.email}</div>}
             </div>
           </div>
           <div className="form-group">
@@ -89,12 +129,23 @@ export default function StudentNew() {
             </select>
           </div>
           <div className="form-group">
-            <label>Комментарий</label>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} />
+            <label>Комментарий <span style={{ fontWeight: 400, color: 'var(--text-soft)', fontSize: 12 }}>— до 1000 символов</span></label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              maxLength={1000}
+              className={showErr('comment') ? 'input-error' : ''}
+            />
+            {showErr('comment') && <div className="form-error-text">{errors.comment}</div>}
           </div>
           <div className="form-actions">
             <button type="button" className="btn btn-secondary" onClick={() => navigate('/students')}>Отмена</button>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={submitting || isInvalid}
+              title={isInvalid ? 'Исправьте ошибки в форме' : ''}
+            >
               {submitting ? 'Создаём...' : 'Создать'}
             </button>
           </div>
