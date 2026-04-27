@@ -82,8 +82,58 @@ export class StudentsService {
       include: STUDENT_INCLUDE,
     });
 
-    // Возвращаем студента + плейн-пароль отдельным полем (только в этом ответе!)
-    return { ...student, plainPassword };
+    // Автосоздаём связанную заявку со статусом NEW, чтобы степпер этапов был
+    // доступен сразу. Это нужно для студентов, заведённых вручную через CRM.
+    await this.prisma.application.create({
+      data: {
+        fullName: student.fullName,
+        phone: student.phones[0] || '',
+        email: student.email,
+        direction: student.direction,
+        comment: student.comment,
+        status: 'NEW',
+        studentId: student.id,
+      },
+    });
+
+    // Перечитываем студента уже с заявкой
+    const withApp = await this.prisma.student.findUnique({
+      where: { id: student.id },
+      include: STUDENT_INCLUDE,
+    });
+
+    return { ...(withApp || student), plainPassword };
+  }
+
+  /**
+   * Гарантирует, что у студента есть хотя бы одна заявка. Если нет — создаёт
+   * новую со статусом NEW. Используется для студентов, заведённых вручную
+   * до того, как авто-создание заявки появилось в коде.
+   */
+  async ensureApplication(id: string, user: CurrentUser) {
+    const student = await this.findOne(id);
+    this.ensureCanEdit(student, user);
+    const existing = await this.prisma.application.findFirst({
+      where: { studentId: id },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) {
+      return existing;
+    }
+    const created = await this.prisma.application.create({
+      data: {
+        fullName: student.fullName,
+        phone: student.phones[0] || '',
+        email: student.email,
+        direction: student.direction,
+        comment: student.comment,
+        status: 'NEW',
+        studentId: id,
+      },
+    });
+    this.realtime.emitStaff('application:new', { application: created });
+    this.realtime.emitStudent(id, 'student:updated', { studentId: id });
+    return created;
   }
 
   async regeneratePassword(id: string, user: CurrentUser) {

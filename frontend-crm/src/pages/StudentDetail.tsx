@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignStudentManager, deleteStudent, getStudent, regenerateStudentPassword, updateStudent, uploadPhoto } from '../api/students';
+import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, updateStudent, uploadPhoto } from '../api/students';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
@@ -170,12 +170,38 @@ export default function StudentDetail() {
           onReassign={onReassign}
         />
 
-        {student.applications && student.applications.length > 0 && (
+        {student.applications && student.applications.length > 0 ? (
           <ApplicationStatusStepper
             application={student.applications[0]}
             canEdit={canEdit}
             onChanged={reload}
           />
+        ) : (
+          canEdit && (
+            <div className="app-stepper" style={{ textAlign: 'center' }}>
+              <div className="app-stepper-title" style={{ marginBottom: 6 }}>
+                Этап поступления
+              </div>
+              <div style={{ color: 'var(--text-soft)', fontSize: 13, marginBottom: 12 }}>
+                У этого студента пока нет связанной заявки. Создайте её, чтобы отслеживать этапы поступления.
+              </div>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={async () => {
+                  try {
+                    await ensureStudentApplication(student.id);
+                    toast('Заявка создана', 'success');
+                    reload();
+                  } catch (e: any) {
+                    toast(e?.response?.data?.message || 'Ошибка', 'error');
+                  }
+                }}
+              >
+                <Icon name="add" size={16} style={{ marginRight: 4 }} />
+                Создать заявку
+              </button>
+            </div>
+          )
         )}
 
         {isAdmin && (

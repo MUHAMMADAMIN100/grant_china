@@ -19,6 +19,11 @@ export async function getStudent(id: string) {
   return data;
 }
 
+export async function ensureStudentApplication(id: string) {
+  const { data } = await api.post(`/students/${id}/ensure-application`);
+  return data;
+}
+
 export async function createStudent(payload: Partial<Student>) {
   const { data } = await api.post<Student>('/students', payload);
   return data;

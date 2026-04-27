@@ -151,4 +151,9 @@ export class StudentsController {
   removeDocument(@Param('docId') docId: string, @CurrentUser() user: any) {
     return this.students.removeDocument(docId, user);
   }
+
+  @Post(':id/ensure-application')
+  ensureApplication(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.students.ensureApplication(id, user);
+  }
 }
