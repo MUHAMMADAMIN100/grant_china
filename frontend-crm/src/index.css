@@ -959,17 +959,19 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
     min-height: 34px;
     line-height: 1.1;
     white-space: nowrap;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
     justify-content: center;
   }
   .card-header .btn .material-symbols-rounded { font-size: 15px; }
   .card-title { font-size: 16px; }
-  /* Scope-switch (Мои/Все) — компактный, не растягиваем */
-  .scope-switch { gap: 0; flex: 0 0 auto; }
+  /* Scope-switch (Мои/Все) — компактный, занимает столько, сколько нужно */
+  .scope-switch { gap: 0; flex: 0 1 auto; min-width: 0; }
   .scope-btn {
     padding: 6px 10px; font-size: 12px;
     min-height: 34px;
+    flex: 1 1 0;
+    min-width: 50px;
   }
   .scope-btn .material-symbols-rounded { font-size: 14px; }
 }
