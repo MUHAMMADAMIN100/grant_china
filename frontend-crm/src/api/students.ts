@@ -24,6 +24,11 @@ export async function ensureStudentApplication(id: string) {
   return data;
 }
 
+export async function updateStudentForm(id: string, form: any) {
+  const { data } = await api.patch(`/students/${id}/form`, form);
+  return data;
+}
+
 export async function createStudent(payload: Partial<Student>) {
   const { data } = await api.post<Student>('/students', payload);
   return data;

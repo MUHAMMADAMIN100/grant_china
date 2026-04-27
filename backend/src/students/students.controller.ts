@@ -156,4 +156,9 @@ export class StudentsController {
   ensureApplication(@Param('id') id: string, @CurrentUser() user: any) {
     return this.students.ensureApplication(id, user);
   }
+
+  @Patch(':id/form')
+  updateForm(@Param('id') id: string, @Body() form: any, @CurrentUser() user: any) {
+    return this.students.updateForm(id, form, user);
+  }
 }

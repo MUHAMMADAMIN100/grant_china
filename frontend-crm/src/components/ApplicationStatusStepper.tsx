@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
 import {
   APPLICATION_STAGES,
   STAGE_INDEX,
@@ -23,6 +22,8 @@ export default function ApplicationStatusStepper({ application, canEdit, onChang
   const [saving, setSaving] = useState(false);
 
   const currentIdx = STAGE_INDEX[application.status] ?? 0;
+  const nextStage = APPLICATION_STAGES[currentIdx + 1];
+  const prevStage = currentIdx > 0 ? APPLICATION_STAGES[currentIdx - 1] : null;
 
   const change = async (next: ApplicationStatus) => {
     if (!canEdit || saving || next === application.status) return;
@@ -39,54 +40,54 @@ export default function ApplicationStatusStepper({ application, canEdit, onChang
   };
 
   return (
-    <div className="app-stepper">
-      <div className="app-stepper-head">
-        <div>
-          <div className="app-stepper-title">Этап поступления</div>
-          <div className="app-stepper-current">
-            <span className="badge badge-warning">{STATUS_LABEL[application.status]}</span>
-          </div>
-        </div>
-        {canEdit && (
-          <select
-            className="app-stepper-select"
-            value={application.status}
-            disabled={saving}
-            onChange={(e) => change(e.target.value as ApplicationStatus)}
-          >
-            {APPLICATION_STAGES.map((s) => (
-              <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      <div className="app-stepper-track" role="list">
-        {APPLICATION_STAGES.map((s, i) => {
-          const reached = i <= currentIdx;
-          const isCurrent = i === currentIdx;
+    <div className="stage-bar">
+      <div className="stage-bar-track">
+        {APPLICATION_STAGES.map((stage, i) => {
+          const done = i < currentIdx;
+          const current = i === currentIdx;
           return (
-            <button
-              key={s}
-              type="button"
-              role="listitem"
-              className={`app-stepper-step${reached ? ' reached' : ''}${isCurrent ? ' current' : ''}`}
-              onClick={() => change(s)}
-              disabled={!canEdit || saving}
-              title={STATUS_LABEL[s]}
+            <div
+              key={stage}
+              className={`stage-step${done ? ' done' : ''}${current ? ' current' : ''}`}
+              onClick={() => canEdit && !saving && change(stage)}
+              style={canEdit ? { cursor: 'pointer' } : undefined}
+              title={canEdit ? `Перейти: ${STATUS_LABEL[stage]}` : STATUS_LABEL[stage]}
             >
-              <motion.span
-                className="app-stepper-dot"
-                whileHover={canEdit ? { scale: 1.1 } : {}}
-                whileTap={canEdit ? { scale: 0.9 } : {}}
-              >
-                {reached ? <Icon name="check" size={14} /> : i + 1}
-              </motion.span>
-              <span className="app-stepper-label">{STATUS_SHORT[s]}</span>
-            </button>
+              <div className="stage-dot">
+                {done ? <Icon name="check" size={16} /> : <span>{i + 1}</span>}
+              </div>
+              <div className="stage-label">{STATUS_SHORT[stage]}</div>
+              {i < APPLICATION_STAGES.length - 1 && <div className="stage-connector" />}
+            </div>
           );
         })}
       </div>
+      {canEdit && (
+        <div className="stage-actions">
+          {prevStage && (
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => change(prevStage)}
+              disabled={saving}
+              title="Вернуться на предыдущий этап"
+            >
+              <Icon name="arrow_back" size={16} style={{ marginRight: 4 }} />
+              Назад
+            </button>
+          )}
+          {nextStage && (
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => change(nextStage)}
+              disabled={saving}
+              title={`Перейти: ${STATUS_LABEL[nextStage]}`}
+            >
+              {STATUS_LABEL[nextStage]}
+              <Icon name="arrow_forward" size={16} style={{ marginLeft: 4 }} />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

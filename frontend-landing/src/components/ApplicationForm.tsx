@@ -3,28 +3,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { submitApplication, type Direction, DIRECTION_LABEL } from '../api';
 import { fadeUp, staggerContainer, viewportOnce } from '../motion';
 import Icon from '../Icon';
+import PhoneInput, { COUNTRIES } from './PhoneInput';
 
 const MAX_NAME = 100;
 const MAX_EMAIL = 120;
 const MAX_COMMENT = 500;
 
-type Country = { code: string; flag: string; label: string; minDigits: number; maxDigits: number };
-
-const COUNTRIES: Country[] = [
-  { code: '+992', flag: '🇹🇯', label: 'Таджикистан', minDigits: 9, maxDigits: 9 },
-  { code: '+7',   flag: '🇷🇺', label: 'Россия',      minDigits: 10, maxDigits: 10 },
-  { code: '+7',   flag: '🇰🇿', label: 'Казахстан',   minDigits: 10, maxDigits: 10 },
-  { code: '+998', flag: '🇺🇿', label: 'Узбекистан',  minDigits: 9, maxDigits: 9 },
-  { code: '+996', flag: '🇰🇬', label: 'Кыргызстан',  minDigits: 9, maxDigits: 9 },
-  { code: '+86',  flag: '🇨🇳', label: 'Китай',       minDigits: 11, maxDigits: 11 },
-];
-
 type Errors = Partial<Record<'fullName' | 'phone' | 'email' | 'comment', string>>;
 
 export default function ApplicationForm() {
   const [fullName, setFullName] = useState('');
-  const [countryIdx, setCountryIdx] = useState(0);
-  const [phoneLocal, setPhoneLocal] = useState('');
+  const [phone, setPhone] = useState(''); // полный номер с кодом
   const [email, setEmail] = useState('');
   const [direction, setDirection] = useState<Direction>('BACHELOR');
   const [comment, setComment] = useState('');
@@ -33,10 +22,6 @@ export default function ApplicationForm() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-
-  const country = COUNTRIES[countryIdx];
-  const phoneDigits = phoneLocal.replace(/\D/g, '');
-  const fullPhone = `${country.code}${phoneDigits}`;
 
   const validateField = (field: keyof Errors, value: string): string | undefined => {
     if (field === 'fullName') {
@@ -49,10 +34,13 @@ export default function ApplicationForm() {
       return;
     }
     if (field === 'phone') {
-      const digits = (value || '').replace(/\D/g, '');
-      if (digits.length === 0) return 'Укажите номер телефона';
-      if (digits.length < country.minDigits) return `Слишком короткий номер для ${country.label} (нужно ${country.minDigits} цифр)`;
-      if (digits.length > country.maxDigits) return `Слишком длинный номер для ${country.label}`;
+      const v = (value || '').trim();
+      if (!v) return 'Укажите номер телефона';
+      const matched = COUNTRIES.find((c) => v.startsWith(c.code));
+      if (!matched) return 'Выберите код страны';
+      const digits = v.slice(matched.code.length).replace(/\D/g, '');
+      if (digits.length < matched.minDigits) return `Слишком короткий номер (нужно ${matched.minDigits} цифр)`;
+      if (digits.length > matched.maxDigits) return `Слишком длинный номер`;
       return;
     }
     if (field === 'email') {
@@ -71,7 +59,7 @@ export default function ApplicationForm() {
 
   const checkAll = (): Errors => ({
     fullName: validateField('fullName', fullName),
-    phone: validateField('phone', phoneLocal),
+    phone: validateField('phone', phone),
     email: validateField('email', email),
     comment: validateField('comment', comment),
   });
@@ -86,7 +74,7 @@ export default function ApplicationForm() {
 
   const handleBlur = (field: keyof Errors) => {
     setTouched((t) => ({ ...t, [field]: true }));
-    const value = field === 'fullName' ? fullName : field === 'phone' ? phoneLocal : field === 'email' ? email : comment;
+    const value = field === 'fullName' ? fullName : field === 'phone' ? phone : field === 'email' ? email : comment;
     const err = validateField(field, value);
     setErrors((prev) => ({ ...prev, [field]: err }));
   };
@@ -94,10 +82,9 @@ export default function ApplicationForm() {
   const handleFieldChange = (field: keyof Errors, value: string) => {
     if (field === 'fullName') setFullName(value);
     else if (field === 'phone') {
-      const digits = value.replace(/\D/g, '').slice(0, country.maxDigits);
-      setPhoneLocal(digits);
+      setPhone(value);
       if (touched.phone || errors.phone) {
-        const err = validateField('phone', digits);
+        const err = validateField('phone', value);
         setErrors((prev) => ({ ...prev, phone: err }));
       }
       return;
@@ -122,7 +109,7 @@ export default function ApplicationForm() {
     try {
       await submitApplication({
         fullName: fullName.trim(),
-        phone: fullPhone,
+        phone: phone.trim(),
         email: email.trim() || undefined,
         direction,
         comment: comment.trim() || undefined,
@@ -132,7 +119,7 @@ export default function ApplicationForm() {
         (window as any).gtag?.('event', 'submit_application', { direction });
         (window as any).ym?.((window as any).__YM_ID__, 'reachGoal', 'APPLICATION_SUBMIT');
       } catch {}
-      setFullName(''); setPhoneLocal(''); setEmail(''); setComment('');
+      setFullName(''); setPhone(''); setEmail(''); setComment('');
       setDirection('BACHELOR');
       setErrors({});
       setTouched({});
@@ -226,35 +213,11 @@ export default function ApplicationForm() {
 
           <div className="form-row">
             <label>Номер телефона *</label>
-            <div className={`phone-input-wrap${invalid('phone') ? ' input-error' : ''}`}>
-              <select
-                className="phone-country"
-                value={countryIdx}
-                onChange={(e) => {
-                  setCountryIdx(Number(e.target.value));
-                  if (touched.phone || errors.phone) {
-                    const err = validateField('phone', phoneLocal);
-                    setErrors((prev) => ({ ...prev, phone: err }));
-                  }
-                }}
-              >
-                {COUNTRIES.map((c, i) => (
-                  <option key={`${c.code}-${c.label}`} value={i}>
-                    {c.flag} {c.code} ({c.label})
-                  </option>
-                ))}
-              </select>
-              <input
-                type="tel"
-                value={phoneLocal}
-                onChange={(e) => handleFieldChange('phone', e.target.value)}
-                onBlur={() => handleBlur('phone')}
-                placeholder={'9'.repeat(country.minDigits)}
-                autoComplete="tel-national"
-                inputMode="numeric"
-                maxLength={country.maxDigits}
-              />
-            </div>
+            <PhoneInput
+              value={phone}
+              onChange={(v) => handleFieldChange('phone', v)}
+              error={invalid('phone')}
+            />
             <AnimatePresence>
               {invalid('phone') && (
                 <motion.div
@@ -262,6 +225,7 @@ export default function ApplicationForm() {
                   initial={{ opacity: 0, y: -5 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
+                  onBlur={() => handleBlur('phone')}
                 >
                   {errors.phone}
                 </motion.div>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, updateStudent, uploadPhoto } from '../api/students';
+import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, updateStudent, updateStudentForm, uploadPhoto } from '../api/students';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
@@ -150,10 +150,20 @@ export default function StudentDetail() {
   const isMine = !assigned || student.managerId === me?.id || student.chinaManagerId === me?.id;
   const canEdit = isAdmin || isMine;
 
+  const isEnrolled = student.applications?.[0]?.status === 'ENROLLED';
+
   return (
     <div className="card">
       <div className="card-header">
-        <h2 className="card-title">{student.fullName}</h2>
+        <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {student.fullName}
+          {isEnrolled && (
+            <span className="enrolled-badge" title="Студент зачислен">
+              <Icon name="verified" size={16} />
+              Зачислен
+            </span>
+          )}
+        </h2>
         <div style={{ display: 'flex', gap: 8 }}>
           {canEdit && !edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
           {canEdit && edit && <>
@@ -300,7 +310,20 @@ export default function StudentDetail() {
         />
 
         <div style={{ marginTop: 28 }}>
-          <ApplicationFormView form={student.applicationForm} />
+          <ApplicationFormView
+            form={student.applicationForm}
+            canEdit={canEdit}
+            onSave={async (form) => {
+              try {
+                await updateStudentForm(student.id, form);
+                toast('Анкета сохранена', 'success');
+                reload();
+              } catch (e: any) {
+                toast(e?.response?.data?.message || 'Ошибка', 'error');
+                throw e;
+              }
+            }}
+          />
         </div>
       </div>
 

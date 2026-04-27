@@ -1,4 +1,4 @@
-export type FieldKind = 'text' | 'date' | 'email' | 'tel' | 'number' | 'textarea' | 'radio' | 'year';
+export type FieldKind = 'text' | 'date' | 'email' | 'tel' | 'number' | 'textarea' | 'radio' | 'year' | 'select';
 
 export interface FieldDef {
   key: string;
@@ -114,19 +114,23 @@ export const FORM_SECTIONS: SectionDef[] = [
         key: 'chineseProficiency',
         label: 'Уровень китайского',
         labelEn: 'Chinese Proficiency',
-        kind: 'radio',
+        kind: 'select',
         options: [
-          { value: 'EXCELLENT', label: 'Отлично' },
-          { value: 'GOOD', label: 'Хорошо' },
-          { value: 'POOR', label: 'Слабо' },
-          { value: 'NONE', label: 'Не знаю' },
+          { value: 'NONE', label: 'Не владею' },
+          { value: 'A1', label: 'A1 — начальный' },
+          { value: 'A2', label: 'A2 — элементарный' },
+          { value: 'B1', label: 'B1 — средний' },
+          { value: 'B2', label: 'B2 — выше среднего' },
+          { value: 'C1', label: 'C1 — продвинутый' },
+          { value: 'C2', label: 'C2 — свободный' },
+          { value: 'NATIVE', label: 'Носитель' },
         ],
       },
       {
         key: 'hskLevel',
         label: 'Уровень HSK',
         labelEn: 'HSK Level',
-        kind: 'radio',
+        kind: 'select',
         options: [
           { value: 'NO', label: 'Нет' },
           { value: 'HSK1', label: 'HSK 1' },
@@ -141,12 +145,16 @@ export const FORM_SECTIONS: SectionDef[] = [
         key: 'englishProficiency',
         label: 'Уровень английского',
         labelEn: 'English Proficiency',
-        kind: 'radio',
+        kind: 'select',
         options: [
-          { value: 'EXCELLENT', label: 'Отлично' },
-          { value: 'GOOD', label: 'Хорошо' },
-          { value: 'POOR', label: 'Слабо' },
-          { value: 'NONE', label: 'Не знаю' },
+          { value: 'NONE', label: 'Не владею' },
+          { value: 'A1', label: 'A1 — начальный' },
+          { value: 'A2', label: 'A2 — элементарный' },
+          { value: 'B1', label: 'B1 — средний' },
+          { value: 'B2', label: 'B2 — выше среднего' },
+          { value: 'C1', label: 'C1 — продвинутый' },
+          { value: 'C2', label: 'C2 — свободный' },
+          { value: 'NATIVE', label: 'Носитель' },
         ],
       },
       { key: 'toefl', label: 'TOEFL (балл)', labelEn: 'TOEFL Score' },

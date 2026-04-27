@@ -10,6 +10,7 @@ import {
 } from '../formSchema';
 import { getStudentForm, saveStudentForm } from '../studentApi';
 import Icon from '../Icon';
+import PhoneInput from './PhoneInput';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -109,6 +110,35 @@ function Field({
           <option value="">—</option>
           {Array.from({ length: 60 }, (_, i) => CURRENT_YEAR + 5 - i).map((y) => (
             <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (def.kind === 'tel') {
+    return (
+      <div className="af-field">
+        <label className="af-label">
+          {def.label} <span className="af-label-en">{def.labelEn}</span>
+          {def.optional && <span className="af-optional">— необязательно</span>}
+        </label>
+        <PhoneInput value={value || ''} onChange={onChange} />
+      </div>
+    );
+  }
+
+  if (def.kind === 'select' && def.options) {
+    return (
+      <div className="af-field">
+        <label className="af-label">
+          {def.label} <span className="af-label-en">{def.labelEn}</span>
+          {def.optional && <span className="af-optional">— необязательно</span>}
+        </label>
+        <select {...common}>
+          <option value="">— выберите —</option>
+          {def.options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
       </div>

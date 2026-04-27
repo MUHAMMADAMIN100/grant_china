@@ -56,6 +56,7 @@ export default function StudentCabinet() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [tab, setTab] = useState<'home' | 'programs'>('home');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const otherRef = useRef<HTMLInputElement>(null);
 
@@ -153,6 +154,24 @@ export default function StudentCabinet() {
       </header>
 
       <main className="container stu-main">
+        <div className="stu-tabs">
+          <button
+            type="button"
+            className={`stu-tab${tab === 'home' ? ' active' : ''}`}
+            onClick={() => setTab('home')}
+          >
+            <Icon name="dashboard" size={18} />
+            Главная
+          </button>
+          <button
+            type="button"
+            className={`stu-tab${tab === 'programs' ? ' active' : ''}`}
+            onClick={() => setTab('programs')}
+          >
+            <Icon name="menu_book" size={18} />
+            Программы
+          </button>
+        </div>
         <AnimatePresence>
           {toast && (
             <motion.div
@@ -167,45 +186,49 @@ export default function StudentCabinet() {
           )}
         </AnimatePresence>
 
-        {/* Поздравление при зачислении */}
-        {me.applications?.[0]?.status === 'ENROLLED' && (
+        {tab === 'programs' ? (
           <motion.div
-            className="stu-celebrate"
-            initial={{ opacity: 0, scale: 0.9, y: -20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ type: 'spring', stiffness: 200, damping: 18 }}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
           >
-            <div className="stu-celebrate-icon">🎉</div>
-            <div>
-              <div className="stu-celebrate-title">Поздравляем с зачислением!</div>
-              <div className="stu-celebrate-sub">
-                Вы официально зачислены в университет. Поздравляем с поступлением — следующий шаг
-                ваш менеджер обсудит с вами лично.
-              </div>
-            </div>
+            <ProgramsSection />
           </motion.div>
+        ) : (
+          <>
+            {/* Поздравление при зачислении */}
+            {me.applications?.[0]?.status === 'ENROLLED' && (
+              <motion.div
+                className="stu-celebrate"
+                initial={{ opacity: 0, scale: 0.9, y: -20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 200, damping: 18 }}
+              >
+                <div className="stu-celebrate-icon">🎉</div>
+                <div>
+                  <div className="stu-celebrate-title">Поздравляем с зачислением!</div>
+                  <div className="stu-celebrate-sub">
+                    Вы официально зачислены в университет. Поздравляем с поступлением — следующий шаг
+                    ваш менеджер обсудит с вами лично.
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Прогресс поступления */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              <EnrollmentProgress
+                currentStatus={me.applications?.[0]?.status}
+              />
+            </motion.div>
+          </>
         )}
 
-        {/* Прогресс поступления */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <EnrollmentProgress
-            currentStatus={me.applications?.[0]?.status}
-          />
-        </motion.div>
-
-        {/* Каталог программ */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.05 }}
-        >
-          <ProgramsSection />
-        </motion.div>
-
+        {tab === 'home' && (<>
         {/* Профиль */}
         <motion.section
           className="stu-card"
@@ -404,6 +427,7 @@ export default function StudentCabinet() {
         >
           <ApplicationFormSection />
         </motion.div>
+        </>)}
       </main>
     </div>
   );

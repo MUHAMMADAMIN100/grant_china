@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { ActivityService } from '../activity/activity.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 function generatePassword(length = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -34,7 +36,12 @@ type CurrentUser = { id: string; role: Role };
 
 @Injectable()
 export class StudentsService {
-  constructor(private prisma: PrismaService, private realtime: RealtimeGateway) {}
+  constructor(
+    private prisma: PrismaService,
+    private realtime: RealtimeGateway,
+    private activity: ActivityService,
+    private notifications: NotificationsService,
+  ) {}
 
   private ensureCanEdit(
     student: { managerId: string | null; chinaManagerId?: string | null },
@@ -227,6 +234,68 @@ export class StudentsService {
       include: STUDENT_INCLUDE,
     });
     this.realtime.emitStudentAndStaff(id, 'student:updated', { studentId: id });
+
+    // Логируем и уведомляем staff о каждом изменённом поле
+    const FIELD_LABELS: Record<string, string> = {
+      fullName: 'ФИО',
+      phones: 'Телефоны',
+      email: 'Email',
+      direction: 'Направление',
+      cabinet: 'Кабинет',
+      status: 'Статус',
+      comment: 'Комментарий',
+      photoUrl: 'Фото',
+    };
+    const changes: string[] = [];
+    for (const k of Object.keys(FIELD_LABELS)) {
+      const before = (existing as any)[k];
+      const after = (updated as any)[k];
+      const beforeS = Array.isArray(before) ? before.join(', ') : (before ?? '—');
+      const afterS = Array.isArray(after) ? after.join(', ') : (after ?? '—');
+      if (String(beforeS) !== String(afterS)) {
+        changes.push(`${FIELD_LABELS[k]}: ${beforeS} → ${afterS}`);
+      }
+    }
+    if (changes.length > 0) {
+      const summary = changes.join('; ');
+      this.activity?.log?.({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'STUDENT_UPDATE',
+        studentId: id,
+        studentName: updated.fullName,
+        details: summary,
+      }).catch(() => undefined);
+      this.notifications?.notifyAllStaff?.({
+        type: 'STUDENT_UPDATE',
+        title: 'Изменения у студента',
+        message: `${updated.fullName}: ${summary}`,
+        payload: { studentId: id },
+      }).catch(() => undefined);
+    }
+
+    return updated;
+  }
+
+  /** Сохраняет анкету студента из CRM (admin / manager). */
+  async updateForm(id: string, form: any, user: CurrentUser) {
+    const existing = await this.findOne(id);
+    this.ensureCanEdit(existing, user);
+    const updated = await this.prisma.student.update({
+      where: { id },
+      data: { applicationForm: form },
+      include: STUDENT_INCLUDE,
+    });
+    this.realtime.emitStudentAndStaff(id, 'form:updated', { studentId: id });
+    this.realtime.emitStudentAndStaff(id, 'student:updated', { studentId: id });
+    this.activity?.log?.({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'STUDENT_UPDATE',
+      studentId: id,
+      studentName: updated.fullName,
+      details: 'Изменена анкета студента',
+    }).catch(() => undefined);
     return updated;
   }
 

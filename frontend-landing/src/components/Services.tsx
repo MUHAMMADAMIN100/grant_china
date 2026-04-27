@@ -39,6 +39,42 @@ const services = [
       'Проживание в кампусе',
     ],
   },
+  {
+    iconClass: 'language',
+    icon: 'menu_book',
+    title: 'Языковой + колледж',
+    text: 'Год языковой подготовки + 3 года колледжа на китайском.',
+    items: [
+      'Старт без HSK',
+      'Гарантия места в колледже',
+      'Доступная стоимость',
+      'Подача с 16 лет',
+    ],
+  },
+  {
+    iconClass: 'bachelor',
+    icon: 'auto_stories',
+    title: 'Языковой + бакалавриат',
+    text: 'Год языковой подготовки + 4 года бакалавриата в топ-вузе Китая.',
+    items: [
+      'Поступление без знания китайского',
+      'Подготовка к HSK 4',
+      'Стипендиальные программы',
+      'Полное сопровождение',
+    ],
+  },
+  {
+    iconClass: 'master',
+    icon: 'school',
+    title: 'Колледж',
+    text: 'Профессиональное обучение 3 года: IT, медицина, дизайн, бизнес.',
+    items: [
+      'Практика-ориентированное обучение',
+      'Старт с HSK 3',
+      'Гибкие сроки 2-3 года',
+      'Гарантия зачисления',
+    ],
+  },
 ];
 
 export default function Services() {
@@ -54,7 +90,7 @@ export default function Services() {
           <motion.div className="section-eyebrow" variants={fadeUp}>
             Программы обучения
           </motion.div>
-          <motion.h2 variants={fadeUp}>Три направления, тысячи возможностей</motion.h2>
+          <motion.h2 variants={fadeUp}>Шесть направлений, тысячи возможностей</motion.h2>
           <motion.p className="section-sub" variants={fadeUp}>
             Выбирайте программу — и мы поможем поступить в выбранный вуз Китая под ключ
           </motion.p>
