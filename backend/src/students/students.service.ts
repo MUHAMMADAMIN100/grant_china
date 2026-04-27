@@ -84,7 +84,7 @@ export class StudentsService {
 
     // Автосоздаём связанную заявку со статусом NEW, чтобы степпер этапов был
     // доступен сразу. Это нужно для студентов, заведённых вручную через CRM.
-    await this.prisma.application.create({
+    const application = await this.prisma.application.create({
       data: {
         fullName: student.fullName,
         phone: student.phones[0] || '',
@@ -95,6 +95,11 @@ export class StudentsService {
         studentId: student.id,
       },
     });
+
+    // Сообщаем staff, что появилась новая заявка — чтобы открытый /applications
+    // у других менеджеров обновился без F5
+    this.realtime.emitStaff('application:new', { application });
+    this.realtime.emitStaff('student:created', { studentId: student.id });
 
     // Перечитываем студента уже с заявкой
     const withApp = await this.prisma.student.findUnique({
