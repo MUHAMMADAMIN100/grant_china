@@ -152,7 +152,11 @@ export default function ApplicationDetail() {
   const isMine = !assigned || app.managerId === me?.id || app.chinaManagerId === me?.id;
   const canAct = isAdmin || isMine;
   const currentIdx = STAGE_INDEX[app.status] ?? 0;
-  const canEdit = currentIdx >= 1 && currentIdx <= 4 && student && canAct;
+  // Админ может редактировать заявку на любом этапе.
+  // Менеджер — только пока заявка не зачислена (1..4) и есть студент.
+  const canEdit = isAdmin
+    ? !!student
+    : currentIdx >= 1 && currentIdx <= 4 && student && canAct;
   const uploadedTypes = new Set((student?.documents || []).map((d) => d.type).filter((t) => t && t !== 'OTHER'));
   const missingDocs = REQUIRED_DOCUMENTS.filter((r) => !uploadedTypes.has(r.type));
   const nextStage = APPLICATION_STAGES[currentIdx + 1];
