@@ -35,11 +35,18 @@ export const positive = (msg = 'Должно быть больше нуля'): R
   return undefined;
 };
 
-export const phoneRule = (msg = 'Некорректный номер телефона'): Rule => (v) => {
+// Везде требуем ровно 9 цифр в номере (без учёта кода страны вроде "+992").
+// Если в строку включён код "+992..." — суммарно получится 12 цифр; засчитываем
+// последние 9 как "номер абонента".
+export const phoneRule = (msg = 'Номер должен содержать 9 цифр'): Rule => (v) => {
   const s = String(v ?? '').trim();
   if (!s) return undefined;
   const digits = s.replace(/\D/g, '');
-  if (digits.length < 9 || digits.length > 15) return msg;
+  // Берём последние 9 цифр — они должны существовать (т.е. всего >= 9 цифр)
+  // и общий ввод не должен быть «обрезанным».
+  if (digits.length < 9) return 'Номер слишком короткий — нужно 9 цифр';
+  // Допускаем код страны: всего цифр не больше 9 (без кода) или 12 (с +992).
+  if (digits.length > 12) return msg;
   return undefined;
 };
 

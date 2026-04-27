@@ -8,13 +8,14 @@ export type Country = {
   maxDigits: number;
 };
 
+// Везде максимум 9 цифр (по требованию заказчика — формат TJ-номеров).
 export const COUNTRIES: Country[] = [
   { code: '+992', flag: '🇹🇯', label: 'Таджикистан', minDigits: 9, maxDigits: 9 },
-  { code: '+7',   flag: '🇷🇺', label: 'Россия',      minDigits: 10, maxDigits: 10 },
-  { code: '+7',   flag: '🇰🇿', label: 'Казахстан',   minDigits: 10, maxDigits: 10 },
+  { code: '+7',   flag: '🇷🇺', label: 'Россия',      minDigits: 9, maxDigits: 9 },
+  { code: '+7',   flag: '🇰🇿', label: 'Казахстан',   minDigits: 9, maxDigits: 9 },
   { code: '+998', flag: '🇺🇿', label: 'Узбекистан',  minDigits: 9, maxDigits: 9 },
   { code: '+996', flag: '🇰🇬', label: 'Кыргызстан',  minDigits: 9, maxDigits: 9 },
-  { code: '+86',  flag: '🇨🇳', label: 'Китай',       minDigits: 11, maxDigits: 11 },
+  { code: '+86',  flag: '🇨🇳', label: 'Китай',       minDigits: 9, maxDigits: 9 },
 ];
 
 const findCountryByPhone = (phone: string): { idx: number; rest: string } => {
