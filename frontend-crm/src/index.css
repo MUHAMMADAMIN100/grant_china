@@ -927,6 +927,36 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .form-grid-2 { grid-template-columns: 1fr !important; gap: 0; }
 }
 
+/* Компактные кнопки в шапках карточек на узких экранах */
+@media (max-width: 720px) {
+  .card-header { gap: 8px; padding: 12px 14px 6px !important; }
+  .card-header .btn,
+  .card-header .btn-primary,
+  .card-header .btn-secondary {
+    padding: 7px 12px;
+    font-size: 13px;
+    min-height: 36px;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .card-header .btn .material-symbols-rounded { font-size: 16px; }
+  .card-title { font-size: 16px; }
+  /* Scope-switch (Мои/Все) — компактный */
+  .scope-switch { gap: 0; }
+  .scope-btn {
+    padding: 7px 10px; font-size: 12px;
+    min-height: 36px;
+  }
+  .scope-btn .material-symbols-rounded { font-size: 14px; }
+}
+
+@media (max-width: 480px) {
+  .card-header { flex-wrap: wrap; }
+  .card-header .btn { padding: 6px 10px; font-size: 12px; min-height: 32px; }
+  .card-header .btn .material-symbols-rounded { font-size: 14px; }
+  .scope-btn { padding: 6px 8px; font-size: 11px; min-height: 32px; }
+}
+
 /* ===== MOBILE (до 720) — sidebar становится верхней горизонтальной навигацией ===== */
 @media (max-width: 720px) {
   body { background: #f5f7fb; }
