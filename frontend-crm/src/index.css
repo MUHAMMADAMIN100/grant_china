@@ -770,14 +770,27 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   gap: 12px; padding: 12px 14px;
   background: var(--primary-soft); border: 1px solid rgba(213, 43, 43, 0.2);
   border-radius: 10px; margin-bottom: 18px;
+  flex-wrap: wrap;
 }
-.access-bar-info { display: flex; align-items: center; gap: 10px; }
-.access-bar-info .material-symbols-rounded { color: var(--primary); }
+.access-bar-info { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 200px; }
+.access-bar-info > div { min-width: 0; }
+.access-bar-info .material-symbols-rounded { color: var(--primary); flex-shrink: 0; }
 .access-bar-title {
   font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--primary); font-weight: 600;
 }
-.access-bar-email { font-size: 14px; color: var(--text); }
+.access-bar-email {
+  font-size: 14px; color: var(--text);
+  word-break: break-all;
+}
+.access-bar > .btn { flex-shrink: 0; }
+@media (max-width: 720px) {
+  .access-bar { padding: 10px 12px; gap: 8px; }
+  .access-bar-info { flex: 1 1 100%; }
+  .access-bar > .btn { width: 100%; justify-content: center; }
+  .access-bar-email { font-size: 13px; }
+  .access-bar-title { font-size: 11px; }
+}
 
 /* Application form (readonly view in CRM) */
 .af-view {
