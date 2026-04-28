@@ -102,7 +102,7 @@ export class StudentsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: uploadStorage,
-      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
+      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '209715200', 10) },
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.startsWith('image/')) {
           return cb(new BadRequestException('Только изображения'), false);
@@ -125,7 +125,7 @@ export class StudentsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: uploadStorage,
-      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
+      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '209715200', 10) },
     }),
   )
   async uploadDocument(

@@ -812,7 +812,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   padding: 6px 10px; border-radius: 8px; font-weight: 500; font-size: 12px;
   display: inline-flex; align-items: center; gap: 4px;
 }
-.btn-danger:hover { background: #dc2626; }
+.btn-danger:hover { background: #dc2626; color: white; }
+/* Текст на цветных кнопках всегда виден, даже если родительский контекст перекрашивает */
+.btn-primary, .btn-primary:hover, .btn-primary:focus, .btn-primary:active,
+.btn-danger, .btn-danger:hover, .btn-danger:focus, .btn-danger:active { color: white !important; }
+.btn-primary .material-symbols-rounded, .btn-danger .material-symbols-rounded { color: white !important; }
 
 .stu-toast {
   position: fixed; top: 20px; right: 20px; z-index: 100;
