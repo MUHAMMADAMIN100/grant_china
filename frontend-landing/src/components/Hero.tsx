@@ -52,7 +52,13 @@ export default function Hero() {
               transition: { y: { duration: 4, repeat: Infinity, ease: 'easeInOut' } },
             }}
           >
-            <img src="/backlogoo.png" alt="Grant China" className="hero-logo" />
+            <div className="hero-brand">
+              <span className="brand-text hero-brand-text">
+                <span className="brand-grant">GRANT</span>
+                <span className="brand-china">CHINA</span>
+              </span>
+              <div className="hero-brand-sub">Образование в Китае</div>
+            </div>
           </motion.div>
         </motion.div>
 

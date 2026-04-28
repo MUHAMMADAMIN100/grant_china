@@ -32,7 +32,10 @@ export default function Sidebar() {
         whileHover={{ scale: 1.03 }}
         transition={{ type: 'spring', stiffness: 300 }}
       >
-        <img src="/backlogoo.png" alt="Grant China" className="sidebar-logo-image" />
+        <span className="brand-text">
+          <span className="brand-grant">GRANT</span>
+          <span className="brand-china">CHINA</span>
+        </span>
       </motion.div>
       <motion.nav
         className="sidebar-nav"

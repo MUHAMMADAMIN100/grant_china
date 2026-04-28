@@ -45,7 +45,10 @@ export default function Header() {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
         >
-          <img src="/backlogoo.png" alt="Grant China" className="logo-image" />
+          <span className="brand-text">
+            <span className="brand-grant">GRANT</span>
+            <span className="brand-china">CHINA</span>
+          </span>
         </motion.a>
 
         <nav className="nav nav-desktop">
@@ -102,7 +105,10 @@ export default function Header() {
               transition={{ type: 'tween', duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
               <div className="header-mobile-top">
-                <img src="/backlogoo.png" alt="Grant China" className="logo-image" />
+                <span className="brand-text" style={{ fontSize: 20 }}>
+                  <span className="brand-grant">GRANT</span>
+                  <span className="brand-china">CHINA</span>
+                </span>
                 <button
                   type="button"
                   className="header-mobile-close"

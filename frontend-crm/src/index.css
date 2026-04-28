@@ -67,6 +67,16 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .sidebar-logo-image {
   height: 64px; width: auto; display: block;
 }
+.brand-text {
+  font-family: 'Noto Sans Myanmar', system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: 1.5px;
+  display: inline-flex; align-items: center; gap: 4px;
+  white-space: nowrap;
+}
+.brand-text .brand-grant { color: white; }
+.brand-text .brand-china { color: var(--primary); }
 .sidebar-logo-mark {
   width: 36px; height: 36px; border-radius: 10px;
   background: linear-gradient(135deg, var(--primary), #ff6b6b);
@@ -315,6 +325,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .login-logo-image {
   height: 130px; width: auto; display: block;
 }
+.login-brand {
+  font-size: 30px;
+  letter-spacing: 2.5px;
+}
+.login-brand .brand-grant { color: var(--text); }
 .login-logo-label {
   font-size: 14px; font-weight: 700;
   letter-spacing: 3px; color: var(--primary);
