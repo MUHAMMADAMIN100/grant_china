@@ -82,25 +82,28 @@ interface Props {
  * По умолчанию подставляет +992 🇹🇯.
  */
 export default function PhoneInput({ value, onChange, error, placeholder }: Props) {
-  const initial = useMemo(() => findCountryByPhone(value || '+992'), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [countryIdx, setCountryIdx] = useState(initial.idx);
-  const [local, setLocal] = useState(initial.rest);
+  // Lazy initializer: вычисляется один раз при монтировании по props.value.
+  const [countryIdx, setCountryIdx] = useState(() => findCountryByPhone(value || '+992').idx);
+  const [local, setLocal] = useState(() => findCountryByPhone(value || '+992').rest);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const wrapRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Синхронизация с внешним value. countryIdx/local держим в ref чтобы effect
+  // мог их сравнить без попадания в deps (иначе зацикливание).
+  const stateRef = useRef({ countryIdx, local });
+  stateRef.current = { countryIdx, local };
   useEffect(() => {
     if (!value) {
       setLocal('');
       return;
     }
     const parsed = findCountryByPhone(value);
-    if (parsed.idx !== countryIdx || parsed.rest !== local) {
+    if (parsed.idx !== stateRef.current.countryIdx || parsed.rest !== stateRef.current.local) {
       setCountryIdx(parsed.idx);
       setLocal(parsed.rest);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   // Закрытие dropdown по клику вне или Escape

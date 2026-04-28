@@ -69,11 +69,26 @@ export class TasksService {
     return task;
   }
 
-  async findAll(filters: { mine?: boolean; currentUserId: string; role: Role }) {
-    const where =
+  async findAll(filters: {
+    mine?: boolean;
+    currentUserId: string;
+    role: Role;
+    search?: string;
+  }) {
+    const baseWhere: any =
       filters.role === 'ADMIN' && !filters.mine
         ? {}
         : { assignedToId: filters.currentUserId };
+    const search = (filters.search || '').trim();
+    const where = search
+      ? {
+          ...baseWhere,
+          OR: [
+            { title: { contains: search, mode: 'insensitive' as const } },
+            { description: { contains: search, mode: 'insensitive' as const } },
+          ],
+        }
+      : baseWhere;
     return this.prisma.task.findMany({
       where,
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],

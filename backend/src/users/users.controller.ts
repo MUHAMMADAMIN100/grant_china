@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
@@ -23,8 +24,8 @@ export class UsersController {
   constructor(private users: UsersService) {}
 
   @Get()
-  list() {
-    return this.users.findAll();
+  list(@Query('search') search?: string) {
+    return this.users.findAll({ search });
   }
 
   @Post()

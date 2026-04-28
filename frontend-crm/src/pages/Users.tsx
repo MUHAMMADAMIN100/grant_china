@@ -13,6 +13,7 @@ export default function Users() {
   const [form, setForm] = useState({ email: '', fullName: '', password: '', role: 'EMPLOYEE' as Role });
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const formErrors = validateAll(
     form,
@@ -25,8 +26,12 @@ export default function Users() {
   const showErr = (k: keyof typeof formErrors) => touched[k] && formErrors[k];
   const formInvalid = hasErrors(formErrors);
 
-  const load = () => listUsers().then(setItems).catch(() => {});
-  useEffect(() => { load(); }, []);
+  const load = () => listUsers(search || undefined).then(setItems).catch(() => {});
+  useEffect(() => {
+    const t = setTimeout(load, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,6 +78,13 @@ export default function Users() {
         {!creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Добавить</button>}
       </div>
       <div className="card-body">
+        <div className="filters">
+          <input
+            placeholder="Поиск по email или ФИО..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         {creating && (
           <form onSubmit={onCreate} style={{ marginBottom: 22, padding: 18, background: '#f5f7fb', borderRadius: 10 }}>
             {error && <div className="error-banner">{error}</div>}

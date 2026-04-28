@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { join } from 'path';
 
 import { PrismaModule } from './prisma/prisma.module';
@@ -26,6 +28,12 @@ import { ActivityModule } from './activity/activity.module';
       rootPath: join(process.cwd(), process.env.UPLOADS_DIR || './uploads'),
       serveRoot: '/uploads',
     }),
+    // Глобальные rate-limits. Точечные более жёсткие лимиты — через @Throttle()
+    // на конкретных публичных эндпоинтах (POST /applications/public,
+    // POST /student-auth/login).
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60_000, limit: 60 },
+    ]),
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -41,6 +49,9 @@ import { ActivityModule } from './activity/activity.module';
     RealtimeModule,
     ProgramsModule,
     ActivityModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

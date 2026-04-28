@@ -1,8 +1,10 @@
 import { api } from './client';
 import type { Role, User } from './types';
 
-export async function listUsers() {
-  const { data } = await api.get<User[]>('/users');
+export async function listUsers(search?: string) {
+  const { data } = await api.get<User[]>('/users', {
+    params: { search: search ? search : undefined },
+  });
   return data;
 }
 

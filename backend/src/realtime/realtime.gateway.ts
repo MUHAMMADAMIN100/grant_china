@@ -39,8 +39,26 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     try {
-      const secret = this.config.get<string>('JWT_SECRET') || 'fallback-secret';
-      const payload = await this.jwt.verifyAsync<JwtPayload>(token, { secret });
+      const staffSecret =
+        this.config.get<string>('JWT_SECRET') || 'fallback-secret';
+      const studentSecret = this.config.get<string>('STUDENT_JWT_SECRET');
+
+      // Сначала пробуем как staff-токен (JWT_SECRET).
+      // Если не подошёл — пробуем как студенческий (STUDENT_JWT_SECRET, потом legacy JWT_SECRET).
+      let payload: JwtPayload | null = null;
+      try {
+        payload = await this.jwt.verifyAsync<JwtPayload>(token, { secret: staffSecret });
+      } catch {
+        if (studentSecret) {
+          try {
+            payload = await this.jwt.verifyAsync<JwtPayload>(token, { secret: studentSecret });
+          } catch {
+            // тоже не подошёл — fallthrough
+          }
+        }
+      }
+      if (!payload) throw new Error('Invalid token signature');
+
       const role = payload.role;
       const id = payload.sub;
 

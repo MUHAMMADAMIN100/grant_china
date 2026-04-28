@@ -1,17 +1,64 @@
-import { ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 
+/**
+ * Гард для эндпоинтов студента.
+ *  - Сначала пытается верифицировать токен с STUDENT_JWT_SECRET (новый, отдельный).
+ *  - Если не удалось — fallback на JWT_SECRET (старые токены, выданные до разделения).
+ *  - Принимает только токены с role === 'STUDENT'.
+ */
 @Injectable()
-export class StudentJwtGuard extends AuthGuard('jwt') {
-  handleRequest(err: any, user: any) {
-    if (err || !user) throw err || new ForbiddenException('Требуется авторизация студента');
-    if (user.role !== 'STUDENT') {
+export class StudentJwtGuard implements CanActivate {
+  constructor(
+    private config: ConfigService,
+    private jwt: JwtService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest();
+    const auth: string | undefined =
+      req.headers?.authorization || req.headers?.Authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      throw new ForbiddenException('Требуется авторизация студента');
+    }
+    const token = auth.slice(7).trim();
+
+    const studentSecret = this.config.get<string>('STUDENT_JWT_SECRET');
+    const legacySecret =
+      this.config.get<string>('JWT_SECRET') || 'fallback-secret';
+
+    let payload: any = null;
+    if (studentSecret) {
+      try {
+        payload = await this.jwt.verifyAsync(token, { secret: studentSecret });
+      } catch {
+        // не подошёл — пробуем legacy
+      }
+    }
+    if (!payload) {
+      try {
+        payload = await this.jwt.verifyAsync(token, { secret: legacySecret });
+      } catch {
+        throw new ForbiddenException('Неверный или просроченный токен');
+      }
+    }
+
+    if (payload.role !== 'STUDENT') {
       throw new ForbiddenException('Эта зона только для студентов');
     }
-    return user;
-  }
 
-  canActivate(context: ExecutionContext) {
-    return super.canActivate(context);
+    req.user = {
+      id: payload.sub,
+      sub: payload.sub,
+      email: payload.email,
+      role: payload.role,
+    };
+    return true;
   }
 }

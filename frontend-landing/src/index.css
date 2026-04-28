@@ -355,6 +355,21 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .form-row .input-error:focus { border-color: var(--danger); }
 .form-row textarea { resize: vertical; min-height: 90px; }
+.rt-status {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1500;
+  background: #fef3c7; color: #92400e;
+  border: 1px solid #fde68a; border-radius: 999px;
+  padding: 8px 14px; font-size: 13px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 8px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.08);
+}
+.rt-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #f59e0b;
+  animation: rt-blink 1.2s ease-in-out infinite;
+}
+@keyframes rt-blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
 .phone-input-wrap {
   display: flex; gap: 0; align-items: stretch;
   border: 1.5px solid var(--border); border-radius: 10px;

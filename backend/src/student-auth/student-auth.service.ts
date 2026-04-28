@@ -2,6 +2,14 @@ import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
+
+function generatePassword(length = 8): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
 
 const STUDENT_INCLUDE = {
   documents: true,
@@ -12,7 +20,50 @@ const STUDENT_INCLUDE = {
 
 @Injectable()
 export class StudentAuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwt: JwtService,
+    private mail: MailService,
+  ) {}
+
+  /**
+   * Сбрасывает пароль студента и отправляет новый на email.
+   * Возвращает {ok:true} независимо от того, существует ли email — чтобы
+   * злоумышленник не мог по ответу узнать, зарегистрирован ли email.
+   */
+  async forgotPassword(emailRaw: string) {
+    if (!emailRaw) throw new BadRequestException('Укажите email');
+    const email = emailRaw.trim().toLowerCase();
+    const student = await this.prisma.student.findFirst({ where: { email } });
+    if (!student) {
+      // Молчим (anti-enumeration). Возвращаем тот же ответ.
+      return { ok: true };
+    }
+    if (student.status === 'ARCHIVED') {
+      // Аккаунт в архиве — не сбрасываем
+      return { ok: true };
+    }
+    const newPassword = generatePassword(8);
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.student.update({
+      where: { id: student.id },
+      data: { password: passwordHash },
+    });
+    // Отправляем письмо со ссылкой и новым паролем
+    const loginUrl = process.env.STUDENT_LOGIN_URL || 'https://grantchina.tj/login';
+    this.mail
+      .send(
+        student.email!,
+        'GrantChina — новый пароль для входа в кабинет',
+        `<p>Здравствуйте, <b>${student.fullName}</b>!</p>
+         <p>Вы запросили сброс пароля. Ваш новый пароль:</p>
+         <p style="font-size:18px;font-weight:bold;letter-spacing:1px;">${newPassword}</p>
+         <p>Войдите в личный кабинет: <a href="${loginUrl}">${loginUrl}</a></p>
+         <p>Если вы не запрашивали смену пароля — обратитесь к менеджеру GrantChina.</p>`,
+      )
+      .catch(() => undefined);
+    return { ok: true };
+  }
 
   async login(email: string, password: string) {
     if (!email || !password) {

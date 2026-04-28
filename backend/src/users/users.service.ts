@@ -8,8 +8,18 @@ import { UpdateUserDto } from './dto/update-user.dto';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
+  async findAll(filters: { search?: string } = {}) {
+    const search = (filters.search || '').trim();
+    const where = search
+      ? {
+          OR: [
+            { email: { contains: search, mode: 'insensitive' as const } },
+            { fullName: { contains: search, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
     const users = await this.prisma.user.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       select: { id: true, email: true, fullName: true, role: true, createdAt: true },
     });

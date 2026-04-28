@@ -7,8 +7,8 @@ import { compose, email as emailRule, hasErrors, minLen, required, validateAll }
 export default function Login() {
   const navigate = useNavigate();
   const login = useAuth((s) => s.login);
-  const [email, setEmail] = useState('admin@grantchina.local');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
@@ -118,14 +118,6 @@ export default function Login() {
         >
           {submitting ? 'Вход...' : 'Войти'}
         </motion.button>
-        <motion.p
-          style={{ textAlign: 'center', marginTop: 18, fontSize: 13, color: '#5b6478' }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
-        >
-          По умолчанию: admin@grantchina.local / admin123
-        </motion.p>
       </motion.form>
     </div>
   );

@@ -19,7 +19,7 @@ export default function Footer() {
               Китая на бакалавриат, магистратуру и языковые курсы — без посредников и скрытых комиссий.
             </p>
             <div className="footer-socials">
-              <a href="https://t.me/grantchina" target="_blank" rel="noreferrer" aria-label="Telegram" className="footer-social">
+              <a href="https://t.me/grant_china_tj" target="_blank" rel="noreferrer" aria-label="Telegram" className="footer-social">
                 <Icon name="send" size={20} />
               </a>
               <a href="https://wa.me/992900000000" target="_blank" rel="noreferrer" aria-label="WhatsApp" className="footer-social">

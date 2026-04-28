@@ -19,6 +19,7 @@ export default function Tasks() {
   const [items, setItems] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', assignedToId: '' });
@@ -27,7 +28,7 @@ export default function Tasks() {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await listTasks(scope === 'mine');
+      const data = await listTasks(scope === 'mine', search || undefined);
       setItems(data);
     } catch (e: any) {
       toast(e?.response?.data?.message || 'Ошибка загрузки', 'error');
@@ -37,8 +38,10 @@ export default function Tasks() {
   };
 
   useEffect(() => {
-    load();
-  }, [scope]);
+    const t = setTimeout(load, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, search]);
 
   useRealtime({
     'task:new': () => load(),
@@ -159,6 +162,13 @@ export default function Tasks() {
       </div>
 
       <div className="card-body">
+        <div className="filters">
+          <input
+            placeholder="Поиск по заголовку или описанию..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         <AnimatePresence>
           {creating && isAdmin && (
             <motion.form

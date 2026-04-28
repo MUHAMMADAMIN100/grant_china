@@ -13,6 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { Direction } from '@prisma/client';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -39,9 +40,19 @@ export class StudentAuthController {
     private realtime: RealtimeGateway,
   ) {}
 
+  // Лимит: 10 попыток входа в минуту с одного IP — защита от брутфорса.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
   login(@Body() body: { email: string; password: string }) {
     return this.auth.login(body.email, body.password);
+  }
+
+  // Forgot password: студент вводит email — на него высылается новый
+  // одноразовый пароль. Лимит: 3 запроса в минуту с IP (anti-spam).
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Post('forgot-password')
+  forgotPassword(@Body() body: { email: string }) {
+    return this.auth.forgotPassword(body?.email || '');
   }
 
   @UseGuards(StudentJwtGuard)

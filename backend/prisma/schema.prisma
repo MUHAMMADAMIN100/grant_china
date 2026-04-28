@@ -63,6 +63,13 @@ model User {
   createdTasks             Task[]        @relation("TaskCreator")
 }
 
+// Заявка на обучение: создаётся через лендинг (POST /applications/public),
+// либо автоматически вместе со студентом из CRM ("+ Студент").
+// При удалении любого из связанных объектов (User-менеджер, Program) заявка
+// остаётся в БД с обнулённой ссылкой (SetNull) — историю не теряем.
+// При удалении Student — Application НЕ удаляется автоматически
+// (нет onDelete: Cascade на student-связи), поэтому в applications.service.remove()
+// студент явно удаляется отдельно.
 model Application {
   id         String            @id @default(uuid())
   fullName   String
@@ -72,12 +79,16 @@ model Application {
   comment    String?
   status     ApplicationStatus @default(NEW)
   studentId  String?
+  // student → SetNull-семантика по сути не задана, потому что removed применяется в коде вручную.
   student    Student?          @relation(fields: [studentId], references: [id])
   managerId       String?
+  // Удалили сотрудника-менеджера TJ → менеджер у заявки обнуляется, заявка остаётся.
   manager         User?             @relation("ApplicationManager", fields: [managerId], references: [id], onDelete: SetNull)
   chinaManagerId  String?
+  // Аналогично для китайского менеджера.
   chinaManager    User?             @relation("ApplicationChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
   programId       String?
+  // Удалили программу → у заявки programId становится null.
   program         Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
@@ -121,6 +132,9 @@ model Student {
   @@index([programId])
 }
 
+// Документ студента (10 типов + OTHER).
+// При удалении студента документы каскадно удаляются (Cascade) — это сейчас
+// единственная Cascade-связь в схеме. Заявки и менеджеры используют SetNull.
 model Document {
   id         String   @id @default(uuid())
   studentId  String

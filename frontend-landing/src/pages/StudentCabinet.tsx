@@ -14,6 +14,7 @@ import { connectStudentRealtime, useStudentRealtime, getSocket } from '../realti
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import EnrollmentProgress from '../components/EnrollmentProgress';
 import ProgramsSection from '../components/ProgramsSection';
+import RealtimeStatusBanner from '../components/RealtimeStatusBanner';
 import Icon from '../Icon';
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -138,6 +139,7 @@ export default function StudentCabinet() {
 
   return (
     <div className="stu-page">
+      <RealtimeStatusBanner />
       <header className="stu-header">
         <div className="container stu-header-inner">
           <Link to="/" className="logo">

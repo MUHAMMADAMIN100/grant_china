@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApplicationStatus, Direction } from '@prisma/client';
+import { Throttle } from '@nestjs/throttler';
 import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
@@ -20,6 +21,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 export class ApplicationsController {
   constructor(private apps: ApplicationsService) {}
 
+  // Лимит: 5 заявок в минуту с одного IP — защита от спама из формы лендинга.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('public')
   createFromLanding(@Body() dto: CreateApplicationDto) {
     return this.apps.create(dto);

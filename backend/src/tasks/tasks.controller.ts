@@ -21,11 +21,16 @@ export class TasksController {
   constructor(private tasks: TasksService) {}
 
   @Get()
-  list(@CurrentUser() user: any, @Query('mine') mine?: string) {
+  list(
+    @CurrentUser() user: any,
+    @Query('mine') mine?: string,
+    @Query('search') search?: string,
+  ) {
     return this.tasks.findAll({
       mine: mine === 'true',
       currentUserId: user.id,
       role: user.role,
+      search,
     });
   }
 

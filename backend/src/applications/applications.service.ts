@@ -9,6 +9,7 @@ import { MailService } from '../mail/mail.service';
 import { SmsService } from '../sms/sms.service';
 import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { REQUIRED_DOCUMENT_TYPES } from '../common/documents';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
@@ -27,19 +28,6 @@ const DIRECTION_LABEL: Record<Direction, string> = {
   LANGUAGE_BACHELOR: 'Языковой + бакалавриат',
   COLLEGE: 'Колледж',
 };
-
-const REQUIRED_DOCUMENT_TYPES: { type: string; label: string }[] = [
-  { type: 'PHOTO', label: 'Фото 3/4' },
-  { type: 'PASSPORT', label: 'Загран паспорт' },
-  { type: 'BANK', label: 'Справка с банка' },
-  { type: 'MEDICAL', label: 'Мед.справка' },
-  { type: 'NO_CRIMINAL', label: 'Справка о несудимости' },
-  { type: 'STUDY_PLAN', label: 'Study Plan' },
-  { type: 'CERTIFICATE', label: 'Certificate' },
-  { type: 'PARENTS_PASSPORT', label: 'Parents passport' },
-  { type: 'DIPLOMA', label: 'Аттестат' },
-  { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
-];
 
 const MANAGER_INCLUDE = {
   student: {
