@@ -8,6 +8,34 @@ import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, phoneRule, required, validateAll } from '../utils/validators';
 import PhoneInput from '../components/PhoneInput';
 
+// Строка-копируемое поле для модалки выдачи доступа.
+function CredRow({ label, value, small }: { label: string; value: string; small?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <div className="creds-row">
+      <span className="creds-label">{label}:</span>
+      <code className="creds-value" style={small ? { fontSize: 12 } : undefined}>{value}</code>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="creds-copy-btn"
+        title={copied ? 'Скопировано' : 'Скопировать'}
+      >
+        <Icon name={copied ? 'check' : 'content_copy'} size={15} />
+      </button>
+    </div>
+  );
+}
+
 export default function StudentNew() {
   const navigate = useNavigate();
   const { toast } = useUI();
@@ -175,20 +203,9 @@ export default function StudentNew() {
               </div>
 
               <div className="creds-box">
-                <div className="creds-row">
-                  <span className="creds-label">Логин:</span>
-                  <code className="creds-value">{credentials.email}</code>
-                </div>
-                <div className="creds-row">
-                  <span className="creds-label">Пароль:</span>
-                  <code className="creds-value">{credentials.password}</code>
-                </div>
-                <div className="creds-row">
-                  <span className="creds-label">Ссылка:</span>
-                  <code className="creds-value" style={{ fontSize: 12 }}>
-                    grant-china-landing.vercel.app/login
-                  </code>
-                </div>
+                <CredRow label="Логин" value={credentials.email} />
+                <CredRow label="Пароль" value={credentials.password} />
+                <CredRow label="Ссылка" value="grantchina.tj/login" small />
               </div>
 
               <div className="dialog-actions">

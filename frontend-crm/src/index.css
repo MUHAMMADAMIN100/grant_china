@@ -886,6 +886,17 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   border: 1px solid var(--border);
   user-select: all; word-break: break-all;
 }
+.creds-copy-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 6px;
+  background: white; border: 1px solid var(--border);
+  color: var(--text-soft); cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.creds-copy-btn:hover {
+  background: var(--primary); color: white; border-color: var(--primary);
+}
 
 /* Toasts */
 .toast-stack {

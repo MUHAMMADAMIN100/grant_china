@@ -25,6 +25,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Service worker сразу активируется при новом билде и забирает контроль
+        // над всеми открытыми клиентами — старая закэшированная версия не "залипает".
+        skipWaiting: true,
+        clientsClaim: true,
         // Не кэшируем /admin (это проксированный CRM-бандл с другим life-cycle)
         // и не кэшируем POST/api запросы.
         navigateFallbackDenylist: [/^\/admin/, /^\/api/],

@@ -145,6 +145,17 @@ function Field({
     );
   }
 
+  // Валидация числовых полей с min/max (TOEFL/IELTS/age)
+  let numError: string | null = null;
+  if (def.kind === 'number' && value !== '' && value !== null && value !== undefined) {
+    const n = Number(value);
+    if (Number.isFinite(n)) {
+      if (def.min !== undefined && n < def.min) numError = `Минимум ${def.min}`;
+      else if (def.max !== undefined && n > def.max) numError = `Максимум ${def.max}`;
+    }
+  }
+  const inputErrCls = (isInvalidLatin || numError) ? 'af-input-error' : '';
+
   return (
     <div className="af-field">
       <label className="af-label">
@@ -154,9 +165,13 @@ function Field({
       <input
         type={def.kind || 'text'}
         {...common}
-        className={isInvalidLatin ? 'af-input-error' : ''}
+        min={def.kind === 'number' ? def.min : undefined}
+        max={def.kind === 'number' ? def.max : undefined}
+        step={def.kind === 'number' && def.max !== undefined && def.max <= 9 ? 0.5 : undefined}
+        className={inputErrCls}
       />
       {isInvalidLatin && <div className="af-field-error">Только латиница</div>}
+      {numError && <div className="af-field-error">{numError}</div>}
     </div>
   );
 }
@@ -196,12 +211,40 @@ function TableSection({
   rows: any[];
   onChange: (rows: any[]) => void;
 }) {
+  // Локальное состояние «свёрнутых» строк — открываем строку если в ней есть данные.
+  const [openRows, setOpenRows] = useState<Record<number, boolean>>(() => {
+    const init: Record<number, boolean> = {};
+    rows.forEach((row, i) => {
+      if (row && !row.__notAttended) {
+        const hasData = section.table?.columns.some((c) => row[c.key]?.toString().trim());
+        if (hasData) init[i] = true;
+      }
+    });
+    return init;
+  });
+  const toggleRow = (i: number) => setOpenRows((p) => ({ ...p, [i]: !p[i] }));
+
   if (!section.table) return null;
   const { columns, rowLabels, fixedRows, minRows } = section.table;
+  // На education-таблице (fixedRows + rowLabels) — каждая строка collapsible
+  // с чекбоксом «Не учился». На остальных (work, family) — старый рендер.
+  const isCollapsible = !!fixedRows && !!rowLabels;
 
   const updateCell = (ri: number, key: string, v: string) => {
     const next = [...rows];
     next[ri] = { ...next[ri], [key]: v };
+    onChange(next);
+  };
+  const setNotAttended = (ri: number, value: boolean) => {
+    const next = [...rows];
+    if (value) {
+      // Сбрасываем все поля строки
+      const cleared: any = { __notAttended: true };
+      for (const c of columns) cleared[c.key] = '';
+      next[ri] = cleared;
+    } else {
+      next[ri] = { ...(next[ri] || {}), __notAttended: false };
+    }
     onChange(next);
   };
   const addRow = () => {
@@ -214,6 +257,50 @@ function TableSection({
     if (minRows && rows.length <= minRows) return;
     onChange(rows.filter((_, i) => i !== ri));
   };
+
+  if (isCollapsible) {
+    return (
+      <div className="af-table-wrap af-collapsible">
+        {rows.map((row, ri) => {
+          const isOpen = !!openRows[ri];
+          const notAttended = !!row?.__notAttended;
+          return (
+            <div key={ri} className={`af-edu-row${notAttended ? ' not-attended' : ''}`}>
+              <div className="af-edu-head" onClick={() => !notAttended && toggleRow(ri)}>
+                <div className="af-edu-title">{rowLabels![ri] || `Строка ${ri + 1}`}</div>
+                <label
+                  className="af-edu-skip"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={notAttended}
+                    onChange={(e) => setNotAttended(ri, e.target.checked)}
+                  />
+                  <span>Не учился(-ась)</span>
+                </label>
+                {!notAttended && (
+                  <Icon name={isOpen ? 'expand_less' : 'expand_more'} size={20} />
+                )}
+              </div>
+              {!notAttended && isOpen && (
+                <div className="af-row-cells">
+                  {columns.map((c) => (
+                    <Field
+                      key={c.key}
+                      def={c}
+                      value={row?.[c.key] ?? ''}
+                      onChange={(v) => updateCell(ri, c.key, v)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="af-table-wrap">

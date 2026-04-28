@@ -167,6 +167,23 @@ export default function ApplicationFormView({ form, canEdit, onSave }: Props) {
               {s.table && (
                 <div className="af-view-table">
                   {((editing ? draft : form)?.[s.key] || []).map((row: any, ri: number) => {
+                    // Строка отмечена "не учился" — в read-only показываем только заголовок
+                    // с пометкой; в edit-режиме скрываем полностью.
+                    if (row?.__notAttended) {
+                      if (editing) return null;
+                      return (
+                        <div key={ri} className="af-view-table-row not-attended">
+                          {s.table!.rowLabels && (
+                            <div className="af-view-row-label">
+                              {s.table!.rowLabels[ri] || `#${ri + 1}`}
+                            </div>
+                          )}
+                          <div className="af-view-value" style={{ color: 'var(--text-soft)', fontStyle: 'italic' }}>
+                            не учился
+                          </div>
+                        </div>
+                      );
+                    }
                     const hasData = s.table!.columns.some((c) => row?.[c.key]?.toString().trim());
                     if (!hasData && !s.table!.rowLabels && !editing) return null;
                     return (

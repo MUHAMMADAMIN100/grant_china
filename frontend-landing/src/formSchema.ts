@@ -12,6 +12,9 @@ export interface FieldDef {
   optional?: boolean;
   /** разрешена только латиница / цифры — для текстовых полей анкеты */
   latin?: boolean;
+  /** для number-полей: ограничение значения */
+  min?: number;
+  max?: number;
 }
 
 export interface SectionDef {
@@ -157,8 +160,8 @@ export const FORM_SECTIONS: SectionDef[] = [
           { value: 'NATIVE', label: 'Носитель' },
         ],
       },
-      { key: 'toefl', label: 'TOEFL (балл)', labelEn: 'TOEFL Score' },
-      { key: 'ielts', label: 'IELTS (балл)', labelEn: 'IELTS Results' },
+      { key: 'toefl', label: 'TOEFL (балл)', labelEn: 'TOEFL Score', kind: 'number', min: 0, max: 120, optional: true },
+      { key: 'ielts', label: 'IELTS (балл)', labelEn: 'IELTS Results', kind: 'number', min: 0, max: 9, optional: true },
     ],
   },
   {
@@ -255,6 +258,8 @@ export function countProgress(form: any): { filled: number; total: number } {
     } else if (s.table) {
       const rows = form?.[s.key] || [];
       for (const row of rows) {
+        // Строки с пометкой "не учился" вообще не считаем
+        if (row?.__notAttended) continue;
         for (const c of s.table.columns) {
           if (c.optional) continue;
           total++;

@@ -360,6 +360,37 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .form-row .input-error:focus { border-color: var(--danger); }
 .form-row textarea { resize: vertical; min-height: 90px; }
+/* Education table — collapsible rows with "Не учился" checkbox */
+.af-collapsible { display: flex; flex-direction: column; gap: 10px; }
+.af-edu-row {
+  background: white; border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden;
+}
+.af-edu-row.not-attended { opacity: 0.6; }
+.af-edu-head {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  cursor: pointer; user-select: none;
+}
+.af-edu-title {
+  flex: 1; font-weight: 700; font-size: 14px;
+  color: var(--primary); text-transform: uppercase; letter-spacing: 0.5px;
+}
+.af-edu-skip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-soft); font-weight: 500;
+  cursor: pointer; user-select: none;
+}
+.af-edu-skip input { width: 16px; height: 16px; }
+.af-edu-row .af-row-cells {
+  padding: 4px 14px 14px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); gap: 12px;
+}
+@media (max-width: 720px) {
+  .af-edu-head { flex-wrap: wrap; }
+  .af-edu-row .af-row-cells { grid-template-columns: 1fr; }
+}
+
 .rt-status {
   position: fixed; right: 16px; bottom: 16px; z-index: 1500;
   background: #fef3c7; color: #92400e;

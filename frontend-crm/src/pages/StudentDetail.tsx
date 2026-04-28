@@ -14,6 +14,31 @@ import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
 import DirectionOptions from '../components/DirectionOptions';
 import Icon from '../Icon';
 
+function CredRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* ignore */ }
+  };
+  return (
+    <div className="creds-row">
+      <span className="creds-label">{label}:</span>
+      <code className="creds-value">{value}</code>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="creds-copy-btn"
+        title={copied ? 'Скопировано' : 'Скопировать'}
+      >
+        <Icon name={copied ? 'check' : 'content_copy'} size={15} />
+      </button>
+    </div>
+  );
+}
+
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
 
 export default function StudentDetail() {
@@ -352,14 +377,8 @@ export default function StudentDetail() {
                 Передайте студенту — пароль показывается один раз.
               </div>
               <div className="creds-box">
-                <div className="creds-row">
-                  <span className="creds-label">Логин:</span>
-                  <code className="creds-value">{credentials.email}</code>
-                </div>
-                <div className="creds-row">
-                  <span className="creds-label">Пароль:</span>
-                  <code className="creds-value">{credentials.password}</code>
-                </div>
+                <CredRow label="Логин" value={credentials.email} />
+                <CredRow label="Пароль" value={credentials.password} />
               </div>
               <div className="dialog-actions">
                 <button className="btn btn-secondary" onClick={copyCreds}>

@@ -123,6 +123,8 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
 
       const dataRows = form?.[section.key] || [];
       dataRows.forEach((row: any, ri: number) => {
+        // Пропускаем строки, отмеченные как "не учился" — их вообще нет в отчёте.
+        if (row?.__notAttended) return;
         const cells = [];
         if (rowLabels) {
           cells.push(
