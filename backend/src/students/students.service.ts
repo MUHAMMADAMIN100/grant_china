@@ -168,6 +168,7 @@ export class StudentsService {
     cabinet?: number;
     search?: string;
     mine?: boolean;
+    managerUserId?: string;
     currentUserId?: string;
     currentUserRole?: Role;
   }) {
@@ -185,6 +186,15 @@ export class StudentsService {
         OR: [
           { managerId: filters.currentUserId },
           { chinaManagerId: filters.currentUserId },
+        ],
+      });
+    }
+    // Фильтр по менеджеру (любой роли — TJ или CN).
+    if (filters.managerUserId) {
+      and.push({
+        OR: [
+          { managerId: filters.managerUserId },
+          { chinaManagerId: filters.managerUserId },
         ],
       });
     }

@@ -7,6 +7,8 @@ export interface StudentFilters {
   cabinet?: number;
   search?: string;
   mine?: boolean;
+  /** Фильтр по менеджеру (TJ или CN) — userId */
+  manager?: string;
 }
 
 export async function listStudents(filters: StudentFilters = {}) {

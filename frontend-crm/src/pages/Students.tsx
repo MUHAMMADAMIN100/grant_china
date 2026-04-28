@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
-import type { Direction, Student, StudentStatus } from '../api/types';
+import { listUsers } from '../api/users';
+import type { Direction, Student, StudentStatus, User } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
@@ -18,10 +19,12 @@ export default function Students() {
   const me = useAuth((s) => s.user);
   const { toast } = useUI();
   const [items, setItems] = useState<Student[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState('');
   const [direction, setDirection] = useState<Direction | ''>('');
   const [status, setStatus] = useState<StudentStatus | ''>('');
   const [cabinet, setCabinet] = useState('');
+  const [manager, setManager] = useState<string>('');
   const isAdmin = me?.role === 'ADMIN';
   // Менеджер видит только своих студентов; админ может переключать.
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
@@ -39,6 +42,7 @@ export default function Students() {
       status: status || undefined,
       cabinet: cabinet ? parseInt(cabinet, 10) : undefined,
       mine: scope === 'mine',
+      manager: manager || undefined,
     })
       .then(setItems)
       .finally(() => setLoading(false));
@@ -47,7 +51,14 @@ export default function Students() {
   useEffect(() => {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
-  }, [search, direction, status, cabinet, scope]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, direction, status, cabinet, scope, manager]);
+
+  // Список пользователей для фильтра по менеджерам — только админу
+  useEffect(() => {
+    if (!isAdmin) return;
+    listUsers().then(setUsers).catch(() => {});
+  }, [isAdmin]);
 
   useRealtime({
     'student:updated': () => load(),
@@ -165,6 +176,18 @@ export default function Students() {
             <option value="2">Кабинет 2</option>
             <option value="3">Кабинет 3</option>
           </select>
+          {isAdmin && (
+            <select
+              value={manager}
+              onChange={(e) => setManager(e.target.value)}
+              title="Фильтр по менеджеру"
+            >
+              <option value="">Все менеджеры</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.fullName}</option>
+              ))}
+            </select>
+          )}
         </div>
 
         <AnimatePresence mode="wait">

@@ -45,6 +45,7 @@ export class StudentsController {
     @Query('cabinet') cabinet?: string,
     @Query('search') search?: string,
     @Query('mine') mine?: string,
+    @Query('manager') manager?: string,
   ) {
     return this.students.findAll({
       direction,
@@ -52,6 +53,7 @@ export class StudentsController {
       cabinet: cabinet ? parseInt(cabinet, 10) : undefined,
       search,
       mine: mine === 'true',
+      managerUserId: manager || undefined,
       currentUserId: user?.id,
       currentUserRole: user?.role,
     });
