@@ -200,7 +200,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   width: auto; height: auto;
   object-fit: contain;
   background: transparent;
-  /* Файл newwwl.jpg — JPEG, у него всегда непрозрачный фон. multiply
+  /* Файл logo.png — JPEG, у него всегда непрозрачный фон. multiply
      "убивает" белые пиксели на светлой странице, красный/чёрный артворк
      остаётся виден. */
   mix-blend-mode: multiply;
