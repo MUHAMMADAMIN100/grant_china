@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'logo.png'],
+      includeAssets: ['favicon.ico', 'newlogo.png'],
       manifest: {
         name: 'GrantChina — обучение в Китае',
         short_name: 'GrantChina',
@@ -19,9 +19,9 @@ export default defineConfig({
         start_url: '/',
         lang: 'ru',
         icons: [
-          { src: '/logo.png', sizes: '192x192', type: 'image/png' },
-          { src: '/logo.png', sizes: '512x512', type: 'image/png' },
-          { src: '/logo.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/newlogo.png', sizes: '192x192', type: 'image/png' },
+          { src: '/newlogo.png', sizes: '512x512', type: 'image/png' },
+          { src: '/newlogo.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
       workbox: {

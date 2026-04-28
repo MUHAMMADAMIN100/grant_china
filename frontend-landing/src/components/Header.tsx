@@ -45,7 +45,7 @@ export default function Header() {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
         >
-          <img src="/logo.png" alt="Grant China" className="logo-image" />
+          <img src="/newlogo.png" alt="Grant China" className="logo-image" />
         </motion.a>
 
         <nav className="nav nav-desktop">
@@ -102,7 +102,7 @@ export default function Header() {
               transition={{ type: 'tween', duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
               <div className="header-mobile-top">
-                <img src="/logo.png" alt="Grant China" className="logo-image" />
+                <img src="/newlogo.png" alt="Grant China" className="logo-image" />
                 <button
                   type="button"
                   className="header-mobile-close"

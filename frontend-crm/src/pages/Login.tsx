@@ -53,7 +53,7 @@ export default function Login() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.4 }}
         >
-          <img src="/logo.png" alt="Grant China" className="login-logo-image" />
+          <img src="/newlogo.png" alt="Grant China" className="login-logo-image" />
           <span className="login-logo-label">CRM</span>
         </motion.div>
         <AnimatePresence>
