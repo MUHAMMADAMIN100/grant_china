@@ -10,8 +10,9 @@ import { useRealtime } from '../realtime';
 import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsChecklist';
 import DirectionOptions from '../components/DirectionOptions';
 import ManagerBar from '../components/ManagerBar';
-import ApplicationFormView from '../components/ApplicationFormView';
+import ApplicationFormSection from '../components/ApplicationFormSection';
 import Icon from '../Icon';
+import { motion } from 'framer-motion';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
 
@@ -147,16 +148,15 @@ export default function ApplicationDetail() {
   if (!app) return <div className="empty">Загрузка...</div>;
 
   const isNew = app.status === 'NEW';
+  const isEnrolled = app.status === 'ENROLLED';
   const isAdmin = me?.role === 'ADMIN';
   const assigned = !!app.managerId || !!app.chinaManagerId;
   const isMine = !assigned || app.managerId === me?.id || app.chinaManagerId === me?.id;
   const canAct = isAdmin || isMine;
   const currentIdx = STAGE_INDEX[app.status] ?? 0;
-  // Админ может редактировать заявку на любом этапе.
-  // Менеджер — только пока заявка не зачислена (1..4) и есть студент.
-  const canEdit = isAdmin
-    ? !!student
-    : currentIdx >= 1 && currentIdx <= 4 && student && canAct;
+  // Админ и назначенный менеджер (TJ/CN) могут редактировать заявку на любом этапе
+  // — как данные студента, так и анкету.
+  const canEdit = !!student && canAct;
   const uploadedTypes = new Set((student?.documents || []).map((d) => d.type).filter((t) => t && t !== 'OTHER'));
   const missingDocs = REQUIRED_DOCUMENTS.filter((r) => !uploadedTypes.has(r.type));
   const nextStage = APPLICATION_STAGES[currentIdx + 1];
@@ -194,55 +194,71 @@ export default function ApplicationDetail() {
         </div>
       </div>
 
-      {/* Пошаговая воронка статусов */}
-      <div className="stage-bar">
-        <div className="stage-bar-track">
-          {APPLICATION_STAGES.map((stage, i) => {
-            const done = i < currentIdx;
-            const current = i === currentIdx;
-            return (
-              <div
-                key={stage}
-                className={`stage-step${done ? ' done' : ''}${current ? ' current' : ''}`}
-              >
-                <div className="stage-dot">
-                  {done ? <Icon name="check" size={16} /> : <span>{i + 1}</span>}
+      {/* Пошаговая воронка статусов — скрываем когда заявка зачислена */}
+      {!isEnrolled && (
+        <div className="stage-bar">
+          <div className="stage-bar-track">
+            {APPLICATION_STAGES.map((stage, i) => {
+              const done = i < currentIdx;
+              const current = i === currentIdx;
+              return (
+                <div
+                  key={stage}
+                  className={`stage-step${done ? ' done' : ''}${current ? ' current' : ''}`}
+                >
+                  <div className="stage-dot">
+                    {done ? <Icon name="check" size={16} /> : <span>{i + 1}</span>}
+                  </div>
+                  <div className="stage-label">{STATUS_SHORT[stage]}</div>
+                  {i < APPLICATION_STAGES.length - 1 && <div className="stage-connector" />}
                 </div>
-                <div className="stage-label">{STATUS_SHORT[stage]}</div>
-                {i < APPLICATION_STAGES.length - 1 && <div className="stage-connector" />}
-              </div>
-            );
-          })}
-        </div>
-        {canAct && (
-          <div className="stage-actions">
-            {prevStage && (
-              <button
-                className="btn btn-sm btn-secondary"
-                onClick={() => onStatus(prevStage)}
-                title="Вернуться на предыдущий этап"
-              >
-                <Icon name="arrow_back" size={16} style={{ marginRight: 4 }} />
-                Назад
-              </button>
-            )}
-            {nextStage && (
-              <button
-                className="btn btn-sm btn-primary"
-                onClick={handleNext}
-                title={
-                  nextStage === 'DOCS_SUBMITTED' && missingDocs.length > 0
-                    ? `Сначала загрузите все документы (не хватает: ${missingDocs.length})`
-                    : `Перейти: ${STATUS_LABEL[nextStage]}`
-                }
-              >
-                {STATUS_LABEL[nextStage]}
-                <Icon name="arrow_forward" size={16} style={{ marginLeft: 4 }} />
-              </button>
-            )}
+              );
+            })}
           </div>
-        )}
-      </div>
+          {canAct && (
+            <div className="stage-actions">
+              {prevStage && (
+                <button
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => onStatus(prevStage)}
+                  title="Вернуться на предыдущий этап"
+                >
+                  <Icon name="arrow_back" size={16} style={{ marginRight: 4 }} />
+                  Назад
+                </button>
+              )}
+              {nextStage && (
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={handleNext}
+                  title={
+                    nextStage === 'DOCS_SUBMITTED' && missingDocs.length > 0
+                      ? `Сначала загрузите все документы (не хватает: ${missingDocs.length})`
+                      : `Перейти: ${STATUS_LABEL[nextStage]}`
+                  }
+                >
+                  {STATUS_LABEL[nextStage]}
+                  <Icon name="arrow_forward" size={16} style={{ marginLeft: 4 }} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {isEnrolled && canAct && prevStage && (
+        <div className="stage-bar" style={{ paddingTop: 12, paddingBottom: 12 }}>
+          <div className="stage-actions" style={{ marginLeft: 'auto' }}>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => onStatus(prevStage)}
+              title="Вернуться на предыдущий этап"
+            >
+              <Icon name="arrow_back" size={16} style={{ marginRight: 4 }} />
+              Назад
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="card-body">
         {!isNew && (
@@ -272,6 +288,17 @@ export default function ApplicationDetail() {
                     ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
                     : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
                 </div>
+                {isEnrolled && (
+                  <motion.div
+                    className="enrolled-photo-badge"
+                    initial={{ opacity: 0, scale: 0.8, y: 8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    transition={{ type: 'spring', stiffness: 250, damping: 18 }}
+                  >
+                    <Icon name="verified" size={18} />
+                    Зачислен
+                  </motion.div>
+                )}
                 {canEdit && (
                   <>
                     <button
@@ -341,7 +368,12 @@ export default function ApplicationDetail() {
             />
 
             <div style={{ marginTop: 28 }}>
-              <ApplicationFormView form={student.applicationForm} />
+              <ApplicationFormSection
+                studentId={student.id}
+                initialForm={student.applicationForm}
+                canEdit={!!canEdit}
+                onSaved={reload}
+              />
             </div>
           </>
         )}

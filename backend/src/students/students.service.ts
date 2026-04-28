@@ -369,9 +369,9 @@ export class StudentsService {
   ) {
     const existing = await this.findOne(studentId);
     if (user) this.ensureCanEdit(existing, user);
-    if (type !== 'OTHER') {
-      await this.prisma.document.deleteMany({ where: { studentId, type } });
-    }
+    // Раньше на каждый тип хранили только один документ — теперь разрешаем
+    // несколько файлов в одной категории (студент может загрузить, например,
+    // паспорт + копию + перевод в одну плитку «Загран паспорт»).
     const doc = await this.prisma.document.create({
       data: {
         studentId,

@@ -22,7 +22,7 @@ export default function Footer() {
               <a href="https://t.me/grant_china_tj" target="_blank" rel="noreferrer" aria-label="Telegram" className="footer-social">
                 <Icon name="send" size={20} />
               </a>
-              <a href="https://wa.me/992900000000" target="_blank" rel="noreferrer" aria-label="WhatsApp" className="footer-social">
+              <a href="https://wa.me/992777121567" target="_blank" rel="noreferrer" aria-label="WhatsApp" className="footer-social">
                 <Icon name="chat" size={20} />
               </a>
               <a href="https://instagram.com/grantchina" target="_blank" rel="noreferrer" aria-label="Instagram" className="footer-social">
@@ -63,7 +63,7 @@ export default function Footer() {
             <ul className="footer-contacts">
               <li>
                 <Icon name="call" size={16} />
-                <a href="tel:+992900000000">+992 900 00 00 00</a>
+                <a href="tel:+992777121567">+992 777 121 567</a>
               </li>
               <li>
                 <Icon name="mail" size={16} />
@@ -71,7 +71,7 @@ export default function Footer() {
               </li>
               <li>
                 <Icon name="location_on" size={16} />
-                <span>г. Душанбе, ул. Рудаки, 137</span>
+                <span>г. Душанбе, ул. Рудаки, 55</span>
               </li>
               <li>
                 <Icon name="schedule" size={16} />

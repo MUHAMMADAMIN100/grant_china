@@ -8,18 +8,19 @@ import {
   type FieldDef,
   type SectionDef,
 } from '../formSchema';
-import { getStudentForm, saveStudentForm } from '../studentApi';
+import { updateStudentForm } from '../api/students';
 import Icon from '../Icon';
 import PhoneInput from './PhoneInput';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
-function useDebouncedSave(form: any, onSave: (form: any) => Promise<void>) {
+function useDebouncedSave(form: any, onSave: (form: any) => Promise<void>, enabled: boolean) {
   const [state, setState] = useState<SaveState>('idle');
   const firstRun = useRef(true);
   const timer = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     if (firstRun.current) {
       firstRun.current = false;
       return;
@@ -40,7 +41,7 @@ function useDebouncedSave(form: any, onSave: (form: any) => Promise<void>) {
       if (timer.current) window.clearTimeout(timer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(form)]);
+  }, [JSON.stringify(form), enabled]);
 
   return state;
 }
@@ -51,24 +52,23 @@ function Field({
   def,
   value,
   onChange,
+  readOnly,
 }: {
   def: FieldDef;
   value: string;
   onChange: (v: string) => void;
+  readOnly?: boolean;
 }) {
   const sanitizeText = (raw: string): string => {
     if (def.kind === 'tel') return raw;
     if (def.kind === 'number' || def.digitsOnly) {
-      // Только цифры, без минусов, ведущих нулей, точек, запятых, e
       let digits = raw.replace(/[^\d]/g, '');
       if (digits.length > 1) digits = digits.replace(/^0+/, '') || '0';
       return digits;
     }
     if (def.latin) {
-      // Жёсткая фильтрация: только латиница / цифры / разрешённые знаки пунктуации
       return raw.replace(/[^A-Za-z0-9 .,'\-/()&+#@]/g, '');
     }
-    // Любое текстовое: запрещаем «опасные» символы которые ломают вёрстку
     return raw.replace(/[<>{}[\]\\]/g, '');
   };
 
@@ -76,6 +76,7 @@ function Field({
 
   const common = {
     value: value ?? '',
+    disabled: readOnly,
     onChange: (e: any) => onChange(sanitizeText(e.target.value)),
     onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (def.kind === 'number' || def.digitsOnly) {
@@ -106,8 +107,9 @@ function Field({
             <button
               key={o.value}
               type="button"
+              disabled={readOnly}
               className={`af-chip${value === o.value ? ' active' : ''}`}
-              onClick={() => onChange(value === o.value ? '' : o.value)}
+              onClick={() => !readOnly && onChange(value === o.value ? '' : o.value)}
             >
               {value === o.value && <Icon name="check" size={14} />}
               {o.label}
@@ -154,7 +156,7 @@ function Field({
           {def.label} <span className="af-label-en">{def.labelEn}</span>
           {def.optional && <span className="af-optional">— необязательно</span>}
         </label>
-        <PhoneInput value={value || ''} onChange={onChange} />
+        <PhoneInput value={value || ''} onChange={onChange} disabled={readOnly} />
       </div>
     );
   }
@@ -176,7 +178,6 @@ function Field({
     );
   }
 
-  // Валидация числовых полей с min/max (TOEFL/IELTS/age)
   let numError: string | null = null;
   if (def.kind === 'number' && value !== '' && value !== null && value !== undefined) {
     const n = Number(value);
@@ -211,10 +212,12 @@ function SectionFields({
   section,
   value,
   onChange,
+  readOnly,
 }: {
   section: SectionDef;
   value: any;
   onChange: (v: any) => void;
+  readOnly?: boolean;
 }) {
   if (section.fields) {
     return (
@@ -225,6 +228,7 @@ function SectionFields({
             def={f}
             value={value?.[f.key] ?? ''}
             onChange={(v) => onChange({ ...(value || {}), [f.key]: v })}
+            readOnly={readOnly}
           />
         ))}
       </div>
@@ -237,12 +241,13 @@ function TableSection({
   section,
   rows,
   onChange,
+  readOnly,
 }: {
   section: SectionDef;
   rows: any[];
   onChange: (rows: any[]) => void;
+  readOnly?: boolean;
 }) {
-  // Локальное состояние «свёрнутых» строк — открываем строку если в ней есть данные.
   const [openRows, setOpenRows] = useState<Record<number, boolean>>(() => {
     const init: Record<number, boolean> = {};
     rows.forEach((row, i) => {
@@ -257,8 +262,6 @@ function TableSection({
 
   if (!section.table) return null;
   const { columns, rowLabels, fixedRows, minRows, skipLabels } = section.table;
-  // На education-таблице (fixedRows + rowLabels) — каждая строка collapsible
-  // с чекбоксом «Не учился». На остальных (work) — старый рендер.
   const isCollapsible = !!fixedRows && !!rowLabels;
 
   const updateCell = (ri: number, key: string, v: string) => {
@@ -269,7 +272,6 @@ function TableSection({
   const setNotAttended = (ri: number, value: boolean) => {
     const next = [...rows];
     if (value) {
-      // Сбрасываем все поля строки
       const cleared: any = { __notAttended: true };
       for (const c of columns) cleared[c.key] = '';
       next[ri] = cleared;
@@ -305,6 +307,7 @@ function TableSection({
                 >
                   <input
                     type="checkbox"
+                    disabled={readOnly}
                     checked={notAttended}
                     onChange={(e) => setNotAttended(ri, e.target.checked)}
                   />
@@ -322,6 +325,7 @@ function TableSection({
                       def={c}
                       value={row?.[c.key] ?? ''}
                       onChange={(v) => updateCell(ri, c.key, v)}
+                      readOnly={readOnly}
                     />
                   ))}
                 </div>
@@ -346,10 +350,11 @@ function TableSection({
                   def={c}
                   value={row?.[c.key] ?? ''}
                   onChange={(v) => updateCell(ri, c.key, v)}
+                  readOnly={readOnly}
                 />
               ))}
             </div>
-            {!fixedRows && rows.length > (minRows || 1) && (
+            {!fixedRows && rows.length > (minRows || 1) && !readOnly && (
               <button
                 type="button"
                 className="af-row-remove"
@@ -362,7 +367,7 @@ function TableSection({
           </div>
         ))}
       </div>
-      {!fixedRows && (
+      {!fixedRows && !readOnly && (
         <button type="button" className="af-add-row" onClick={addRow}>
           <Icon name="add" size={16} /> Добавить ещё
         </button>
@@ -371,27 +376,40 @@ function TableSection({
   );
 }
 
-export default function ApplicationFormSection() {
-  const [form, setForm] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+type Props = {
+  studentId: string;
+  initialForm: any;
+  canEdit: boolean;
+  onSaved?: () => void;
+};
+
+export default function ApplicationFormSection({ studentId, initialForm, canEdit, onSaved }: Props) {
+  const [form, setForm] = useState<any>(initialForm || emptyForm());
   const [manualSaving, setManualSaving] = useState(false);
   const [manualSaved, setManualSaved] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     personal: true,
   });
 
+  // Подхватываем обновления извне (когда родитель reload-нул студента)
+  useEffect(() => {
+    if (initialForm) setForm(initialForm);
+  }, [JSON.stringify(initialForm)]);
+
   const save = async (data: any) => {
-    await saveStudentForm(data);
+    await updateStudentForm(studentId, data);
+    onSaved?.();
   };
-  const saveState = useDebouncedSave(form, save);
+  const saveState = useDebouncedSave(form, save, canEdit);
 
   const onManualSave = async () => {
     if (!form || manualSaving) return;
     setManualSaving(true);
     setManualSaved(false);
     try {
-      await saveStudentForm(form);
+      await updateStudentForm(studentId, form);
       setManualSaved(true);
+      onSaved?.();
       setTimeout(() => setManualSaved(false), 2500);
     } catch {
       // silent
@@ -399,34 +417,6 @@ export default function ApplicationFormSection() {
       setManualSaving(false);
     }
   };
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const f = await getStudentForm();
-        if (!mounted) return;
-        setForm(f || emptyForm());
-      } catch {
-        if (!mounted) return;
-        setForm(emptyForm());
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  if (loading || !form) {
-    return (
-      <div className="stu-card">
-        <h2 className="stu-section-title">Анкета для поступления</h2>
-        <div className="af-loading">Загружаем анкету...</div>
-      </div>
-    );
-  }
 
   const progress = countProgress(form);
   const percent = progress.total ? Math.round((progress.filled / progress.total) * 100) : 0;
@@ -439,22 +429,26 @@ export default function ApplicationFormSection() {
       <div className="af-header">
         <div>
           <h2 className="stu-section-title" style={{ margin: 0 }}>
-            Application Form — Анкета для поступления
+            Application Form — Анкета студента
           </h2>
-          <div className="af-sub">Заполняется постепенно — каждое изменение сохраняется автоматически</div>
+          <div className="af-sub">
+            {canEdit
+              ? 'Каждое изменение сохраняется автоматически'
+              : 'Просмотр анкеты (редактирование недоступно)'}
+          </div>
         </div>
         <div className="af-save-state">
-          {saveState === 'saving' && (
+          {canEdit && saveState === 'saving' && (
             <span className="af-save saving">
               <Icon name="progress_activity" size={16} /> Сохраняем...
             </span>
           )}
-          {saveState === 'saved' && (
+          {canEdit && saveState === 'saved' && (
             <span className="af-save saved">
               <Icon name="check_circle" size={16} /> Сохранено
             </span>
           )}
-          {saveState === 'error' && (
+          {canEdit && saveState === 'error' && (
             <span className="af-save err">
               <Icon name="error" size={16} /> Ошибка сохранения
             </span>
@@ -523,6 +517,7 @@ export default function ApplicationFormSection() {
                         section={section}
                         value={form[section.key] || {}}
                         onChange={(v) => setForm({ ...form, [section.key]: v })}
+                        readOnly={!canEdit}
                       />
                     )}
                     {section.table && (
@@ -530,6 +525,7 @@ export default function ApplicationFormSection() {
                         section={section}
                         rows={form[section.key] || []}
                         onChange={(rows) => setForm({ ...form, [section.key]: rows })}
+                        readOnly={!canEdit}
                       />
                     )}
                   </motion.div>
@@ -539,20 +535,22 @@ export default function ApplicationFormSection() {
           );
         })}
 
-        <div className="af-save-bar af-save-bar-bottom">
-          <button
-            type="button"
-            className="btn btn-primary af-save-btn"
-            onClick={onManualSave}
-            disabled={manualSaving}
-          >
-            <Icon name="save" size={18} />
-            {manualSaving ? 'Сохраняем...' : manualSaved ? 'Сохранено ✓' : 'Сохранить анкету'}
-          </button>
-          <div className="af-save-hint">
-            Анкета также сохраняется автоматически при каждом изменении
+        {canEdit && (
+          <div className="af-save-bar af-save-bar-bottom">
+            <button
+              type="button"
+              className="btn btn-primary af-save-btn"
+              onClick={onManualSave}
+              disabled={manualSaving}
+            >
+              <Icon name="save" size={18} />
+              {manualSaving ? 'Сохраняем...' : manualSaved ? 'Сохранено ✓' : 'Сохранить анкету'}
+            </button>
+            <div className="af-save-hint">
+              Анкета также сохраняется автоматически при каждом изменении
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </section>
   );

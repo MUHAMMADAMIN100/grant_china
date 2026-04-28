@@ -18,11 +18,14 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
   const BORDER = { style: BorderStyle.SINGLE, size: 4, color: 'D5D9DF' };
   const cellBorders = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
 
-  const labelCell = (text: string, width?: number) =>
+  // Ширина текстового поля страницы в twips: 8.5" - 2*0.5" margins = 7.5" = 10800 twips
+  const PAGE_WIDTH_TWIPS = 10800;
+
+  const labelCell = (text: string) =>
     new TableCell({
-      width: width ? { size: width, type: WidthType.PERCENTAGE } : undefined,
       borders: cellBorders,
       shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'FFF5F5' },
+      margins: { top: 80, bottom: 80, left: 120, right: 120 },
       children: [
         new Paragraph({
           children: [new TextRun({ text, bold: true, size: 18, color: '5B6478' })],
@@ -30,10 +33,10 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
       ],
     });
 
-  const valueCell = (text: string, width?: number) =>
+  const valueCell = (text: string) =>
     new TableCell({
-      width: width ? { size: width, type: WidthType.PERCENTAGE } : undefined,
       borders: cellBorders,
+      margins: { top: 80, bottom: 80, left: 120, right: 120 },
       children: [
         new Paragraph({
           children: [new TextRun({ text: text || '—', size: 20 })],
@@ -41,11 +44,11 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
       ],
     });
 
-  const headerCell = (text: string, width?: number) =>
+  const headerCell = (text: string) =>
     new TableCell({
-      width: width ? { size: width, type: WidthType.PERCENTAGE } : undefined,
       borders: cellBorders,
       shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'D52B2B' },
+      margins: { top: 80, bottom: 80, left: 120, right: 120 },
       children: [
         new Paragraph({
           children: [new TextRun({ text, bold: true, color: 'FFFFFF', size: 18 })],
@@ -96,15 +99,17 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
       const rows = section.fields.map(
         (f) =>
           new TableRow({
+            cantSplit: true,
             children: [
-              labelCell(`${f.label}${f.labelEn ? ` (${f.labelEn})` : ''}`, 40),
-              valueCell(displayValue(f, form?.[section.key]?.[f.key]), 60),
+              labelCell(`${f.label}${f.labelEn ? ` (${f.labelEn})` : ''}`),
+              valueCell(displayValue(f, form?.[section.key]?.[f.key])),
             ],
           }),
       );
       children.push(
         new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
+          width: { size: PAGE_WIDTH_TWIPS, type: WidthType.DXA },
+          columnWidths: [Math.round(PAGE_WIDTH_TWIPS * 0.35), Math.round(PAGE_WIDTH_TWIPS * 0.65)],
           rows,
         }),
       );
@@ -115,11 +120,11 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
 
       // Шапка
       const headerCells = [];
-      if (rowLabels) headerCells.push(headerCell('#', 15));
+      if (rowLabels) headerCells.push(headerCell('#'));
       for (const c of cols) {
         headerCells.push(headerCell(`${c.label}${c.labelEn ? ` / ${c.labelEn}` : ''}`));
       }
-      rows.push(new TableRow({ tableHeader: true, children: headerCells }));
+      rows.push(new TableRow({ tableHeader: true, cantSplit: true, children: headerCells }));
 
       const dataRows = form?.[section.key] || [];
       dataRows.forEach((row: any, ri: number) => {
@@ -131,6 +136,7 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
             new TableCell({
               borders: cellBorders,
               shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'FFF5F5' },
+              margins: { top: 80, bottom: 80, left: 120, right: 120 },
               children: [
                 new Paragraph({
                   children: [
@@ -149,13 +155,23 @@ export async function generateStudentFormDocx(studentName: string, form: any): P
         for (const c of cols) {
           cells.push(valueCell(displayValue(c, row?.[c.key])));
         }
-        rows.push(new TableRow({ children: cells }));
+        rows.push(new TableRow({ cantSplit: true, children: cells }));
       });
+
+      // Расчёт ширины колонок: первая (#) — 18%, остальные равные
+      const totalCols = (rowLabels ? 1 : 0) + cols.length;
+      const labelW = rowLabels ? Math.round(PAGE_WIDTH_TWIPS * 0.18) : 0;
+      const remainW = PAGE_WIDTH_TWIPS - labelW;
+      const colW = Math.floor(remainW / cols.length);
+      const columnWidths = rowLabels
+        ? [labelW, ...Array(cols.length).fill(colW)]
+        : Array(totalCols).fill(Math.floor(PAGE_WIDTH_TWIPS / totalCols));
 
       if (rows.length > 1) {
         children.push(
           new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
+            width: { size: PAGE_WIDTH_TWIPS, type: WidthType.DXA },
+            columnWidths,
             rows,
           }),
         );

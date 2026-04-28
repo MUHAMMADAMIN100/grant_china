@@ -102,12 +102,14 @@ export default function StudentCabinet() {
   };
 
   const onUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setUploading(type);
     try {
-      await studentUploadDocument(file, type);
-      showToast('ok', 'Документ загружен');
+      for (const file of files) {
+        await studentUploadDocument(file, type);
+      }
+      showToast('ok', files.length > 1 ? `Загружено: ${files.length}` : 'Документ загружен');
       await load();
     } catch (err: any) {
       showToast('err', err?.response?.data?.message || 'Ошибка загрузки');
@@ -209,13 +211,64 @@ export default function StudentCabinet() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ type: 'spring', stiffness: 200, damping: 18 }}
               >
-                <div className="stu-celebrate-icon">🎉</div>
+                <div className="stu-confetti" aria-hidden="true">
+                  {Array.from({ length: 24 }).map((_, i) => {
+                    const colors = ['#f59e0b', '#ef4444', '#10b981', '#3b82f6', '#a855f7', '#ec4899'];
+                    const left = Math.random() * 100;
+                    const delay = Math.random() * 1.5;
+                    const dur = 2 + Math.random() * 2;
+                    const size = 6 + Math.random() * 8;
+                    return (
+                      <motion.span
+                        key={i}
+                        className="stu-confetti-piece"
+                        style={{
+                          left: `${left}%`,
+                          width: size,
+                          height: size,
+                          background: colors[i % colors.length],
+                        }}
+                        initial={{ y: -20, opacity: 0, rotate: 0 }}
+                        animate={{
+                          y: 220,
+                          opacity: [0, 1, 1, 0],
+                          rotate: 360,
+                        }}
+                        transition={{
+                          duration: dur,
+                          delay,
+                          repeat: Infinity,
+                          ease: 'easeIn',
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <motion.div
+                  className="stu-celebrate-icon"
+                  animate={{ rotate: [0, -10, 10, -10, 10, 0], scale: [1, 1.15, 1] }}
+                  transition={{ duration: 1.6, repeat: Infinity }}
+                >
+                  🎉
+                </motion.div>
                 <div>
-                  <div className="stu-celebrate-title">Поздравляем с зачислением!</div>
-                  <div className="stu-celebrate-sub">
-                    Вы официально зачислены в университет. Поздравляем с поступлением — следующий шаг
-                    ваш менеджер обсудит с вами лично.
-                  </div>
+                  <motion.div
+                    className="stu-celebrate-title"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.2 }}
+                  >
+                    Поздравляем с зачислением! 🎓
+                  </motion.div>
+                  <motion.div
+                    className="stu-celebrate-sub"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.4 }}
+                  >
+                    Вы официально зачислены в университет. Это огромный шаг — ваша мечта стала реальностью!
+                    Менеджер свяжется с вами лично, чтобы обсудить следующие шаги.
+                  </motion.div>
                 </div>
               </motion.div>
             )}
@@ -334,45 +387,55 @@ export default function StudentCabinet() {
 
           <div className="stu-docs-grid">
             {REQUIRED_DOCS.map((req) => {
-              const doc = typed.find((d) => d.type === req.type);
+              const docs = typed.filter((d) => d.type === req.type);
               const loading = uploading === req.type;
+              const hasAny = docs.length > 0;
               return (
-                <div key={req.type} className={`stu-doc${doc ? ' uploaded' : ''}`}>
+                <div key={req.type} className={`stu-doc${hasAny ? ' uploaded' : ''}`}>
                   <div className="stu-doc-head">
                     <Icon
-                      name={doc ? 'check_circle' : 'radio_button_unchecked'}
+                      name={hasAny ? 'check_circle' : 'radio_button_unchecked'}
                       size={20}
-                      style={{ color: doc ? '#10b981' : '#9ca3af' }}
+                      style={{ color: hasAny ? '#10b981' : '#9ca3af' }}
                     />
                     <div>
-                      <div className="stu-doc-label">{req.label}</div>
+                      <div className="stu-doc-label">
+                        {req.label}
+                        {docs.length > 1 && <span style={{ color: '#9ca3af' }}> · {docs.length}</span>}
+                      </div>
                       {req.hint && <div className="stu-doc-hint">{req.hint}</div>}
                     </div>
                   </div>
-                  {doc ? (
-                    <div className="stu-doc-file">
-                      <a href={`${API_BASE}${doc.url}`} target="_blank" rel="noreferrer">
-                        <Icon name="description" size={16} /> {doc.originalName}
-                      </a>
-                      <div className="stu-doc-meta">
-                        {fmtBytes(doc.size)} · {new Date(doc.createdAt).toLocaleDateString('ru-RU')}
-                      </div>
-                      <div className="stu-doc-actions">
-                        <button
-                          className="btn btn-outline btn-small"
-                          onClick={() => inputs.current[req.type]?.click()}
-                          disabled={loading}
-                        >
-                          <Icon name="refresh" size={14} /> Заменить
-                        </button>
-                        <button
-                          className="btn btn-danger btn-small"
-                          onClick={() => onDelete(doc.id)}
-                        >
-                          <Icon name="delete" size={14} />
-                        </button>
-                      </div>
-                    </div>
+                  {hasAny ? (
+                    <>
+                      {docs.map((doc) => (
+                        <div key={doc.id} className="stu-doc-file">
+                          <a href={`${API_BASE}${doc.url}`} target="_blank" rel="noreferrer">
+                            <Icon name="description" size={16} /> {doc.originalName}
+                          </a>
+                          <div className="stu-doc-meta">
+                            {fmtBytes(doc.size)} · {new Date(doc.createdAt).toLocaleDateString('ru-RU')}
+                          </div>
+                          <div className="stu-doc-actions">
+                            <button
+                              className="btn btn-danger btn-small"
+                              onClick={() => onDelete(doc.id)}
+                            >
+                              <Icon name="delete" size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <button
+                        className="btn btn-outline btn-small"
+                        style={{ marginTop: 8 }}
+                        onClick={() => inputs.current[req.type]?.click()}
+                        disabled={loading}
+                      >
+                        <Icon name={loading ? 'progress_activity' : 'add'} size={14} />
+                        {loading ? 'Загрузка...' : 'Добавить ещё'}
+                      </button>
+                    </>
                   ) : (
                     <button
                       className="btn btn-primary btn-small stu-doc-upload"
@@ -386,6 +449,7 @@ export default function StudentCabinet() {
                   <input
                     ref={(el) => { inputs.current[req.type] = el; }}
                     type="file"
+                    multiple
                     hidden
                     onChange={(e) => onUpload(e, req.type)}
                   />

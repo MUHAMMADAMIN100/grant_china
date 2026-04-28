@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, updateStudent, updateStudentForm, uploadPhoto } from '../api/students';
+import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, updateStudent, uploadPhoto } from '../api/students';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
@@ -9,7 +9,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import DocumentsChecklist from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
-import ApplicationFormView from '../components/ApplicationFormView';
+import ApplicationFormSection from '../components/ApplicationFormSection';
 import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
 import DirectionOptions from '../components/DirectionOptions';
 import Icon from '../Icon';
@@ -206,11 +206,13 @@ export default function StudentDetail() {
         />
 
         {student.applications && student.applications.length > 0 ? (
-          <ApplicationStatusStepper
-            application={student.applications[0]}
-            canEdit={canEdit}
-            onChanged={reload}
-          />
+          !isEnrolled && (
+            <ApplicationStatusStepper
+              application={student.applications[0]}
+              canEdit={canEdit}
+              onChanged={reload}
+            />
+          )
         ) : (
           canEdit && (
             <div className="app-stepper" style={{ textAlign: 'center' }}>
@@ -271,6 +273,17 @@ export default function StudentDetail() {
                 ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
                 : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
             </div>
+            {isEnrolled && (
+              <motion.div
+                className="enrolled-photo-badge"
+                initial={{ opacity: 0, scale: 0.8, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 250, damping: 18 }}
+              >
+                <Icon name="verified" size={18} />
+                Зачислен
+              </motion.div>
+            )}
             {canEdit && (
               <>
                 <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={() => photoRef.current?.click()}>
@@ -335,19 +348,11 @@ export default function StudentDetail() {
         />
 
         <div style={{ marginTop: 28 }}>
-          <ApplicationFormView
-            form={student.applicationForm}
+          <ApplicationFormSection
+            studentId={student.id}
+            initialForm={student.applicationForm}
             canEdit={canEdit}
-            onSave={async (form) => {
-              try {
-                await updateStudentForm(student.id, form);
-                toast('Анкета сохранена', 'success');
-                reload();
-              } catch (e: any) {
-                toast(e?.response?.data?.message || 'Ошибка', 'error');
-                throw e;
-              }
-            }}
+            onSaved={reload}
           />
         </div>
       </div>
