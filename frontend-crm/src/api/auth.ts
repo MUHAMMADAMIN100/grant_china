@@ -10,3 +10,11 @@ export async function me() {
   const { data } = await api.get<User>('/auth/me');
   return data;
 }
+
+export async function changePassword(currentPassword: string, newPassword: string) {
+  const { data } = await api.post<{ ok: true }>('/auth/change-password', {
+    currentPassword,
+    newPassword,
+  });
+  return data;
+}

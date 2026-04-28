@@ -60,8 +60,8 @@ export class StudentsController {
   }
 
   @Get('stats')
-  stats() {
-    return this.students.stats();
+  stats(@CurrentUser() user: any) {
+    return this.students.stats(user);
   }
 
   @Get(':id')

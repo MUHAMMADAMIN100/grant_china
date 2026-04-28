@@ -448,11 +448,17 @@ export class ApplicationsService {
     return { ok: true };
   }
 
-  async stats() {
+  async stats(user?: { id: string; role: Role }) {
+    // EMPLOYEE видит только свои заявки (где он либо локальный, либо китайский менеджер).
+    // ADMIN — все заявки.
+    const where: Prisma.ApplicationWhereInput | undefined =
+      user && user.role === 'EMPLOYEE'
+        ? { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] }
+        : undefined;
     const [total, byStatus, byDirection] = await Promise.all([
-      this.prisma.application.count(),
-      this.prisma.application.groupBy({ by: ['status'], _count: true }),
-      this.prisma.application.groupBy({ by: ['direction'], _count: true }),
+      this.prisma.application.count({ where }),
+      this.prisma.application.groupBy({ by: ['status'], _count: true, where }),
+      this.prisma.application.groupBy({ by: ['direction'], _count: true, where }),
     ]);
     return { total, byStatus, byDirection };
   }

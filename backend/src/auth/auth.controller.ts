@@ -18,4 +18,13 @@ export class AuthController {
   me(@CurrentUser() user: { sub: string }) {
     return this.auth.me(user.sub);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  changePassword(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { currentPassword: string; newPassword: string },
+  ) {
+    return this.auth.changePassword(user.sub, body.currentPassword, body.newPassword);
+  }
 }

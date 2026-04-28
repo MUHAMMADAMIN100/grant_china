@@ -4,6 +4,7 @@ import type { Role, User } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, required, validateAll } from '../utils/validators';
+import ChangePasswordModal from '../components/ChangePasswordModal';
 
 export default function Users() {
   const me = useAuth((s) => s.user);
@@ -14,6 +15,7 @@ export default function Users() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [pwdTarget, setPwdTarget] = useState<User | null>(null);
 
   const formErrors = validateAll(
     form,
@@ -164,9 +166,18 @@ export default function Users() {
                   </td>
                   <td data-label="Создан">{u.createdAt ? new Date(u.createdAt).toLocaleDateString('ru-RU') : '—'}</td>
                   <td>
-                    <button className="btn btn-sm btn-danger" onClick={() => onDelete(u)} disabled={u.id === me?.id}>
-                      Удалить
-                    </button>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        className="btn btn-sm btn-secondary"
+                        onClick={() => setPwdTarget(u)}
+                        title="Сменить пароль"
+                      >
+                        Пароль
+                      </button>
+                      <button className="btn btn-sm btn-danger" onClick={() => onDelete(u)} disabled={u.id === me?.id}>
+                        Удалить
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -174,6 +185,15 @@ export default function Users() {
           </table>
         </div>
       </div>
+      <ChangePasswordModal
+        open={!!pwdTarget}
+        mode={
+          pwdTarget
+            ? { kind: 'admin', userId: pwdTarget.id, userName: pwdTarget.fullName }
+            : { kind: 'self' }
+        }
+        onClose={() => setPwdTarget(null)}
+      />
     </div>
   );
 }

@@ -1,11 +1,14 @@
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../store/auth';
 import Icon from '../Icon';
+import ChangePasswordModal from './ChangePasswordModal';
 
 export default function Sidebar() {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
+  const [pwdOpen, setPwdOpen] = useState(false);
   const initials = user?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
 
   const links = [
@@ -86,6 +89,15 @@ export default function Sidebar() {
         </div>
         <motion.button
           className="logout-btn"
+          onClick={() => setPwdOpen(true)}
+          title="Сменить пароль"
+          whileHover={{ scale: 1.15 }}
+          whileTap={{ scale: 0.9 }}
+        >
+          <Icon name="lock_reset" size={20} />
+        </motion.button>
+        <motion.button
+          className="logout-btn"
           onClick={logout}
           title="Выйти"
           whileHover={{ scale: 1.15, rotate: 15 }}
@@ -94,6 +106,11 @@ export default function Sidebar() {
           <Icon name="logout" size={20} />
         </motion.button>
       </motion.div>
+      <ChangePasswordModal
+        open={pwdOpen}
+        mode={{ kind: 'self' }}
+        onClose={() => setPwdOpen(false)}
+      />
     </motion.aside>
   );
 }

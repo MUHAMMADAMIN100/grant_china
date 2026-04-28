@@ -51,8 +51,8 @@ export class ApplicationsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('stats')
-  stats() {
-    return this.apps.stats();
+  stats(@CurrentUser() user: any) {
+    return this.apps.stats(user);
   }
 
   @UseGuards(JwtAuthGuard)

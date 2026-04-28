@@ -404,11 +404,21 @@ export class StudentsService {
     return { ok: true };
   }
 
-  async stats() {
+  async stats(user?: { id: string; role: Role }) {
+    // EMPLOYEE видит только своих студентов (где он либо локальный, либо китайский менеджер).
+    const where: Prisma.StudentWhereInput | undefined =
+      user && user.role === 'EMPLOYEE'
+        ? { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] }
+        : undefined;
     const [total, byCabinet, byDirection] = await Promise.all([
-      this.prisma.student.count(),
-      this.prisma.student.groupBy({ by: ['cabinet'], _count: true, orderBy: { cabinet: 'asc' } }),
-      this.prisma.student.groupBy({ by: ['direction'], _count: true }),
+      this.prisma.student.count({ where }),
+      this.prisma.student.groupBy({
+        by: ['cabinet'],
+        _count: true,
+        orderBy: { cabinet: 'asc' },
+        where,
+      }),
+      this.prisma.student.groupBy({ by: ['direction'], _count: true, where }),
     ]);
     return { total, byCabinet, byDirection };
   }
