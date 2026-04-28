@@ -74,15 +74,15 @@ function Field({
 
   const isInvalidLatin = def.latin && value && !LATIN_RE.test(value);
 
-  const common = {
+  const common: any = {
     value: value ?? '',
     onChange: (e: any) => onChange(sanitizeText(e.target.value)),
-    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+    onKeyDown: (e: any) => {
       if (def.kind === 'number' || def.digitsOnly) {
         if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
       }
     },
-    onPaste: (e: React.ClipboardEvent<HTMLInputElement>) => {
+    onPaste: (e: any) => {
       if (def.kind === 'number' || def.digitsOnly) {
         const pasted = e.clipboardData.getData('text');
         if (!/^\d+$/.test(pasted)) {
