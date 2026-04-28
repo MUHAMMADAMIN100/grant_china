@@ -200,7 +200,6 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   width: auto; height: auto;
   object-fit: contain;
   background: transparent;
-  mix-blend-mode: multiply;
 }
 
 /* Stats */
