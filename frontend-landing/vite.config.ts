@@ -33,6 +33,9 @@ export default defineConfig({
         // и не кэшируем POST/api запросы.
         navigateFallbackDenylist: [/^\/admin/, /^\/api/],
         globPatterns: ['**/*.{js,css,html,ico,png,jpg,jpeg,svg,webp,woff2}'],
+        // Дефолт у workbox — 2 MiB; backlogoo.png (~2.4 MB) и тестимониалы (~3 MB)
+        // в него не влазят и валят билд. Поднимаем до 6 MiB.
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/flagcdn\.com\//,
