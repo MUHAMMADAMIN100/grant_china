@@ -200,6 +200,9 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   width: auto; height: auto;
   object-fit: contain;
   background: transparent;
+  /* Файл newlogo.png имеет белый фон. multiply «убивает» белые пиксели,
+     красный/чёрный артворк остаётся виден. Работает на светлых фонах. */
+  mix-blend-mode: multiply;
 }
 
 /* Stats */
