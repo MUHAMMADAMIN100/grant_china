@@ -54,7 +54,7 @@ export default function StudentLogin() {
         </Link>
 
         <div className="stu-login-brand">
-          <img src="/logo.png" alt="Grant China" />
+          <img src="/backlogoo.png" alt="Grant China" />
         </div>
 
         <h2 className="stu-login-title">Личный кабинет студента</h2>

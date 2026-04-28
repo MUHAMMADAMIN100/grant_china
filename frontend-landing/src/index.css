@@ -200,9 +200,9 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   width: auto; height: auto;
   object-fit: contain;
   background: transparent;
-  /* Файл logo.png — JPEG, у него всегда непрозрачный фон. multiply
+  /* Файл backlogoo.png — если у него непрозрачный (белый) фон, multiply
      "убивает" белые пиксели на светлой странице, красный/чёрный артворк
-     остаётся виден. */
+     остаётся виден. На прозрачном PNG режим не мешает. */
   mix-blend-mode: multiply;
 }
 
