@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'newlogo.png'],
+      includeAssets: ['favicon.ico', 'newwwl.jpg'],
       manifest: {
         name: 'GrantChina — обучение в Китае',
         short_name: 'GrantChina',
@@ -19,16 +19,16 @@ export default defineConfig({
         start_url: '/',
         lang: 'ru',
         icons: [
-          { src: '/newlogo.png', sizes: '192x192', type: 'image/png' },
-          { src: '/newlogo.png', sizes: '512x512', type: 'image/png' },
-          { src: '/newlogo.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/newwwl.jpg', sizes: '192x192', type: 'image/jpeg' },
+          { src: '/newwwl.jpg', sizes: '512x512', type: 'image/jpeg' },
+          { src: '/newwwl.jpg', sizes: '512x512', type: 'image/jpeg', purpose: 'any maskable' },
         ],
       },
       workbox: {
         // Не кэшируем /admin (это проксированный CRM-бандл с другим life-cycle)
         // и не кэшируем POST/api запросы.
         navigateFallbackDenylist: [/^\/admin/, /^\/api/],
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,jpg,jpeg,svg,webp,woff2}'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/flagcdn\.com\//,
