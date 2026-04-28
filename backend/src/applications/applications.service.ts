@@ -166,6 +166,7 @@ export class ApplicationsService {
     direction?: Direction;
     search?: string;
     mine?: boolean;
+    managerUserId?: string;
     currentUserId?: string;
     currentUserRole?: Role;
   }) {
@@ -182,6 +183,16 @@ export class ApplicationsService {
         OR: [
           { managerId: filters.currentUserId },
           { chinaManagerId: filters.currentUserId },
+        ],
+      });
+    }
+    // Фильтр по конкретному менеджеру: показываем заявки где он
+    // назначен либо локальным, либо китайским менеджером.
+    if (filters.managerUserId) {
+      and.push({
+        OR: [
+          { managerId: filters.managerUserId },
+          { chinaManagerId: filters.managerUserId },
         ],
       });
     }

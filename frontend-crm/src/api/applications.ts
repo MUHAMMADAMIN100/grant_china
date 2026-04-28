@@ -6,6 +6,8 @@ export interface AppFilters {
   direction?: Direction;
   search?: string;
   mine?: boolean;
+  /** Фильтр по конкретному менеджеру (TJ или CN) — userId */
+  manager?: string;
 }
 
 export async function listApplications(filters: AppFilters = {}) {

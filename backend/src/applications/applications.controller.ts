@@ -36,12 +36,14 @@ export class ApplicationsController {
     @Query('direction') direction?: Direction,
     @Query('search') search?: string,
     @Query('mine') mine?: string,
+    @Query('manager') manager?: string,
   ) {
     return this.apps.findAll({
       status,
       direction,
       search,
       mine: mine === 'true',
+      managerUserId: manager || undefined,
       currentUserId: user?.id,
       currentUserRole: user?.role,
     });

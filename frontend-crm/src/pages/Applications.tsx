@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listApplications } from '../api/applications';
-import type { Application, ApplicationStatus, Direction } from '../api/types';
+import { listUsers } from '../api/users';
+import type { Application, ApplicationStatus, Direction, User } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useRealtime } from '../realtime';
@@ -15,9 +16,11 @@ export default function Applications() {
   const navigate = useNavigate();
   const me = useAuth((s) => s.user);
   const [items, setItems] = useState<Application[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ApplicationStatus | ''>('');
   const [direction, setDirection] = useState<Direction | ''>('');
+  const [manager, setManager] = useState<string>('');
   const isAdmin = me?.role === 'ADMIN';
   // Менеджер видит только свои заявки; админ может переключать.
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
@@ -30,6 +33,7 @@ export default function Applications() {
       status: status || undefined,
       direction: direction || undefined,
       mine: scope === 'mine',
+      manager: manager || undefined,
     })
       .then(setItems)
       .finally(() => setLoading(false));
@@ -38,7 +42,14 @@ export default function Applications() {
   useEffect(() => {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
-  }, [search, status, direction, scope]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, status, direction, scope, manager]);
+
+  // Список пользователей для фильтра по менеджерам — только админу
+  useEffect(() => {
+    if (!isAdmin) return;
+    listUsers().then(setUsers).catch(() => {});
+  }, [isAdmin]);
 
   useRealtime({
     'application:new': () => load(),
@@ -86,6 +97,14 @@ export default function Applications() {
             <option value="AWAITING_PAYMENT">Ожидание оплаты</option>
             <option value="ENROLLED">Зачислен</option>
           </select>
+          {isAdmin && (
+            <select value={manager} onChange={(e) => setManager(e.target.value)} title="Фильтр по менеджеру">
+              <option value="">Все менеджеры</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.fullName}</option>
+              ))}
+            </select>
+          )}
           <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
             <option value="">Все направления</option>
             <DirectionOptions />
