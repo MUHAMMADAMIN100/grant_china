@@ -15,7 +15,7 @@ export default function Footer() {
           <div className="footer-col">
             <div className="footer-brand">GrantChina</div>
             <p className="footer-desc">
-              Образовательное агентство с 2015 года. Помогаем поступать в топ-университеты
+              Образовательное агентство с 2020 года. Помогаем поступать в топ-университеты
               Китая на бакалавриат, магистратуру и языковые курсы — без посредников и скрытых комиссий.
             </p>
             <div className="footer-socials">

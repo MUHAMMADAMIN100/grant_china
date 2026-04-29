@@ -15,7 +15,7 @@ export default function Hero() {
           <div>
             <motion.span className="hero-eyebrow" variants={fadeUp}>
               <Icon name="school" size={18} style={{ marginRight: 6 }} />
-              Образование в Китае с 2015 года
+              Образование в Китае с 2020 года
             </motion.span>
             <motion.h1 variants={fadeUp}>
               Обучение в <span className="accent">лучших вузах Китая</span> — без посредников
