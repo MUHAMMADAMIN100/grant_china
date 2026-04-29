@@ -60,13 +60,13 @@ export default function Header() {
         </nav>
 
         <div className="header-actions header-actions-desktop">
-          <Link to="/login" className="header-login">
+          <Link to="/login" className="btn btn-outline header-action-btn">
             <Icon name="person" size={18} />
             <span>Вход</span>
           </Link>
           <motion.a
             href="#apply"
-            className="btn btn-primary"
+            className="btn btn-primary header-action-btn"
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
           >

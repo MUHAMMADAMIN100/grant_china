@@ -28,7 +28,7 @@ export default function Hero() {
             <motion.div className="hero-cta" variants={fadeUp}>
               <motion.a
                 href="#apply"
-                className="btn btn-primary btn-large"
+                className="btn btn-primary btn-large hero-cta-btn"
                 whileHover={{ scale: 1.04, y: -2 }}
                 whileTap={{ scale: 0.97 }}
               >
@@ -36,7 +36,7 @@ export default function Hero() {
               </motion.a>
               <motion.a
                 href="#services"
-                className="btn btn-outline btn-large"
+                className="btn btn-outline btn-large hero-cta-btn"
                 whileHover={{ scale: 1.04, y: -2 }}
                 whileTap={{ scale: 0.97 }}
               >
@@ -70,10 +70,10 @@ export default function Hero() {
           viewport={{ once: true, amount: 0.3 }}
         >
           {[
-            { num: '800+', label: 'студентов отправили' },
-            { num: '50+', label: 'вузов-партнёров' },
-            { num: '10', label: 'лет на рынке' },
-            { num: '98%', label: 'успешных зачислений' },
+            { num: '823', label: 'студентов отправили' },
+            { num: '100+', label: 'вузов-партнёров' },
+            { num: '6', label: 'лет на рынке' },
+            { num: '100%', label: 'успешных зачислений' },
           ].map((s) => (
             <motion.div key={s.label} variants={fadeUp}>
               <div className="stat-num">{s.num}</div>

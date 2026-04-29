@@ -15,6 +15,10 @@ export interface FieldDef {
   /** для number-полей: ограничение значения */
   min?: number;
   max?: number;
+  /** для select: убрать пустой пункт «выберите» */
+  noEmpty?: boolean;
+  /** только цифры (без минусов, ведущих нулей и пр.) */
+  digitsOnly?: boolean;
 }
 
 export interface SectionDef {
@@ -29,6 +33,8 @@ export interface SectionDef {
     rowLabels?: string[]; // названия строк для education (Primary school, Secondary school, ...)
     fixedRows?: boolean; // если true — нельзя добавлять/удалять строки
     minRows?: number;
+    /** Подпись чекбокса «отсутствует» для каждой строки. Если не задано — «Не учился(-ась)» */
+    skipLabels?: string[];
   };
 }
 
@@ -68,6 +74,7 @@ export const FORM_SECTIONS: SectionDef[] = [
         options: [
           { value: 'SINGLE', label: 'Холост / не замужем' },
           { value: 'MARRIED', label: 'В браке' },
+          { value: 'DIVORCED', label: 'Развод' },
           { value: 'OTHER', label: 'Другое' },
         ],
       },
@@ -118,14 +125,12 @@ export const FORM_SECTIONS: SectionDef[] = [
         label: 'Уровень китайского',
         labelEn: 'Chinese Proficiency',
         kind: 'select',
+        noEmpty: true,
         options: [
           { value: 'NONE', label: 'Не владею' },
-          { value: 'A1', label: 'A1 — начальный' },
-          { value: 'A2', label: 'A2 — элементарный' },
-          { value: 'B1', label: 'B1 — средний' },
-          { value: 'B2', label: 'B2 — выше среднего' },
-          { value: 'C1', label: 'C1 — продвинутый' },
-          { value: 'C2', label: 'C2 — свободный' },
+          { value: 'BASIC', label: 'Владею' },
+          { value: 'GOOD', label: 'Хорошо' },
+          { value: 'EXCELLENT', label: 'Отлично' },
           { value: 'NATIVE', label: 'Носитель' },
         ],
       },
@@ -134,6 +139,7 @@ export const FORM_SECTIONS: SectionDef[] = [
         label: 'Уровень HSK',
         labelEn: 'HSK Level',
         kind: 'select',
+        noEmpty: true,
         options: [
           { value: 'NO', label: 'Нет' },
           { value: 'HSK1', label: 'HSK 1' },
@@ -149,18 +155,16 @@ export const FORM_SECTIONS: SectionDef[] = [
         label: 'Уровень английского',
         labelEn: 'English Proficiency',
         kind: 'select',
+        noEmpty: true,
         options: [
           { value: 'NONE', label: 'Не владею' },
-          { value: 'A1', label: 'A1 — начальный' },
-          { value: 'A2', label: 'A2 — элементарный' },
-          { value: 'B1', label: 'B1 — средний' },
-          { value: 'B2', label: 'B2 — выше среднего' },
-          { value: 'C1', label: 'C1 — продвинутый' },
-          { value: 'C2', label: 'C2 — свободный' },
+          { value: 'BASIC', label: 'Владею' },
+          { value: 'GOOD', label: 'Хорошо' },
+          { value: 'EXCELLENT', label: 'Отлично' },
           { value: 'NATIVE', label: 'Носитель' },
         ],
       },
-      { key: 'toefl', label: 'TOEFL (балл)', labelEn: 'TOEFL Score', kind: 'number', min: 0, max: 120, optional: true },
+      { key: 'toefl', label: 'TOEFL (балл)', labelEn: 'TOEFL Score', kind: 'number', min: 0, max: 120, optional: true, digitsOnly: true },
       { key: 'ielts', label: 'IELTS (балл)', labelEn: 'IELTS Results', kind: 'number', min: 0, max: 9, optional: true },
     ],
   },
@@ -211,11 +215,12 @@ export const FORM_SECTIONS: SectionDef[] = [
     titleEn: 'Family of the Applicant',
     table: {
       rowLabels: ['Отец', 'Мать', 'Супруг(а)'],
+      skipLabels: ['Нет отца', 'Нет матери', 'Нет супруга(-и)'],
       fixedRows: true,
       columns: [
         { key: 'fullName', label: 'ФИО', labelEn: 'Full Name', latin: true },
         { key: 'idNumber', label: 'Паспорт / ID', labelEn: 'ID / Passport', latin: true },
-        { key: 'age', label: 'Возраст', labelEn: 'Age', kind: 'number' },
+        { key: 'age', label: 'Возраст', labelEn: 'Age', kind: 'number', min: 0, max: 120, digitsOnly: true },
         { key: 'jobTitle', label: 'Должность', labelEn: 'Job Title', latin: true, optional: true },
         { key: 'workPlace', label: 'Место работы', labelEn: 'Work Place', latin: true, optional: true },
         { key: 'phone', label: 'Телефон', labelEn: 'Phone' },

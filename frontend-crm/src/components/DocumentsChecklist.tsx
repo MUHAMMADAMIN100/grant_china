@@ -54,12 +54,14 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
   const percent = Math.round((uploadedCount / total) * 100);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setUploadingType(type);
     try {
-      await uploadDocument(studentId, file, type);
-      toast('Документ загружен', 'success');
+      for (const file of files) {
+        await uploadDocument(studentId, file, type);
+      }
+      toast(files.length > 1 ? `Загружено: ${files.length}` : 'Документ загружен', 'success');
       onChange();
     } catch (err: any) {
       toast(err?.response?.data?.message || 'Ошибка загрузки', 'error');
@@ -90,18 +92,21 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
         }
       }
 
-      // Загружаем типизированные документы
+      // Загружаем типизированные документы (несколько файлов в категории идут с суффиксом _1/_2/...)
       for (let i = 0; i < REQUIRED_DOCUMENTS.length; i++) {
         const req = REQUIRED_DOCUMENTS[i];
-        const doc = typedDocs.find((d) => d.type === req.type);
-        if (!doc) continue;
-        const res = await fetch(`${API_BASE}${doc.url}`);
-        if (!res.ok) continue;
-        const blob = await res.blob();
-        const ext = doc.originalName.includes('.') ? doc.originalName.split('.').pop() : '';
-        const baseName = `${String(i + 1).padStart(2, '0')}_${sanitizeFileName(req.label)}`;
-        const fileName = ext ? `${baseName}.${ext}` : baseName;
-        zip.file(fileName, blob);
+        const docs = typedDocs.filter((d) => d.type === req.type);
+        if (docs.length === 0) continue;
+        for (let j = 0; j < docs.length; j++) {
+          const doc = docs[j];
+          const res = await fetch(`${API_BASE}${doc.url}`);
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          const ext = doc.originalName.includes('.') ? doc.originalName.split('.').pop() : '';
+          const baseName = `${String(i + 1).padStart(2, '0')}_${sanitizeFileName(req.label)}${docs.length > 1 ? `_${j + 1}` : ''}`;
+          const fileName = ext ? `${baseName}.${ext}` : baseName;
+          zip.file(fileName, blob);
+        }
       }
 
       // Прочие документы — в папке "Прочее"
@@ -184,8 +189,8 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
 
       <div className="docs-grid">
         {REQUIRED_DOCUMENTS.map((req) => {
-          const doc = typedDocs.find((d) => d.type === req.type);
-          const isUploaded = !!doc;
+          const docs = typedDocs.filter((d) => d.type === req.type);
+          const isUploaded = docs.length > 0;
           const isUploading = uploadingType === req.type;
 
           return (
@@ -199,36 +204,45 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
                   <Icon name={isUploaded ? 'check_circle' : 'radio_button_unchecked'} size={22} />
                 </div>
                 <div className="doc-slot-info">
-                  <div className="doc-slot-label">{req.label}</div>
+                  <div className="doc-slot-label">
+                    {req.label}
+                    {docs.length > 1 && <span className="doc-slot-count"> · {docs.length} файла</span>}
+                  </div>
                   {req.hint && <div className="doc-slot-hint">{req.hint}</div>}
                 </div>
               </div>
 
-              {isUploaded && doc ? (
-                <div className="doc-slot-file">
-                  <a href={`${API_BASE}${doc.url}`} target="_blank" rel="noreferrer" className="doc-slot-filename">
-                    <Icon name="description" size={18} />
-                    <span>{doc.originalName}</span>
-                  </a>
-                  <div className="doc-slot-meta">
-                    {fmtBytes(doc.size)} · {new Date(doc.createdAt).toLocaleDateString('ru-RU')}
+              {isUploaded ? (
+                <>
+                  <div className="doc-slot-files">
+                    {docs.map((doc) => (
+                      <div key={doc.id} className="doc-slot-file">
+                        <a href={`${API_BASE}${doc.url}`} target="_blank" rel="noreferrer" className="doc-slot-filename">
+                          <Icon name="description" size={18} />
+                          <span>{doc.originalName}</span>
+                        </a>
+                        <div className="doc-slot-meta">
+                          {fmtBytes(doc.size)} · {new Date(doc.createdAt).toLocaleDateString('ru-RU')}
+                        </div>
+                        {editable && (
+                          <button className="btn btn-sm btn-danger doc-slot-del" onClick={() => handleDelete(doc)}>
+                            <Icon name="delete" size={14} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
                   {editable && (
-                    <div className="doc-slot-actions">
-                      <button
-                        className="btn btn-sm btn-secondary"
-                        onClick={() => inputRefs.current[req.type]?.click()}
-                        disabled={isUploading}
-                      >
-                        <Icon name="refresh" size={16} style={{ marginRight: 4 }} />
-                        Заменить
-                      </button>
-                      <button className="btn btn-sm btn-danger" onClick={() => handleDelete(doc)}>
-                        <Icon name="delete" size={16} />
-                      </button>
-                    </div>
+                    <button
+                      className="btn btn-sm btn-secondary doc-slot-add"
+                      onClick={() => inputRefs.current[req.type]?.click()}
+                      disabled={isUploading}
+                    >
+                      <Icon name={isUploading ? 'progress_activity' : 'add'} size={16} style={{ marginRight: 4 }} />
+                      {isUploading ? 'Загрузка...' : 'Добавить ещё'}
+                    </button>
                   )}
-                </div>
+                </>
               ) : editable ? (
                 <button
                   className="btn btn-secondary doc-slot-upload"
@@ -245,6 +259,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
               <input
                 ref={(el) => { inputRefs.current[req.type] = el; }}
                 type="file"
+                multiple
                 hidden
                 onChange={(e) => handleUpload(e, req.type)}
               />

@@ -199,6 +199,51 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   margin-bottom: 32px; max-width: 520px;
 }
 .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; }
+/* Hero CTA: одинаковая ширина и фикс ховера для outline-кнопки */
+.hero-cta-btn {
+  min-width: 230px;
+  padding: 16px 24px !important;
+  font-size: 17px !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  border-width: 2px !important;
+}
+.hero-cta-btn.btn-outline {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border: 2px solid var(--primary) !important;
+}
+.hero-cta-btn.btn-outline:hover {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border-color: var(--primary) !important;
+}
+@media (max-width: 480px) {
+  .hero-cta-btn { width: 100%; min-width: 0; }
+}
+/* Header action buttons: одинаковая высота и ширина */
+.header-action-btn {
+  min-width: 165px;
+  height: 42px;
+  padding: 0 18px !important;
+  font-size: 14px !important;
+  border-radius: 10px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 600 !important;
+}
+.header-action-btn.btn-outline {
+  background: #fff !important;
+  color: var(--text) !important;
+  border: 1.5px solid var(--border) !important;
+}
+.header-action-btn.btn-outline:hover {
+  background: #fff !important;
+  color: var(--primary) !important;
+  border-color: var(--primary) !important;
+}
 .hero-image {
   background: transparent;
   border-radius: 24px;
@@ -767,7 +812,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   padding: 6px 10px; border-radius: 8px; font-weight: 500; font-size: 12px;
   display: inline-flex; align-items: center; gap: 4px;
 }
-.btn-danger:hover { background: #dc2626; }
+.btn-danger:hover { background: #dc2626; color: white; }
+/* Текст на цветных кнопках всегда виден, даже если родительский контекст перекрашивает */
+.btn-primary, .btn-primary:hover, .btn-primary:focus, .btn-primary:active,
+.btn-danger, .btn-danger:hover, .btn-danger:focus, .btn-danger:active { color: white !important; }
+.btn-primary .material-symbols-rounded, .btn-danger .material-symbols-rounded { color: white !important; }
 
 .stu-toast {
   position: fixed; top: 20px; right: 20px; z-index: 100;
@@ -1152,6 +1201,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 
 .stu-celebrate {
+  position: relative; overflow: hidden;
   display: flex; align-items: center; gap: 16px;
   padding: 22px 24px;
   background: linear-gradient(135deg, #fef9c3 0%, #fef3c7 100%);
@@ -1160,14 +1210,18 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   margin-bottom: 16px;
   box-shadow: 0 8px 24px rgba(250, 204, 21, 0.2);
 }
+.stu-confetti {
+  position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+  z-index: 1;
+}
+.stu-confetti-piece {
+  position: absolute; top: 0;
+  border-radius: 2px;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
+}
+.stu-celebrate > *:not(.stu-confetti) { position: relative; z-index: 2; }
 .stu-celebrate-icon {
   font-size: 48px; line-height: 1; flex-shrink: 0;
-  animation: celebrate-bounce 1.6s ease-in-out infinite;
-}
-@keyframes celebrate-bounce {
-  0%, 100% { transform: scale(1) rotate(0); }
-  25% { transform: scale(1.1) rotate(-8deg); }
-  75% { transform: scale(1.1) rotate(8deg); }
 }
 .stu-celebrate-title {
   font-size: 22px; font-weight: 800; color: #854d0e;

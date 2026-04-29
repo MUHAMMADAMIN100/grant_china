@@ -1,11 +1,19 @@
-export type FieldKind = 'text' | 'date' | 'email' | 'tel' | 'number' | 'textarea' | 'radio';
+export type FieldKind = 'text' | 'date' | 'email' | 'tel' | 'number' | 'textarea' | 'radio' | 'year' | 'select';
 
 export interface FieldDef {
   key: string;
   label: string;
   labelEn?: string;
   kind?: FieldKind;
+  placeholder?: string;
   options?: { value: string; label: string }[];
+  required?: boolean;
+  optional?: boolean;
+  latin?: boolean;
+  min?: number;
+  max?: number;
+  noEmpty?: boolean;
+  digitsOnly?: boolean;
 }
 
 export interface SectionDef {
@@ -16,8 +24,11 @@ export interface SectionDef {
   fields?: FieldDef[];
   table?: {
     columns: FieldDef[];
+    defaultRows?: number;
     rowLabels?: string[];
     fixedRows?: boolean;
+    minRows?: number;
+    skipLabels?: string[];
   };
 }
 
@@ -28,40 +39,44 @@ export const FORM_SECTIONS: SectionDef[] = [
     title: 'Личные данные',
     titleEn: 'Personal Information',
     fields: [
-      { key: 'surname', label: 'Фамилия', labelEn: 'Surname' },
-      { key: 'givenName', label: 'Имя', labelEn: 'Given name' },
-      { key: 'birthDate', label: 'Дата рождения', labelEn: 'Date of Birth' },
-      { key: 'birthPlace', label: 'Место рождения', labelEn: 'Place of Birth' },
-      { key: 'nationality', label: 'Национальность', labelEn: 'Nationality' },
-      { key: 'currentCountry', label: 'Страна / город', labelEn: 'Present Country/City' },
-      { key: 'passportNumber', label: 'Номер паспорта', labelEn: 'Passport No.' },
-      { key: 'passportExpiry', label: 'Срок паспорта', labelEn: 'Passport Expiration' },
+      { key: 'surname', label: 'Фамилия (как в паспорте)', labelEn: 'Surname', latin: true },
+      { key: 'givenName', label: 'Имя (как в паспорте)', labelEn: 'Given name', latin: true },
+      { key: 'birthDate', label: 'Дата рождения', labelEn: 'Date of Birth', kind: 'date' },
+      { key: 'birthPlace', label: 'Место рождения', labelEn: 'Place of Birth', latin: true },
+      { key: 'nationality', label: 'Национальность', labelEn: 'Nationality', latin: true },
+      { key: 'currentCountry', label: 'Текущая страна / город', labelEn: 'Present Country/City', latin: true },
+      { key: 'passportNumber', label: 'Номер паспорта', labelEn: 'Passport No.', latin: true },
+      { key: 'passportExpiry', label: 'Срок действия паспорта', labelEn: 'Passport Expiration', kind: 'date' },
       {
         key: 'gender',
         label: 'Пол',
         labelEn: 'Gender',
+        kind: 'radio',
         options: [
           { value: 'MALE', label: 'Мужской' },
           { value: 'FEMALE', label: 'Женский' },
         ],
       },
-      { key: 'religion', label: 'Религия', labelEn: 'Religion' },
-      { key: 'nativeLanguage', label: 'Родной язык', labelEn: 'Native Language' },
-      { key: 'officialLanguage', label: 'Официальный язык', labelEn: 'Official Language' },
+      { key: 'religion', label: 'Религия', labelEn: 'Religion', latin: true, optional: true },
+      { key: 'nativeLanguage', label: 'Родной язык', labelEn: 'Native Language', latin: true },
+      { key: 'officialLanguage', label: 'Официальный язык', labelEn: 'Official Language', latin: true },
       {
         key: 'maritalStatus',
         label: 'Семейное положение',
         labelEn: 'Marital Status',
+        kind: 'radio',
         options: [
           { value: 'SINGLE', label: 'Холост / не замужем' },
           { value: 'MARRIED', label: 'В браке' },
+          { value: 'DIVORCED', label: 'Развод' },
           { value: 'OTHER', label: 'Другое' },
         ],
       },
       {
         key: 'educationLevel',
-        label: 'Уровень образования',
-        labelEn: 'Highest Education',
+        label: 'Высший уровень образования',
+        labelEn: 'Highest Education Level',
+        kind: 'radio',
         options: [
           { value: 'HIGH_SCHOOL', label: 'Средняя школа' },
           { value: 'BACHELOR', label: 'Бакалавр' },
@@ -71,8 +86,9 @@ export const FORM_SECTIONS: SectionDef[] = [
       },
       {
         key: 'inChina',
-        label: 'Сейчас в Китае?',
-        labelEn: 'In China?',
+        label: 'Сейчас находитесь в Китае?',
+        labelEn: 'Are you currently in China?',
+        kind: 'radio',
         options: [
           { value: 'YES', label: 'Да' },
           { value: 'NO', label: 'Нет' },
@@ -83,13 +99,13 @@ export const FORM_SECTIONS: SectionDef[] = [
   {
     key: 'address',
     icon: 'home',
-    title: 'Адрес',
-    titleEn: 'Address',
+    title: 'Адрес постоянного проживания',
+    titleEn: 'Permanent Address',
     fields: [
-      { key: 'home', label: 'Домашний адрес', labelEn: 'Home Address' },
-      { key: 'tel', label: 'Телефон', labelEn: 'Tel' },
-      { key: 'email', label: 'Email', labelEn: 'Email' },
-      { key: 'postCode', label: 'Индекс', labelEn: 'Post code' },
+      { key: 'home', label: 'Домашний адрес', labelEn: 'Home Address', kind: 'textarea', placeholder: 'Страна, город, улица, дом', latin: true },
+      { key: 'tel', label: 'Телефон', labelEn: 'Tel', kind: 'tel' },
+      { key: 'email', label: 'Email', labelEn: 'Email', kind: 'email' },
+      { key: 'postCode', label: 'Почтовый индекс', labelEn: 'Post code', latin: true, optional: true },
     ],
   },
   {
@@ -100,19 +116,24 @@ export const FORM_SECTIONS: SectionDef[] = [
     fields: [
       {
         key: 'chineseProficiency',
-        label: 'Китайский',
-        labelEn: 'Chinese',
+        label: 'Уровень китайского',
+        labelEn: 'Chinese Proficiency',
+        kind: 'select',
+        noEmpty: true,
         options: [
-          { value: 'EXCELLENT', label: 'Отлично' },
+          { value: 'NONE', label: 'Не владею' },
+          { value: 'BASIC', label: 'Владею' },
           { value: 'GOOD', label: 'Хорошо' },
-          { value: 'POOR', label: 'Слабо' },
-          { value: 'NONE', label: 'Нет' },
+          { value: 'EXCELLENT', label: 'Отлично' },
+          { value: 'NATIVE', label: 'Носитель' },
         ],
       },
       {
         key: 'hskLevel',
-        label: 'HSK',
+        label: 'Уровень HSK',
         labelEn: 'HSK Level',
+        kind: 'select',
+        noEmpty: true,
         options: [
           { value: 'NO', label: 'Нет' },
           { value: 'HSK1', label: 'HSK 1' },
@@ -125,17 +146,20 @@ export const FORM_SECTIONS: SectionDef[] = [
       },
       {
         key: 'englishProficiency',
-        label: 'Английский',
-        labelEn: 'English',
+        label: 'Уровень английского',
+        labelEn: 'English Proficiency',
+        kind: 'select',
+        noEmpty: true,
         options: [
-          { value: 'EXCELLENT', label: 'Отлично' },
+          { value: 'NONE', label: 'Не владею' },
+          { value: 'BASIC', label: 'Владею' },
           { value: 'GOOD', label: 'Хорошо' },
-          { value: 'POOR', label: 'Слабо' },
-          { value: 'NONE', label: 'Нет' },
+          { value: 'EXCELLENT', label: 'Отлично' },
+          { value: 'NATIVE', label: 'Носитель' },
         ],
       },
-      { key: 'toefl', label: 'TOEFL', labelEn: 'TOEFL Score' },
-      { key: 'ielts', label: 'IELTS', labelEn: 'IELTS Results' },
+      { key: 'toefl', label: 'TOEFL (балл)', labelEn: 'TOEFL Score', kind: 'number', min: 0, max: 120, optional: true, digitsOnly: true },
+      { key: 'ielts', label: 'IELTS (балл)', labelEn: 'IELTS Results', kind: 'number', min: 0, max: 9, optional: true },
     ],
   },
   {
@@ -154,10 +178,11 @@ export const FORM_SECTIONS: SectionDef[] = [
       ],
       fixedRows: true,
       columns: [
-        { key: 'schoolName', label: 'Название', labelEn: 'School Name' },
-        { key: 'years', label: 'Годы', labelEn: 'Years' },
-        { key: 'major', label: 'Специальность', labelEn: 'Major' },
-        { key: 'degree', label: 'Степень', labelEn: 'Degree' },
+        { key: 'schoolName', label: 'Название', labelEn: 'School Name', latin: true },
+        { key: 'yearFrom', label: 'Год начала', labelEn: 'Year From', kind: 'year' },
+        { key: 'yearTo', label: 'Год окончания', labelEn: 'Year To', kind: 'year' },
+        { key: 'major', label: 'Специальность', labelEn: 'Major', latin: true, optional: true },
+        { key: 'degree', label: 'Степень', labelEn: 'Degree', latin: true, optional: true },
       ],
     },
   },
@@ -167,11 +192,13 @@ export const FORM_SECTIONS: SectionDef[] = [
     title: 'Опыт работы',
     titleEn: 'Work Experience',
     table: {
+      minRows: 1,
       columns: [
-        { key: 'unit', label: 'Организация', labelEn: 'Working Unit' },
-        { key: 'years', label: 'Годы', labelEn: 'Years' },
-        { key: 'position', label: 'Должность', labelEn: 'Position' },
-        { key: 'place', label: 'Место работы', labelEn: 'Work Place' },
+        { key: 'unit', label: 'Организация', labelEn: 'Working Unit Name', latin: true },
+        { key: 'yearFrom', label: 'Год начала', labelEn: 'Year From', kind: 'year' },
+        { key: 'yearTo', label: 'Год окончания', labelEn: 'Year To', kind: 'year' },
+        { key: 'position', label: 'Должность', labelEn: 'Position', latin: true },
+        { key: 'place', label: 'Место работы', labelEn: 'Work Place', latin: true },
       ],
     },
   },
@@ -179,22 +206,41 @@ export const FORM_SECTIONS: SectionDef[] = [
     key: 'family',
     icon: 'groups',
     title: 'Семья',
-    titleEn: 'Family',
+    titleEn: 'Family of the Applicant',
     table: {
       rowLabels: ['Отец', 'Мать', 'Супруг(а)'],
+      skipLabels: ['Нет отца', 'Нет матери', 'Нет супруга(-и)'],
       fixedRows: true,
       columns: [
-        { key: 'fullName', label: 'ФИО', labelEn: 'Full Name' },
-        { key: 'idNumber', label: 'Паспорт', labelEn: 'ID' },
-        { key: 'age', label: 'Возраст', labelEn: 'Age' },
-        { key: 'jobTitle', label: 'Должность', labelEn: 'Job Title' },
-        { key: 'workPlace', label: 'Место работы', labelEn: 'Work Place' },
+        { key: 'fullName', label: 'ФИО', labelEn: 'Full Name', latin: true },
+        { key: 'idNumber', label: 'Паспорт / ID', labelEn: 'ID / Passport', latin: true },
+        { key: 'age', label: 'Возраст', labelEn: 'Age', kind: 'number', min: 0, max: 120, digitsOnly: true },
+        { key: 'jobTitle', label: 'Должность', labelEn: 'Job Title', latin: true, optional: true },
+        { key: 'workPlace', label: 'Место работы', labelEn: 'Work Place', latin: true, optional: true },
         { key: 'phone', label: 'Телефон', labelEn: 'Phone' },
-        { key: 'email', label: 'Email', labelEn: 'Email' },
+        { key: 'email', label: 'Email', labelEn: 'E-mail', kind: 'email', optional: true },
       ],
     },
   },
 ];
+
+export function emptyForm(): any {
+  const form: any = {};
+  for (const s of FORM_SECTIONS) {
+    if (s.fields) {
+      form[s.key] = {};
+      for (const f of s.fields) form[s.key][f.key] = '';
+    } else if (s.table) {
+      const rows = s.table.rowLabels?.length || s.table.minRows || 1;
+      form[s.key] = Array.from({ length: rows }, () => {
+        const row: any = {};
+        for (const c of s.table!.columns) row[c.key] = '';
+        return row;
+      });
+    }
+  }
+  return form;
+}
 
 export function countProgress(form: any): { filled: number; total: number } {
   let filled = 0;
@@ -202,13 +248,16 @@ export function countProgress(form: any): { filled: number; total: number } {
   for (const s of FORM_SECTIONS) {
     if (s.fields) {
       for (const f of s.fields) {
+        if (f.optional) continue;
         total++;
         if (form?.[s.key]?.[f.key]?.toString().trim()) filled++;
       }
     } else if (s.table) {
       const rows = form?.[s.key] || [];
       for (const row of rows) {
+        if (row?.__notAttended) continue;
         for (const c of s.table.columns) {
+          if (c.optional) continue;
           total++;
           if (row?.[c.key]?.toString().trim()) filled++;
         }
@@ -227,3 +276,5 @@ export function displayValue(def: FieldDef, raw: any): string {
   }
   return v;
 }
+
+export const LATIN_RE = /^[A-Za-z0-9 .,'\-/()&+#@]*$/;

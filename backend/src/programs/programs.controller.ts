@@ -89,7 +89,7 @@ export class ProgramsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: programImageStorage,
-      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
+      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '209715200', 10) },
       fileFilter: (_req, file, cb) => {
         if (!/^image\//.test(file.mimetype)) {
           return cb(new BadRequestException('Нужен файл-картинка'), false);
@@ -150,7 +150,7 @@ export class ProgramsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: programImageStorage,
-      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
+      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '209715200', 10) },
       fileFilter: (_req, file, cb) => {
         if (!/^image\//.test(file.mimetype)) {
           return cb(new BadRequestException('Нужен файл-картинка'), false);

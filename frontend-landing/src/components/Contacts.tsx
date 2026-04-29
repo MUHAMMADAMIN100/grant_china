@@ -3,9 +3,9 @@ import { fadeUp, staggerContainer, viewportOnce } from '../motion';
 import Icon from '../Icon';
 
 const contacts = [
-  { icon: 'call', title: 'Телефон', content: <a href="tel:+992900000000">+992 900 00 00 00</a> },
+  { icon: 'call', title: 'Телефон', content: <a href="tel:+992777121567">+992 777 121 567</a> },
   { icon: 'mail', title: 'Email', content: <a href="mailto:info@grantchina.tj">info@grantchina.tj</a> },
-  { icon: 'location_on', title: 'Адрес', content: <span>г. Душанбе, ул. Рудаки, 137</span> },
+  { icon: 'location_on', title: 'Адрес', content: <span>г. Душанбе, ул. Рудаки, 55</span> },
 ];
 
 export default function Contacts() {

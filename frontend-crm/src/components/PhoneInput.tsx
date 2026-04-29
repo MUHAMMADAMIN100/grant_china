@@ -67,9 +67,10 @@ interface Props {
   onChange: (fullPhone: string) => void;
   error?: boolean;
   placeholder?: string;
+  disabled?: boolean;
 }
 
-export default function PhoneInput({ value, onChange, error, placeholder }: Props) {
+export default function PhoneInput({ value, onChange, error, placeholder, disabled }: Props) {
   const [countryIdx, setCountryIdx] = useState(() => findCountryByPhone(value || '+992').idx);
   const [local, setLocal] = useState(() => findCountryByPhone(value || '+992').rest);
   const [open, setOpen] = useState(false);
@@ -142,7 +143,8 @@ export default function PhoneInput({ value, onChange, error, placeholder }: Prop
       <button
         type="button"
         className="phone-country-btn"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -162,6 +164,7 @@ export default function PhoneInput({ value, onChange, error, placeholder }: Prop
         inputMode="numeric"
         autoComplete="tel-national"
         value={local}
+        disabled={disabled}
         maxLength={country.maxDigits}
         placeholder={placeholder || '9'.repeat(country.minDigits)}
         onChange={(e) => {
