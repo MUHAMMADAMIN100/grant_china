@@ -29,7 +29,7 @@ export default function Login() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(email.trim(), password.trim());
       navigate('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Не удалось войти');

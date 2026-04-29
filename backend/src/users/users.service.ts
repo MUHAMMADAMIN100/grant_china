@@ -36,12 +36,15 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
-    const exists = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const email = (dto.email || '').trim().toLowerCase();
+    const rawPassword = (dto.password || '').trim();
+
+    const exists = await this.prisma.user.findUnique({ where: { email } });
     if (exists) throw new ConflictException('Email уже занят');
 
-    const password = await bcrypt.hash(dto.password, 10);
+    const password = await bcrypt.hash(rawPassword, 10);
     const user = await this.prisma.user.create({
-      data: { email: dto.email, password, fullName: dto.fullName, role: dto.role },
+      data: { email, password, fullName: dto.fullName, role: dto.role },
       select: { id: true, email: true, fullName: true, role: true, createdAt: true },
     });
     return user;
@@ -50,10 +53,15 @@ export class UsersService {
   async update(id: string, dto: UpdateUserDto) {
     await this.findOne(id);
     const data: any = {};
-    if (dto.email) data.email = dto.email;
+    if (dto.email) data.email = dto.email.trim().toLowerCase();
     if (dto.fullName) data.fullName = dto.fullName;
     if (dto.role) data.role = dto.role;
-    if (dto.password) data.password = await bcrypt.hash(dto.password, 10);
+    if (dto.password) {
+      // Нормализуем так же, как в auth.service: иначе при login сравнение
+      // bcrypt.compare(plain, hashOfPlainWithSpaces) всегда вернёт false.
+      const trimmed = dto.password.trim();
+      data.password = await bcrypt.hash(trimmed, 10);
+    }
 
     const user = await this.prisma.user.update({
       where: { id },

@@ -40,20 +40,27 @@ export default function ChangePasswordModal({ open, mode, onClose }: Props) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
-    if (next.length < 8) {
+    // Триммим перед валидацией и отправкой — если юзер случайно зацепит
+    // пробел (часто при copy-paste), backend всё равно сохранит хэш по
+    // тримленному паролю, иначе login потом провалится.
+    const cur = current.trim();
+    const nxt = next.trim();
+    const cnf = confirm.trim();
+
+    if (nxt.length < 8) {
       setErr('Новый пароль: минимум 8 символов');
       return;
     }
-    if (next !== confirm) {
+    if (nxt !== cnf) {
       setErr('Пароли не совпадают');
       return;
     }
     setBusy(true);
     try {
       if (mode.kind === 'self') {
-        await changePassword(current, next);
+        await changePassword(cur, nxt);
       } else {
-        await updateUser(mode.userId, { password: next });
+        await updateUser(mode.userId, { password: nxt });
       }
       toast('Пароль обновлён', 'success');
       reset();
@@ -112,6 +119,7 @@ export default function ChangePasswordModal({ open, mode, onClose }: Props) {
                   onChange={(e) => setCurrent(e.target.value)}
                   required
                   autoFocus
+                  autoComplete="current-password"
                 />
               </div>
             )}
@@ -124,6 +132,7 @@ export default function ChangePasswordModal({ open, mode, onClose }: Props) {
                 required
                 minLength={8}
                 autoFocus={mode.kind === 'admin'}
+                autoComplete="new-password"
               />
             </div>
             <div className="form-group" style={{ textAlign: 'left', marginBottom: 16 }}>
@@ -134,6 +143,7 @@ export default function ChangePasswordModal({ open, mode, onClose }: Props) {
                 onChange={(e) => setConfirm(e.target.value)}
                 required
                 minLength={8}
+                autoComplete="new-password"
               />
             </div>
 
