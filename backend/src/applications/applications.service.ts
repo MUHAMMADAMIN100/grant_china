@@ -292,21 +292,11 @@ export class ApplicationsService {
       return updated;
     }
 
-    // Гейт: нельзя переходить в DOCS_SUBMITTED пока не загружены все 10 документов.
-    // Гейт срабатывает только при движении ВПЕРЁД (с этапа ниже), но не при откате назад.
-    if (
-      dto.status === ApplicationStatus.DOCS_SUBMITTED &&
-      existing.status !== ApplicationStatus.DOCS_SUBMITTED &&
-      existing.studentId &&
-      !this.isDowngrade(existing.status, ApplicationStatus.DOCS_SUBMITTED)
-    ) {
-      const missing = await this.missingRequiredDocs(existing.studentId);
-      if (missing.length > 0) {
-        throw new BadRequestException(
-          `Невозможно подать документы: не загружены (${missing.length}): ${missing.join(', ')}`,
-        );
-      }
-    }
+    // Гейт DOCS_SUBMITTED удалён по запросу: менеджер должен иметь возможность
+    // переводить заявку на следующий этап даже если не все документы загружены
+    // (документы могут быть переданы по другим каналам, или клиент просит
+    // двигаться дальше). Список недостающих документов всё ещё доступен для
+    // справки через `missingRequiredDocs` и UI-предупреждение в CRM.
 
     const updated = await this.prisma.application.update({
       where: { id },
