@@ -153,8 +153,9 @@ export default function PhoneInput({ value, onChange, error, placeholder }: Prop
     setSearch('');
   };
 
-  // Inline-стили на критичные для layout свойства, чтобы перебить любые
-  // глобальные CSS-правила (input { width:100% } и т. п.).
+  // Inline-стили на критичные для layout И визуальные свойства,
+  // чтобы перебить любые глобальные правила и кеши. Внешний вид
+  // подобран ровно как у обычного <input> на лендинге.
   const wrapStyle: React.CSSProperties = {
     display: 'flex',
     flexDirection: 'row',
@@ -162,11 +163,23 @@ export default function PhoneInput({ value, onChange, error, placeholder }: Prop
     flexWrap: 'nowrap',
     width: '100%',
     boxSizing: 'border-box',
+    border: `1.5px solid ${error ? 'var(--danger, #dc2626)' : 'var(--border, #e5e7eb)'}`,
+    borderRadius: 10,
+    background: error ? '#fef2f2' : '#fff',
+    overflow: 'hidden',
   };
   const btnStyle: React.CSSProperties = {
     flex: '0 0 auto',
     display: 'inline-flex',
     alignItems: 'center',
+    gap: 8,
+    padding: '0 10px',
+    border: 'none',
+    borderRight: '1px solid var(--border, #e5e7eb)',
+    background: 'transparent',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    height: 'auto',
   };
   const inputStyle: React.CSSProperties = {
     flex: '1 1 0',
@@ -175,6 +188,10 @@ export default function PhoneInput({ value, onChange, error, placeholder }: Prop
     border: 'none',
     background: 'transparent',
     outline: 'none',
+    padding: '12px 14px',
+    fontSize: 15,
+    color: 'var(--text, #0f172a)',
+    boxShadow: 'none',
   };
 
   return (

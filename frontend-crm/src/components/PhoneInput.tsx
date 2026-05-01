@@ -138,8 +138,9 @@ export default function PhoneInput({ value, onChange, error, placeholder, disabl
     setSearch('');
   };
 
-  // Inline-стили на критичные для layout свойства, чтобы перебить любые
-  // глобальные правила (.af-field input { width:100% } и т. п.).
+  // Inline-стили на критичные для layout И визуальные свойства,
+  // чтобы перебить любые глобальные правила и кеши. Внешний вид
+  // подобран ровно как у обычного <input> в .af-field / .form-group.
   const wrapStyle: React.CSSProperties = {
     display: 'flex',
     flexDirection: 'row',
@@ -147,11 +148,23 @@ export default function PhoneInput({ value, onChange, error, placeholder, disabl
     flexWrap: 'nowrap',
     width: '100%',
     boxSizing: 'border-box',
+    border: `1px solid ${error ? 'var(--danger, #dc2626)' : 'var(--border, #e5e7eb)'}`,
+    borderRadius: 8,
+    background: error ? '#fef2f2' : '#fff',
+    overflow: 'hidden',
   };
   const btnStyle: React.CSSProperties = {
     flex: '0 0 auto',
     display: 'inline-flex',
     alignItems: 'center',
+    gap: 8,
+    padding: '0 10px',
+    border: 'none',
+    borderRight: '1px solid var(--border, #e5e7eb)',
+    background: 'transparent',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    height: 'auto',
   };
   const inputStyle: React.CSSProperties = {
     flex: '1 1 0',
@@ -160,6 +173,10 @@ export default function PhoneInput({ value, onChange, error, placeholder, disabl
     border: 'none',
     background: 'transparent',
     outline: 'none',
+    padding: '10px 12px',
+    fontSize: 14,
+    color: 'var(--text, #0f172a)',
+    boxShadow: 'none',
   };
 
   return (
