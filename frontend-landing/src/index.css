@@ -483,20 +483,23 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 @keyframes rt-blink { 0%,100%{opacity:1} 50%{opacity:.35} }
 
 .phone-input-wrap {
-  display: flex; gap: 0; align-items: stretch;
+  display: flex; gap: 0; align-items: stretch; flex-wrap: nowrap;
+  width: 100%;
   border: 1.5px solid var(--border); border-radius: 10px;
   background: white;
   position: relative;
+  overflow: hidden;
 }
 .phone-input-wrap.input-error { border-color: var(--danger); background: #fef2f2; }
 .phone-input-wrap:focus-within { border-color: var(--primary); }
 
 .phone-country-btn {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 0 12px; border: none; background: transparent;
+  padding: 0 10px; border: none; background: transparent;
   border-right: 1px solid var(--border); border-radius: 10px 0 0 10px;
-  cursor: pointer; min-width: 110px;
+  cursor: pointer; min-width: 0; flex: 0 0 auto;
   transition: background 0.15s;
+  white-space: nowrap;
 }
 .phone-country-btn:hover { background: rgba(0, 0, 0, 0.03); }
 .phone-country-flag {
@@ -505,14 +508,16 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 .phone-country-code { font-size: 14px; font-weight: 600; color: var(--text); }
-.phone-country-caret { font-size: 10px; color: var(--text-soft); margin-left: auto; }
+.phone-country-caret { font-size: 10px; color: var(--text-soft); margin-left: 4px; }
 
 .phone-input-wrap input[type="tel"] {
-  flex: 1; border: none !important; background: transparent;
+  flex: 1 1 0; min-width: 0;
+  width: auto !important;
+  border: none !important; background: transparent;
   padding: 12px 14px; font-size: 15px; outline: none;
-  border-radius: 0 10px 10px 0;
+  border-radius: 0 10px 10px 0 !important;
 }
-.phone-input-wrap input[type="tel"]:focus { border: none !important; }
+.phone-input-wrap input[type="tel"]:focus { border: none !important; box-shadow: none !important; }
 
 .phone-dropdown {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;

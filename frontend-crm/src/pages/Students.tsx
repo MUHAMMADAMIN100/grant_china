@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
 import { listUsers } from '../api/users';
 import type { Direction, Student, StudentStatus, User } from '../api/types';
-import { DIRECTION_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
+import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -252,7 +252,23 @@ export default function Students() {
                           </div>
                         </div>
                       </td>
-                      <td data-label="Статус"><span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span></td>
+                      <td data-label="Статус">
+                        {(() => {
+                          const appStatus = s.applications?.[0]?.status;
+                          if (s.status !== 'ACTIVE' || !appStatus) {
+                            return (
+                              <span className={`badge ${STUDENT_STATUS_BADGE[s.status]}`}>
+                                {STUDENT_STATUS_LABEL[s.status]}
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className={`badge ${STATUS_BADGE[appStatus]}`}>
+                              {STATUS_LABEL[appStatus]}
+                            </span>
+                          );
+                        })()}
+                      </td>
                     </motion.tr>
                   ))}
                 </motion.tbody>

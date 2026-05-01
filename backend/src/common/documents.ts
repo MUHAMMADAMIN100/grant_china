@@ -15,9 +15,9 @@ export const REQUIRED_DOCUMENT_TYPES: DocumentTypeDef[] = [
   { type: 'BANK', label: 'Справка с банка' },
   { type: 'MEDICAL', label: 'Мед.справка' },
   { type: 'NO_CRIMINAL', label: 'Справка о несудимости' },
-  { type: 'STUDY_PLAN', label: 'Study Plan' },
+  { type: 'STUDY_PLAN', label: 'Study Plan (Мотивационное письмо)' },
   { type: 'CERTIFICATE', label: 'Certificate' },
-  { type: 'PARENTS_PASSPORT', label: 'Parents passport' },
+  { type: 'PARENTS_PASSPORT', label: 'Паспорт родителей' },
   { type: 'DIPLOMA', label: 'Аттестат' },
   { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
 ];

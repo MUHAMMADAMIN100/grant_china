@@ -38,9 +38,9 @@ const REQUIRED_DOCS = [
   { type: 'BANK', label: 'Справка с банка' },
   { type: 'MEDICAL', label: 'Мед.справка (для Китая)' },
   { type: 'NO_CRIMINAL', label: 'Справка о несудимости' },
-  { type: 'STUDY_PLAN', label: 'Study Plan' },
-  { type: 'CERTIFICATE', label: 'Certificate' },
-  { type: 'PARENTS_PASSPORT', label: 'Parents passport' },
+  { type: 'STUDY_PLAN', label: 'Study Plan (Мотивационное письмо)' },
+  { type: 'CERTIFICATE', label: 'Certificate', hint: 'IELTS, TOEFL, DUOLINGO, HSK, CSCA (если есть)' },
+  { type: 'PARENTS_PASSPORT', label: 'Паспорт родителей' },
   { type: 'DIPLOMA', label: 'Аттестат', hint: 'Или табель оценок + справка со школы' },
   { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
 ];

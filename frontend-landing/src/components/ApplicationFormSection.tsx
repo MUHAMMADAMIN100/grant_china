@@ -5,6 +5,8 @@ import {
   countProgress,
   emptyForm,
   LATIN_RE,
+  PRESENT_LABEL,
+  PRESENT_VALUE,
   type FieldDef,
   type SectionDef,
 } from '../formSchema';
@@ -58,11 +60,20 @@ function Field({
 }) {
   const sanitizeText = (raw: string): string => {
     if (def.kind === 'tel') return raw;
-    if (def.kind === 'number' || def.digitsOnly) {
-      // Только цифры, без минусов, ведущих нулей, точек, запятых, e
+    if (def.digitsOnly) {
+      // Целые числа: запрещаем точки, запятые, минусы и т. п.
       let digits = raw.replace(/[^\d]/g, '');
       if (digits.length > 1) digits = digits.replace(/^0+/, '') || '0';
       return digits;
+    }
+    if (def.kind === 'number') {
+      // Разрешаем десятичные дроби (например, IELTS 7.5). Одна точка максимум.
+      let v = raw.replace(/,/g, '.').replace(/[^\d.]/g, '');
+      const firstDot = v.indexOf('.');
+      if (firstDot !== -1) {
+        v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, '');
+      }
+      return v;
     }
     if (def.latin) {
       // Жёсткая фильтрация: только латиница / цифры / разрешённые знаки пунктуации
@@ -78,14 +89,17 @@ function Field({
     value: value ?? '',
     onChange: (e: any) => onChange(sanitizeText(e.target.value)),
     onKeyDown: (e: any) => {
-      if (def.kind === 'number' || def.digitsOnly) {
+      if (def.digitsOnly) {
         if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+      } else if (def.kind === 'number') {
+        if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
       }
     },
     onPaste: (e: any) => {
-      if (def.kind === 'number' || def.digitsOnly) {
+      if (def.digitsOnly || def.kind === 'number') {
         const pasted = e.clipboardData.getData('text');
-        if (!/^\d+$/.test(pasted)) {
+        const ok = def.digitsOnly ? /^\d+$/.test(pasted) : /^\d+([.,]\d+)?$/.test(pasted);
+        if (!ok) {
           e.preventDefault();
           const cleaned = sanitizeText(pasted);
           if (cleaned) onChange(cleaned);
@@ -139,6 +153,7 @@ function Field({
         </label>
         <select {...common}>
           <option value="">—</option>
+          {def.allowPresent && <option value={PRESENT_VALUE}>{PRESENT_LABEL}</option>}
           {Array.from({ length: 60 }, (_, i) => CURRENT_YEAR + 5 - i).map((y) => (
             <option key={y} value={y}>{y}</option>
           ))}

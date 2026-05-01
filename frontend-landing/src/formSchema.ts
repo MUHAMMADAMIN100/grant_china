@@ -19,7 +19,12 @@ export interface FieldDef {
   noEmpty?: boolean;
   /** только цифры (без минусов, ведущих нулей и пр.) */
   digitsOnly?: boolean;
+  /** для year-полей: добавить опцию «По настоящее время» */
+  allowPresent?: boolean;
 }
+
+export const PRESENT_VALUE = 'PRESENT';
+export const PRESENT_LABEL = 'По настоящее время';
 
 export interface SectionDef {
   key: string;
@@ -74,7 +79,7 @@ export const FORM_SECTIONS: SectionDef[] = [
         options: [
           { value: 'SINGLE', label: 'Холост / не замужем' },
           { value: 'MARRIED', label: 'В браке' },
-          { value: 'DIVORCED', label: 'Развод' },
+          { value: 'DIVORCED', label: 'Разведен(а)' },
           { value: 'OTHER', label: 'Другое' },
         ],
       },
@@ -186,7 +191,7 @@ export const FORM_SECTIONS: SectionDef[] = [
       columns: [
         { key: 'schoolName', label: 'Название', labelEn: 'School Name', latin: true },
         { key: 'yearFrom', label: 'Год начала', labelEn: 'Year From', kind: 'year' },
-        { key: 'yearTo', label: 'Год окончания', labelEn: 'Year To', kind: 'year' },
+        { key: 'yearTo', label: 'Год окончания', labelEn: 'Year To', kind: 'year', allowPresent: true },
         { key: 'major', label: 'Специальность', labelEn: 'Major', latin: true, optional: true },
         { key: 'degree', label: 'Степень', labelEn: 'Degree', latin: true, optional: true },
       ],
@@ -202,7 +207,7 @@ export const FORM_SECTIONS: SectionDef[] = [
       columns: [
         { key: 'unit', label: 'Организация', labelEn: 'Working Unit Name', latin: true },
         { key: 'yearFrom', label: 'Год начала', labelEn: 'Year From', kind: 'year' },
-        { key: 'yearTo', label: 'Год окончания', labelEn: 'Year To', kind: 'year' },
+        { key: 'yearTo', label: 'Год окончания', labelEn: 'Year To', kind: 'year', allowPresent: true },
         { key: 'position', label: 'Должность', labelEn: 'Position', latin: true },
         { key: 'place', label: 'Место работы', labelEn: 'Work Place', latin: true },
       ],
@@ -223,7 +228,7 @@ export const FORM_SECTIONS: SectionDef[] = [
         { key: 'age', label: 'Возраст', labelEn: 'Age', kind: 'number', min: 0, max: 120, digitsOnly: true },
         { key: 'jobTitle', label: 'Должность', labelEn: 'Job Title', latin: true, optional: true },
         { key: 'workPlace', label: 'Место работы', labelEn: 'Work Place', latin: true, optional: true },
-        { key: 'phone', label: 'Телефон', labelEn: 'Phone' },
+        { key: 'phone', label: 'Телефон', labelEn: 'Phone', kind: 'tel' },
         { key: 'email', label: 'Email', labelEn: 'E-mail', kind: 'email', optional: true },
       ],
     },

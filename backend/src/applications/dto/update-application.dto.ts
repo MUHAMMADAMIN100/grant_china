@@ -1,5 +1,7 @@
-import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { ApplicationStatus, Direction } from '@prisma/client';
+
+const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
 
 export class UpdateApplicationDto {
   @IsOptional()
@@ -8,14 +10,18 @@ export class UpdateApplicationDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(2)
+  @MaxLength(120)
   fullName?: string;
 
   @IsOptional()
   @IsString()
+  @Matches(PHONE_RE, { message: 'phone должен содержать только цифры' })
   phone?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEmail()
+  @MaxLength(120)
   email?: string;
 
   @IsOptional()

@@ -13,6 +13,7 @@ import ManagerBar from '../components/ManagerBar';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import Icon from '../Icon';
 import { motion } from 'framer-motion';
+import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
 
 const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
 
@@ -27,6 +28,31 @@ export default function ApplicationDetail() {
   const [form, setForm] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const formErrors = form
+    ? validateAll(
+        { fullName: form.fullName, phones: form.phones, email: form.email, cabinet: form.cabinet, comment: form.comment },
+        {
+          fullName: compose(required('Введите ФИО'), minLen(2), maxLen(100)),
+          phones: (v) => {
+            const s = String(v ?? '').trim();
+            if (!s) return undefined;
+            const parts = s.split(',').map((p: string) => p.trim()).filter(Boolean);
+            for (const p of parts) {
+              const digits = p.replace(/\D/g, '');
+              if (digits.length < 7) return `Номер «${p}» слишком короткий (мин. 7 цифр)`;
+              if (digits.length > 15) return `Номер «${p}» слишком длинный (макс. 15 цифр)`;
+            }
+            return undefined;
+          },
+          email: emailRule(),
+          cabinet: numberRule({ min: 1, max: 99, integer: true }),
+          comment: maxLen(2000),
+        },
+      )
+    : {};
+  const showErr = (k: string) => touched[k] && (formErrors as any)[k];
 
   const reload = async () => {
     if (!id) return;
@@ -113,20 +139,26 @@ export default function ApplicationDetail() {
 
   const onSave = async () => {
     if (!student || !form) return;
+    setTouched({ fullName: true, phones: true, email: true, cabinet: true, comment: true });
+    if (hasErrors(formErrors)) {
+      toast('Исправьте ошибки в форме', 'error');
+      return;
+    }
     const phones = form.phones.split(',').map((p: string) => p.trim()).filter(Boolean);
     try {
       await updateStudent(student.id, {
-        fullName: form.fullName,
+        fullName: form.fullName.trim(),
         phones,
-        email: form.email || undefined,
+        email: form.email?.trim() || undefined,
         direction: form.direction,
         cabinet: parseInt(form.cabinet, 10),
         status: form.status,
-        comment: form.comment || undefined,
+        comment: form.comment?.trim() || undefined,
       });
       toast('Данные сохранены', 'success');
       await reload();
       setEdit(false);
+      setTouched({});
     } catch (e: any) {
       toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
     }
@@ -283,22 +315,22 @@ export default function ApplicationDetail() {
           <>
             <div className="detail-grid">
               <div>
-                <div className="detail-photo">
+                <div className={`detail-photo${isEnrolled ? ' is-enrolled' : ''}`}>
                   {student.photoUrl
                     ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
                     : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
+                  {isEnrolled && (
+                    <motion.div
+                      className="enrolled-photo-badge"
+                      initial={{ opacity: 0, scale: 0.8, y: 8 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      transition={{ type: 'spring', stiffness: 250, damping: 18 }}
+                    >
+                      <Icon name="verified" size={16} />
+                      Зачислен
+                    </motion.div>
+                  )}
                 </div>
-                {isEnrolled && (
-                  <motion.div
-                    className="enrolled-photo-badge"
-                    initial={{ opacity: 0, scale: 0.8, y: 8 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    transition={{ type: 'spring', stiffness: 250, damping: 18 }}
-                  >
-                    <Icon name="verified" size={18} />
-                    Зачислен
-                  </motion.div>
-                )}
                 {canEdit && (
                   <>
                     <button
@@ -328,9 +360,39 @@ export default function ApplicationDetail() {
                   </>
                 ) : (
                   <>
-                    <div className="form-group"><label>ФИО</label><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} /></div>
-                    <div className="form-group"><label>Телефоны (через запятую)</label><input value={form.phones} onChange={(e) => setForm({ ...form, phones: e.target.value })} /></div>
-                    <div className="form-group"><label>Email</label><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+                    <div className="form-group">
+                      <label>ФИО *</label>
+                      <input
+                        value={form.fullName}
+                        onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+                        onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
+                        className={showErr('fullName') ? 'input-error' : ''}
+                        maxLength={100}
+                      />
+                      {showErr('fullName') && <div className="form-error-text">{(formErrors as any).fullName}</div>}
+                    </div>
+                    <div className="form-group">
+                      <label>Телефоны (через запятую)</label>
+                      <input
+                        value={form.phones}
+                        onChange={(e) => setForm({ ...form, phones: e.target.value.replace(/[^\d ,+\-()]/g, '') })}
+                        onBlur={() => setTouched((t) => ({ ...t, phones: true }))}
+                        className={showErr('phones') ? 'input-error' : ''}
+                        placeholder="+992123456789, +992111222333"
+                      />
+                      {showErr('phones') && <div className="form-error-text">{(formErrors as any).phones}</div>}
+                    </div>
+                    <div className="form-group">
+                      <label>Email</label>
+                      <input
+                        type="email"
+                        value={form.email}
+                        onChange={(e) => setForm({ ...form, email: e.target.value })}
+                        onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                        className={showErr('email') ? 'input-error' : ''}
+                      />
+                      {showErr('email') && <div className="form-error-text">{(formErrors as any).email}</div>}
+                    </div>
                     <div className="form-grid-2">
                       <div className="form-group">
                         <label>Направление</label>
@@ -340,7 +402,16 @@ export default function ApplicationDetail() {
                       </div>
                       <div className="form-group">
                         <label>Кабинет</label>
-                        <input type="number" value={form.cabinet} onChange={(e) => setForm({ ...form, cabinet: e.target.value })} />
+                        <input
+                          type="number"
+                          min={1}
+                          max={99}
+                          value={form.cabinet}
+                          onChange={(e) => setForm({ ...form, cabinet: e.target.value.replace(/[^\d]/g, '') })}
+                          onBlur={() => setTouched((t) => ({ ...t, cabinet: true }))}
+                          className={showErr('cabinet') ? 'input-error' : ''}
+                        />
+                        {showErr('cabinet') && <div className="form-error-text">{(formErrors as any).cabinet}</div>}
                       </div>
                     </div>
                     <div className="form-group">
@@ -352,7 +423,17 @@ export default function ApplicationDetail() {
                         <option value="ARCHIVED">В архиве</option>
                       </select>
                     </div>
-                    <div className="form-group"><label>Комментарий</label><textarea value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></div>
+                    <div className="form-group">
+                      <label>Комментарий</label>
+                      <textarea
+                        value={form.comment}
+                        onChange={(e) => setForm({ ...form, comment: e.target.value })}
+                        onBlur={() => setTouched((t) => ({ ...t, comment: true }))}
+                        maxLength={2000}
+                        className={showErr('comment') ? 'input-error' : ''}
+                      />
+                      {showErr('comment') && <div className="form-error-text">{(formErrors as any).comment}</div>}
+                    </div>
                   </>
                 )}
               </div>

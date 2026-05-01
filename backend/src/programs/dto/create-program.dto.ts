@@ -1,4 +1,4 @@
-import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Direction } from '@prisma/client';
 
 export class CreateProgramDto {
@@ -26,6 +26,8 @@ export class CreateProgramDto {
   direction: Direction;
 
   @IsNumber()
+  @Min(0)
+  @Max(10_000_000)
   cost: number;
 
   @IsOptional()

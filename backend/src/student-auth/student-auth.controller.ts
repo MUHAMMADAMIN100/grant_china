@@ -23,6 +23,7 @@ import { StudentJwtGuard } from './student-jwt.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { StudentForgotPasswordDto, StudentLoginDto } from './dto/student-login.dto';
 
 const uploadStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -31,6 +32,26 @@ const uploadStorage = diskStorage({
     cb(null, `${id}${extname(file.originalname)}`);
   },
 });
+
+const ALLOWED_DOC_MIME_RE =
+  /^(image\/(jpeg|jpg|png|webp|heic|heif|gif)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|zip|x-zip-compressed|x-rar-compressed|vnd\.rar)|text\/plain)$/i;
+const ALLOWED_DOC_EXT_RE = /\.(jpe?g|png|webp|heic|heif|gif|pdf|docx?|xlsx?|zip|rar|txt)$/i;
+
+const docFileFilter = (
+  _req: any,
+  file: Express.Multer.File,
+  cb: (error: Error | null, acceptFile: boolean) => void,
+) => {
+  if (ALLOWED_DOC_MIME_RE.test(file.mimetype) || ALLOWED_DOC_EXT_RE.test(file.originalname)) {
+    return cb(null, true);
+  }
+  cb(
+    new BadRequestException(
+      'Недопустимый тип файла. Разрешены: PDF, изображения, Word, Excel, ZIP/RAR, TXT.',
+    ),
+    false,
+  );
+};
 
 @Controller('student-auth')
 export class StudentAuthController {
@@ -43,7 +64,7 @@ export class StudentAuthController {
   // Лимит: 10 попыток входа в минуту с одного IP — защита от брутфорса.
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
-  login(@Body() body: { email: string; password: string }) {
+  login(@Body() body: StudentLoginDto) {
     return this.auth.login(body.email, body.password);
   }
 
@@ -51,8 +72,8 @@ export class StudentAuthController {
   // одноразовый пароль. Лимит: 3 запроса в минуту с IP (anti-spam).
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Post('forgot-password')
-  forgotPassword(@Body() body: { email: string }) {
-    return this.auth.forgotPassword(body?.email || '');
+  forgotPassword(@Body() body: StudentForgotPasswordDto) {
+    return this.auth.forgotPassword(body.email);
   }
 
   @UseGuards(StudentJwtGuard)
@@ -91,6 +112,7 @@ export class StudentAuthController {
     FileInterceptor('file', {
       storage: uploadStorage,
       limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '209715200', 10) },
+      fileFilter: docFileFilter,
     }),
   )
   async uploadDocument(

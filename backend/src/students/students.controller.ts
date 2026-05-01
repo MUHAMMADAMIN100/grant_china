@@ -32,6 +32,28 @@ const uploadStorage = diskStorage({
   },
 });
 
+// Разрешённые типы для загрузки документов студента (паспорта, аттестаты,
+// справки и т. п.). Запрещаем исполняемые файлы и любую экзотику.
+const ALLOWED_DOC_MIME_RE =
+  /^(image\/(jpeg|jpg|png|webp|heic|heif|gif)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|zip|x-zip-compressed|x-rar-compressed|vnd\.rar)|text\/plain)$/i;
+const ALLOWED_DOC_EXT_RE = /\.(jpe?g|png|webp|heic|heif|gif|pdf|docx?|xlsx?|zip|rar|txt)$/i;
+
+const docFileFilter = (
+  _req: any,
+  file: Express.Multer.File,
+  cb: (error: Error | null, acceptFile: boolean) => void,
+) => {
+  if (ALLOWED_DOC_MIME_RE.test(file.mimetype) || ALLOWED_DOC_EXT_RE.test(file.originalname)) {
+    return cb(null, true);
+  }
+  cb(
+    new BadRequestException(
+      'Недопустимый тип файла. Разрешены: PDF, изображения (JPG/PNG/WEBP/HEIC), Word, Excel, ZIP/RAR, TXT.',
+    ),
+    false,
+  );
+};
+
 @UseGuards(JwtAuthGuard)
 @Controller('students')
 export class StudentsController {
@@ -126,6 +148,7 @@ export class StudentsController {
     FileInterceptor('file', {
       storage: uploadStorage,
       limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '209715200', 10) },
+      fileFilter: docFileFilter,
     }),
   )
   async uploadDocument(

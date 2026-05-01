@@ -1,21 +1,27 @@
-import { IsArray, IsEmail, IsEnum, IsInt, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsArray, IsEmail, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Direction, StudentStatus } from '@prisma/client';
+
+const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
 
 export class CreateStudentDto {
   @IsString()
   @MinLength(2)
+  @MaxLength(120)
   fullName: string;
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  @Matches(PHONE_RE, { each: true, message: 'каждый phone должен содержать только цифры' })
   phones?: string[];
 
   @IsEmail()
+  @MaxLength(120)
   email: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   photoUrl?: string;
 
   @IsEnum(Direction)
@@ -23,6 +29,8 @@ export class CreateStudentDto {
 
   @IsOptional()
   @IsInt()
+  @Min(1)
+  @Max(99)
   cabinet?: number;
 
   @IsOptional()
@@ -31,5 +39,6 @@ export class CreateStudentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   comment?: string;
 }
