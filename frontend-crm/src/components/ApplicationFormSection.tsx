@@ -4,9 +4,9 @@ import {
   FORM_SECTIONS,
   countProgress,
   emptyForm,
-  LATIN_RE,
   PRESENT_LABEL,
   PRESENT_VALUE,
+  validateField,
   type FieldDef,
   type SectionDef,
 } from '../formSchema';
@@ -55,12 +55,16 @@ function Field({
   value,
   onChange,
   readOnly,
+  rowContext,
 }: {
   def: FieldDef;
   value: string;
   onChange: (v: string) => void;
   readOnly?: boolean;
+  rowContext?: any;
 }) {
+  const [touched, setTouched] = useState(false);
+  const error = touched ? validateField(def, value, rowContext) : undefined;
   const sanitizeText = (raw: string): string => {
     if (def.kind === 'tel') return raw;
     if (def.digitsOnly) {
@@ -83,12 +87,11 @@ function Field({
     return raw.replace(/[<>{}[\]\\]/g, '');
   };
 
-  const isInvalidLatin = def.latin && value && !LATIN_RE.test(value);
-
   const common: any = {
     value: value ?? '',
     disabled: readOnly,
     onChange: (e: any) => onChange(sanitizeText(e.target.value)),
+    onBlur: () => setTouched(true),
     onKeyDown: (e: any) => {
       if (def.digitsOnly) {
         if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
@@ -115,6 +118,7 @@ function Field({
       <div className="af-field">
         <label className="af-label">
           {def.label} <span className="af-label-en">{def.labelEn}</span>
+          {!def.optional && <span className="af-required">*</span>}
         </label>
         <div className="af-radio-group">
           {def.options.map((o) => (
@@ -123,13 +127,14 @@ function Field({
               type="button"
               disabled={readOnly}
               className={`af-chip${value === o.value ? ' active' : ''}`}
-              onClick={() => !readOnly && onChange(value === o.value ? '' : o.value)}
+              onClick={() => { setTouched(true); !readOnly && onChange(value === o.value ? '' : o.value); }}
             >
               {value === o.value && <Icon name="check" size={14} />}
               {o.label}
             </button>
           ))}
         </div>
+        {error && <div className="af-field-error">{error}</div>}
       </div>
     );
   }
@@ -141,8 +146,8 @@ function Field({
           {def.label} <span className="af-label-en">{def.labelEn}</span>
           {def.optional && <span className="af-optional">— необязательно</span>}
         </label>
-        <textarea {...common} rows={3} className={isInvalidLatin ? 'af-input-error' : ''} />
-        {isInvalidLatin && <div className="af-field-error">Только латиница</div>}
+        <textarea {...common} rows={3} className={error ? 'af-input-error' : ''} />
+        {error && <div className="af-field-error">{error}</div>}
       </div>
     );
   }
@@ -152,14 +157,16 @@ function Field({
       <div className="af-field">
         <label className="af-label">
           {def.label} <span className="af-label-en">{def.labelEn}</span>
+          {!def.optional && <span className="af-required">*</span>}
         </label>
-        <select {...common}>
+        <select {...common} className={error ? 'af-input-error' : ''}>
           <option value="">—</option>
           {def.allowPresent && <option value={PRESENT_VALUE}>{PRESENT_LABEL}</option>}
           {Array.from({ length: 60 }, (_, i) => CURRENT_YEAR + 5 - i).map((y) => (
             <option key={y} value={y}>{y}</option>
           ))}
         </select>
+        {error && <div className="af-field-error">{error}</div>}
       </div>
     );
   }
@@ -171,7 +178,8 @@ function Field({
           {def.label} <span className="af-label-en">{def.labelEn}</span>
           {def.optional && <span className="af-optional">— необязательно</span>}
         </label>
-        <PhoneInput value={value || ''} onChange={onChange} disabled={readOnly} />
+        <PhoneInput value={value || ''} onChange={(v) => { setTouched(true); onChange(v); }} disabled={readOnly} error={!!error} />
+        {error && <div className="af-field-error">{error}</div>}
       </div>
     );
   }
@@ -183,25 +191,20 @@ function Field({
           {def.label} <span className="af-label-en">{def.labelEn}</span>
           {def.optional && <span className="af-optional">— необязательно</span>}
         </label>
-        <select {...common} value={value || (def.noEmpty ? def.options[0].value : '')}>
+        <select
+          {...common}
+          value={value || (def.noEmpty ? def.options[0].value : '')}
+          className={error ? 'af-input-error' : ''}
+        >
           {!def.noEmpty && <option value="">— выберите —</option>}
           {def.options.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
+        {error && <div className="af-field-error">{error}</div>}
       </div>
     );
   }
-
-  let numError: string | null = null;
-  if (def.kind === 'number' && value !== '' && value !== null && value !== undefined) {
-    const n = Number(value);
-    if (Number.isFinite(n)) {
-      if (def.min !== undefined && n < def.min) numError = `Минимум ${def.min}`;
-      else if (def.max !== undefined && n > def.max) numError = `Максимум ${def.max}`;
-    }
-  }
-  const inputErrCls = (isInvalidLatin || numError) ? 'af-input-error' : '';
 
   return (
     <div className="af-field">
@@ -215,10 +218,9 @@ function Field({
         min={def.kind === 'number' ? def.min : undefined}
         max={def.kind === 'number' ? def.max : undefined}
         step={def.kind === 'number' && def.max !== undefined && def.max <= 9 ? 0.5 : undefined}
-        className={inputErrCls}
+        className={error ? 'af-input-error' : ''}
       />
-      {isInvalidLatin && <div className="af-field-error">Только латиница</div>}
-      {numError && <div className="af-field-error">{numError}</div>}
+      {error && <div className="af-field-error">{error}</div>}
     </div>
   );
 }
@@ -341,6 +343,7 @@ function TableSection({
                       value={row?.[c.key] ?? ''}
                       onChange={(v) => updateCell(ri, c.key, v)}
                       readOnly={readOnly}
+                      rowContext={row}
                     />
                   ))}
                 </div>
@@ -366,6 +369,7 @@ function TableSection({
                   value={row?.[c.key] ?? ''}
                   onChange={(v) => updateCell(ri, c.key, v)}
                   readOnly={readOnly}
+                  rowContext={row}
                 />
               ))}
             </div>

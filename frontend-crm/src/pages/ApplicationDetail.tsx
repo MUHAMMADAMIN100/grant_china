@@ -11,6 +11,7 @@ import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsC
 import DirectionOptions from '../components/DirectionOptions';
 import ManagerBar from '../components/ManagerBar';
 import ApplicationFormSection from '../components/ApplicationFormSection';
+import BackButton from '../components/BackButton';
 import Icon from '../Icon';
 import { motion } from 'framer-motion';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
@@ -205,7 +206,9 @@ export default function ApplicationDetail() {
   };
 
   return (
-    <div className="card">
+    <div>
+      <BackButton fallback="/applications" />
+      <div className="card">
       <div className="card-header">
         <h2 className="card-title">{app.fullName}</h2>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -319,18 +322,18 @@ export default function ApplicationDetail() {
                   {student.photoUrl
                     ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
                     : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
-                  {isEnrolled && (
-                    <motion.div
-                      className="enrolled-photo-badge"
-                      initial={{ opacity: 0, scale: 0.8, y: 8 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      transition={{ type: 'spring', stiffness: 250, damping: 18 }}
-                    >
-                      <Icon name="verified" size={16} />
-                      Зачислен
-                    </motion.div>
-                  )}
                 </div>
+                {isEnrolled && (
+                  <motion.div
+                    className="enrolled-photo-badge"
+                    initial={{ opacity: 0, scale: 0.9, y: 6 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    transition={{ type: 'spring', stiffness: 250, damping: 18 }}
+                  >
+                    <Icon name="verified" size={16} />
+                    Зачислен
+                  </motion.div>
+                )}
                 {canEdit && (
                   <>
                     <button
@@ -458,6 +461,7 @@ export default function ApplicationDetail() {
             </div>
           </>
         )}
+      </div>
       </div>
     </div>
   );

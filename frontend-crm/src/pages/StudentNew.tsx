@@ -7,6 +7,7 @@ import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, phoneRule, required, validateAll } from '../utils/validators';
 import PhoneInput from '../components/PhoneInput';
+import BackButton from '../components/BackButton';
 
 // Строка-копируемое поле для модалки выдачи доступа.
 function CredRow({ label, value, small }: { label: string; value: string; small?: boolean }) {
@@ -103,7 +104,9 @@ export default function StudentNew() {
   };
 
   return (
-    <div className="card" style={{ maxWidth: 720, margin: '0 auto' }}>
+    <div style={{ maxWidth: 720, margin: '0 auto' }}>
+      <BackButton fallback="/students" />
+      <div className="card">
       <div className="card-header"><h2 className="card-title">Новый студент</h2></div>
       <div className="card-body">
         {error && <div className="error-banner">{error}</div>}
@@ -224,6 +227,7 @@ export default function StudentNew() {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }

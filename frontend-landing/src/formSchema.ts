@@ -283,3 +283,73 @@ export function countProgress(form: any): { filled: number; total: number } {
 
 /** Регулярка латиница + цифры + базовые знаки пунктуации */
 export const LATIN_RE = /^[A-Za-z0-9 .,'\-/()&+#@]*$/;
+
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+export function validateField(def: FieldDef, raw: any, row?: any): string | undefined {
+  const v = raw == null ? '' : String(raw).trim();
+
+  if (!v) {
+    return def.optional ? undefined : 'Обязательное поле';
+  }
+
+  if (def.latin && !LATIN_RE.test(v)) return 'Только латиница и цифры';
+
+  if (def.kind === 'email') {
+    if (!EMAIL_RE.test(v)) return 'Некорректный email';
+    return undefined;
+  }
+
+  if (def.kind === 'tel') {
+    const digits = v.replace(/\D/g, '');
+    if (digits.length < 7) return 'Номер слишком короткий (мин. 7 цифр)';
+    if (digits.length > 15) return 'Номер слишком длинный (макс. 15 цифр)';
+    return undefined;
+  }
+
+  if (def.kind === 'number') {
+    const n = Number(v.replace(',', '.'));
+    if (!Number.isFinite(n)) return 'Должно быть числом';
+    if (def.digitsOnly && !Number.isInteger(n)) return 'Только целое число';
+    if (def.min !== undefined && n < def.min) return `Минимум ${def.min}`;
+    if (def.max !== undefined && n > def.max) return `Максимум ${def.max}`;
+    return undefined;
+  }
+
+  if (def.kind === 'date') {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return 'Некорректная дата';
+    if (def.key === 'birthDate' && d.getTime() > Date.now()) return 'Дата рождения должна быть в прошлом';
+    if (def.key === 'passportExpiry' && d.getTime() < Date.now()) return 'Срок действия паспорта истёк';
+    return undefined;
+  }
+
+  if (def.kind === 'year') {
+    if (v === PRESENT_VALUE) {
+      if (def.key !== 'yearTo') return 'Недопустимое значение';
+      return undefined;
+    }
+    const year = Number(v);
+    if (!Number.isInteger(year)) return 'Год';
+    if (def.key === 'yearTo' && row?.yearFrom && row.yearFrom !== PRESENT_VALUE) {
+      const yf = Number(row.yearFrom);
+      if (Number.isInteger(yf) && year < yf) return 'Год окончания раньше года начала';
+    }
+    return undefined;
+  }
+
+  if (def.kind === 'select' && def.options) {
+    const ok = def.options.some((o) => o.value === v);
+    if (!ok) return 'Выберите значение из списка';
+    return undefined;
+  }
+
+  if (def.kind === 'radio' && def.options) {
+    const ok = def.options.some((o) => o.value === v);
+    if (!ok) return 'Выберите вариант';
+    return undefined;
+  }
+
+  if (v.length > 2000) return 'Слишком длинное значение (>2000 символов)';
+  return undefined;
+}

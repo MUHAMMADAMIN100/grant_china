@@ -12,6 +12,7 @@ import ManagerBar from '../components/ManagerBar';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
 import DirectionOptions from '../components/DirectionOptions';
+import BackButton from '../components/BackButton';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
 
@@ -210,7 +211,9 @@ export default function StudentDetail() {
   const isEnrolled = student.applications?.[0]?.status === 'ENROLLED';
 
   return (
-    <div className="card">
+    <div>
+      <BackButton fallback="/students" />
+      <div className="card">
       <div className="card-header">
         <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {student.fullName}
@@ -304,18 +307,18 @@ export default function StudentDetail() {
               {student.photoUrl
                 ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
                 : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
-              {isEnrolled && (
-                <motion.div
-                  className="enrolled-photo-badge"
-                  initial={{ opacity: 0, scale: 0.8, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  transition={{ type: 'spring', stiffness: 250, damping: 18 }}
-                >
-                  <Icon name="verified" size={16} />
-                  Зачислен
-                </motion.div>
-              )}
             </div>
+            {isEnrolled && (
+              <motion.div
+                className="enrolled-photo-badge"
+                initial={{ opacity: 0, scale: 0.9, y: 6 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 250, damping: 18 }}
+              >
+                <Icon name="verified" size={16} />
+                Зачислен
+              </motion.div>
+            )}
             {canEdit && (
               <>
                 <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={() => photoRef.current?.click()}>
@@ -477,6 +480,7 @@ export default function StudentDetail() {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }

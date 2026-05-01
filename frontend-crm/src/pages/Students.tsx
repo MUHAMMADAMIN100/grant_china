@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
 import { listUsers } from '../api/users';
-import type { Direction, Student, StudentStatus, User } from '../api/types';
+import type { Direction, Student, User } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
@@ -43,7 +43,9 @@ export default function Students() {
   const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState('');
   const [direction, setDirection] = useState<Direction | ''>('');
-  const [status, setStatus] = useState<StudentStatus | ''>('');
+  // Один объединённый фильтр: либо этап заявки (NEW/DOCS_REVIEW/.../ENROLLED),
+  // либо особый студенческий статус (PAUSED/GRADUATED/ARCHIVED).
+  const [stageFilter, setStageFilter] = useState<string>('');
   const [cabinet, setCabinet] = useState('');
   const [manager, setManager] = useState<string>('');
   const isAdmin = me?.role === 'ADMIN';
@@ -61,7 +63,6 @@ export default function Students() {
     listStudents({
       search: search || undefined,
       direction: direction || undefined,
-      status: status || undefined,
       cabinet: cabinet ? parseInt(cabinet, 10) : undefined,
       mine: scope === 'mine',
       manager: manager || undefined,
@@ -75,20 +76,39 @@ export default function Students() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, direction, status, cabinet, scope, manager]);
+  }, [search, direction, cabinet, scope, manager]);
+
+  // Фильтр по этапу — клиентский, чтобы не трогать backend. Особые
+  // статусы студента (PAUSED/GRADUATED/ARCHIVED) тоже идут через этот же
+  // фильтр для удобства.
+  const SPECIAL_STUDENT_STATUSES = ['PAUSED', 'GRADUATED', 'ARCHIVED'];
+  useEffect(() => {
+    setPage(1);
+  }, [stageFilter]);
+
+  const filteredItems = stageFilter
+    ? items.filter((s) => {
+        if (SPECIAL_STUDENT_STATUSES.includes(stageFilter)) {
+          return s.status === stageFilter;
+        }
+        // Этап заявки — берём последнюю, фильтруем активных
+        if (s.status !== 'ACTIVE') return false;
+        return s.applications?.[0]?.status === stageFilter;
+      })
+    : items;
 
   // При изменении набора студентов извне (realtime/удаление) — корректируем
   // текущую страницу, чтобы не остаться на пустой.
   useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
     if (page > totalPages) setPage(totalPages);
-  }, [items.length, page]);
+  }, [filteredItems.length, page]);
 
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
-  const pagedItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pageRange = buildPageRange(page, totalPages);
-  const rangeStart = items.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const rangeEnd = Math.min(page * PAGE_SIZE, items.length);
+  const rangeStart = filteredItems.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, filteredItems.length);
 
   // Список пользователей для фильтра по менеджерам — только админу
   useEffect(() => {
@@ -199,12 +219,25 @@ export default function Students() {
             <option value="">Все направления</option>
             <DirectionOptions />
           </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value as any)}>
+          <select
+            value={stageFilter}
+            onChange={(e) => setStageFilter(e.target.value)}
+            title="Фильтр по этапу заявки"
+          >
             <option value="">Все статусы</option>
-            <option value="ACTIVE">Активные</option>
-            <option value="PAUSED">Приостановлены</option>
-            <option value="GRADUATED">Выпустились</option>
-            <option value="ARCHIVED">В архиве</option>
+            <optgroup label="Этап заявки">
+              <option value="NEW">Новая заявка</option>
+              <option value="DOCS_REVIEW">Документы на проверке</option>
+              <option value="DOCS_SUBMITTED">Подача документов</option>
+              <option value="PRE_ADMISSION">Предв. зачисление</option>
+              <option value="AWAITING_PAYMENT">Ожидает оплаты</option>
+              <option value="ENROLLED">Зачислен</option>
+            </optgroup>
+            <optgroup label="Особые">
+              <option value="PAUSED">Приостановлен</option>
+              <option value="GRADUATED">Выпустился</option>
+              <option value="ARCHIVED">В архиве</option>
+            </optgroup>
           </select>
           <select value={cabinet} onChange={(e) => setCabinet(e.target.value)}>
             <option value="">Все кабинеты</option>
@@ -231,7 +264,7 @@ export default function Students() {
             <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               Загрузка...
             </motion.div>
-          ) : items.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <motion.div key="empty" className="empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <div className="empty-icon"><Icon name="school" size={48} /></div>
               {scope === 'mine' ? 'У вас пока нет назначенных студентов' : 'Студентов не найдено'}
@@ -313,10 +346,10 @@ export default function Students() {
           )}
         </AnimatePresence>
 
-        {!loading && items.length > PAGE_SIZE && (
+        {!loading && filteredItems.length > PAGE_SIZE && (
           <div className="pagination">
             <div className="pagination-info">
-              Показано {rangeStart}–{rangeEnd} из {items.length}
+              Показано {rangeStart}–{rangeEnd} из {filteredItems.length}
             </div>
             <div className="pagination-controls">
               <button
