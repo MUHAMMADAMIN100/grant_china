@@ -138,11 +138,40 @@ export default function PhoneInput({ value, onChange, error, placeholder, disabl
     setSearch('');
   };
 
+  // Inline-стили на критичные для layout свойства, чтобы перебить любые
+  // глобальные правила (.af-field input { width:100% } и т. п.).
+  const wrapStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    flexWrap: 'nowrap',
+    width: '100%',
+    boxSizing: 'border-box',
+  };
+  const btnStyle: React.CSSProperties = {
+    flex: '0 0 auto',
+    display: 'inline-flex',
+    alignItems: 'center',
+  };
+  const inputStyle: React.CSSProperties = {
+    flex: '1 1 0',
+    minWidth: 0,
+    width: 'auto',
+    border: 'none',
+    background: 'transparent',
+    outline: 'none',
+  };
+
   return (
-    <div ref={wrapRef} className={`phone-input-wrap${error ? ' input-error' : ''}`}>
+    <div
+      ref={wrapRef}
+      className={`phone-input-wrap${error ? ' input-error' : ''}`}
+      style={wrapStyle}
+    >
       <button
         type="button"
         className="phone-country-btn"
+        style={btnStyle}
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
         aria-haspopup="listbox"
@@ -167,6 +196,7 @@ export default function PhoneInput({ value, onChange, error, placeholder, disabl
         disabled={disabled}
         maxLength={country.maxDigits}
         placeholder={placeholder || '9'.repeat(country.minDigits)}
+        style={inputStyle}
         onChange={(e) => {
           const digits = e.target.value.replace(/\D/g, '').slice(0, country.maxDigits);
           update(countryIdx, digits);
