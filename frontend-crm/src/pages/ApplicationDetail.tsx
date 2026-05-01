@@ -329,9 +329,10 @@ export default function ApplicationDetail() {
                     initial={{ opacity: 0, scale: 0.9, y: 6 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={{ type: 'spring', stiffness: 250, damping: 18 }}
+                    style={{ color: '#16a34a' }}
                   >
-                    <Icon name="verified" size={16} />
-                    Зачислен
+                    <Icon name="verified" size={16} style={{ color: '#16a34a' }} />
+                    <span style={{ color: '#16a34a' }}>Зачислен</span>
                   </motion.div>
                 )}
                 {canEdit && (
