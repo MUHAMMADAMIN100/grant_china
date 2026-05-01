@@ -1477,6 +1477,15 @@ select.input-error {
 .af-field-error { font-size: 12px; color: var(--danger); margin-top: 2px; }
 .af-optional { font-size: 11px; color: var(--text-soft); font-weight: 400; margin-left: 4px; }
 .af-required { color: var(--danger); margin-left: 4px; font-weight: 700; }
+.af-conflict-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+  background: #fef3c7; border: 1px solid #fcd34d;
+  border-radius: 8px;
+  font-size: 13px; color: #92400e;
+}
+.af-conflict-banner .material-symbols-rounded { color: #d97706; }
 
 .af-save-bar {
   display: flex; flex-direction: column; align-items: center; gap: 8px;

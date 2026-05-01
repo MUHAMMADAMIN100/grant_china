@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FORM_SECTIONS,
@@ -14,39 +14,6 @@ import { updateStudentForm } from '../api/students';
 import Icon from '../Icon';
 import PhoneInput from './PhoneInput';
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-
-function useDebouncedSave(form: any, onSave: (form: any) => Promise<void>, enabled: boolean) {
-  const [state, setState] = useState<SaveState>('idle');
-  const firstRun = useRef(true);
-  const timer = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    if (firstRun.current) {
-      firstRun.current = false;
-      return;
-    }
-    if (timer.current) window.clearTimeout(timer.current);
-    setState('idle');
-    timer.current = window.setTimeout(async () => {
-      setState('saving');
-      try {
-        await onSave(form);
-        setState('saved');
-        window.setTimeout(() => setState('idle'), 1500);
-      } catch {
-        setState('error');
-      }
-    }, 900);
-    return () => {
-      if (timer.current) window.clearTimeout(timer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(form), enabled]);
-
-  return state;
-}
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -406,32 +373,57 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
   const [form, setForm] = useState<any>(initialForm || emptyForm());
   const [manualSaving, setManualSaving] = useState(false);
   const [manualSaved, setManualSaved] = useState(false);
+  // Локальные изменения, ещё не отправленные на сервер. Авто-сохранения
+  // нет — изменения уходят в БД только по нажатию «Сохранить анкету».
+  const [dirty, setDirty] = useState(false);
+  const [externalConflict, setExternalConflict] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     personal: true,
   });
 
-  // Подхватываем обновления извне (когда родитель reload-нул студента)
+  const updateForm = (next: any) => {
+    setForm(next);
+    setDirty(true);
+  };
+
+  // Подхватываем обновления извне (родитель сделал reload). Если у
+  // пользователя есть локальные несохранённые изменения — НЕ перезаписываем,
+  // только показываем баннер о конфликте.
   useEffect(() => {
-    if (initialForm) setForm(initialForm);
+    if (!initialForm) return;
+    if (dirty) {
+      const same = JSON.stringify(initialForm) === JSON.stringify(form);
+      if (!same) setExternalConflict(true);
+      return;
+    }
+    setForm(initialForm);
+    setExternalConflict(false);
   }, [JSON.stringify(initialForm)]);
 
-  const save = async (data: any) => {
-    await updateStudentForm(studentId, data);
-    onSaved?.();
-  };
-  const saveState = useDebouncedSave(form, save, canEdit);
+  // Защита от случайного закрытия вкладки с несохранёнными правками
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 
   const onManualSave = async () => {
-    if (!form || manualSaving) return;
+    if (!form || manualSaving || !dirty) return;
     setManualSaving(true);
     setManualSaved(false);
     try {
       await updateStudentForm(studentId, form);
       setManualSaved(true);
+      setDirty(false);
+      setExternalConflict(false);
       onSaved?.();
       setTimeout(() => setManualSaved(false), 2500);
     } catch {
-      // silent
+      // silent — пользователь увидит, что dirty не сбросился, и попробует ещё раз
     } finally {
       setManualSaving(false);
     }
@@ -450,30 +442,30 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
           <h2 className="stu-section-title" style={{ margin: 0 }}>
             Application Form — Анкета студента
           </h2>
-          <div className="af-sub">
-            {canEdit
-              ? 'Каждое изменение сохраняется автоматически'
-              : 'Просмотр анкеты (редактирование недоступно)'}
+          <div className="af-sub" style={canEdit && dirty ? { color: 'var(--danger)' } : undefined}>
+            {!canEdit
+              ? 'Просмотр анкеты (редактирование недоступно)'
+              : dirty
+                ? 'У вас есть несохранённые изменения — не забудьте нажать «Сохранить анкету»'
+                : 'Не забудьте нажать «Сохранить анкету» после редактирования'}
           </div>
         </div>
         <div className="af-save-state">
-          {canEdit && saveState === 'saving' && (
-            <span className="af-save saving">
-              <Icon name="progress_activity" size={16} /> Сохраняем...
-            </span>
-          )}
-          {canEdit && saveState === 'saved' && (
+          {canEdit && manualSaved && (
             <span className="af-save saved">
               <Icon name="check_circle" size={16} /> Сохранено
             </span>
           )}
-          {canEdit && saveState === 'error' && (
-            <span className="af-save err">
-              <Icon name="error" size={16} /> Ошибка сохранения
-            </span>
-          )}
         </div>
       </div>
+
+      {externalConflict && (
+        <div className="af-conflict-banner">
+          <Icon name="warning" size={16} />
+          Анкета была изменена другим пользователем. Сохраните свои правки или обновите страницу,
+          чтобы увидеть актуальную версию.
+        </div>
+      )}
 
       <div className="af-progress">
         <div className="af-progress-text">
@@ -535,7 +527,7 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
                       <SectionFields
                         section={section}
                         value={form[section.key] || {}}
-                        onChange={(v) => setForm({ ...form, [section.key]: v })}
+                        onChange={(v) => updateForm({ ...form, [section.key]: v })}
                         readOnly={!canEdit}
                       />
                     )}
@@ -543,7 +535,7 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
                       <TableSection
                         section={section}
                         rows={form[section.key] || []}
-                        onChange={(rows) => setForm({ ...form, [section.key]: rows })}
+                        onChange={(rows) => updateForm({ ...form, [section.key]: rows })}
                         readOnly={!canEdit}
                       />
                     )}
@@ -560,13 +552,16 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
               type="button"
               className="btn btn-primary af-save-btn"
               onClick={onManualSave}
-              disabled={manualSaving}
+              disabled={manualSaving || !dirty}
+              title={!dirty ? 'Нет изменений для сохранения' : 'Сохранить анкету'}
             >
               <Icon name="save" size={18} />
               {manualSaving ? 'Сохраняем...' : manualSaved ? 'Сохранено ✓' : 'Сохранить анкету'}
             </button>
             <div className="af-save-hint">
-              Анкета также сохраняется автоматически при каждом изменении
+              {dirty
+                ? 'Изменения сохранятся только после нажатия кнопки'
+                : 'Все изменения сохранены'}
             </div>
           </div>
         )}
