@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FORM_SECTIONS,
@@ -13,39 +13,7 @@ import {
 import { getStudentForm, saveStudentForm } from '../studentApi';
 import Icon from '../Icon';
 import PhoneInput from './PhoneInput';
-
-type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-
-function useDebouncedSave(form: any, onSave: (form: any) => Promise<void>) {
-  const [state, setState] = useState<SaveState>('idle');
-  const firstRun = useRef(true);
-  const timer = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (firstRun.current) {
-      firstRun.current = false;
-      return;
-    }
-    if (timer.current) window.clearTimeout(timer.current);
-    setState('idle');
-    timer.current = window.setTimeout(async () => {
-      setState('saving');
-      try {
-        await onSave(form);
-        setState('saved');
-        window.setTimeout(() => setState('idle'), 1500);
-      } catch {
-        setState('error');
-      }
-    }, 900);
-    return () => {
-      if (timer.current) window.clearTimeout(timer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(form)]);
-
-  return state;
-}
+import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -413,25 +381,29 @@ export default function ApplicationFormSection() {
   const [loading, setLoading] = useState(true);
   const [manualSaving, setManualSaving] = useState(false);
   const [manualSaved, setManualSaved] = useState(false);
+  // Локальные изменения, ещё не отправленные на сервер. Авто-сохранения
+  // нет — изменения уходят в БД только по нажатию «Сохранить анкету».
+  const [dirty, setDirty] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     personal: true,
   });
 
-  const save = async (data: any) => {
-    await saveStudentForm(data);
+  const updateForm = (next: any) => {
+    setForm(next);
+    setDirty(true);
   };
-  const saveState = useDebouncedSave(form, save);
 
   const onManualSave = async () => {
-    if (!form || manualSaving) return;
+    if (!form || manualSaving || !dirty) return;
     setManualSaving(true);
     setManualSaved(false);
     try {
       await saveStudentForm(form);
       setManualSaved(true);
+      setDirty(false);
       setTimeout(() => setManualSaved(false), 2500);
     } catch {
-      // silent
+      // silent — пользователь увидит, что dirty не сбросился, и попробует ещё раз
     } finally {
       setManualSaving(false);
     }
@@ -456,6 +428,10 @@ export default function ApplicationFormSection() {
     };
   }, []);
 
+  // Защита от потери несохранённых изменений: beforeunload + клики по
+  // внутренним ссылкам + кнопка "назад" в браузере.
+  useUnsavedChangesGuard(dirty);
+
   if (loading || !form) {
     return (
       <div className="stu-card">
@@ -478,22 +454,16 @@ export default function ApplicationFormSection() {
           <h2 className="stu-section-title" style={{ margin: 0 }}>
             Application Form — Анкета для поступления
           </h2>
-          <div className="af-sub">Заполняется постепенно — каждое изменение сохраняется автоматически</div>
+          <div className="af-sub" style={dirty ? { color: 'var(--primary)' } : undefined}>
+            {dirty
+              ? 'У вас есть несохранённые изменения — не забудьте нажать «Сохранить анкету»'
+              : 'Заполняйте поля и нажмите «Сохранить анкету» в конце'}
+          </div>
         </div>
         <div className="af-save-state">
-          {saveState === 'saving' && (
-            <span className="af-save saving">
-              <Icon name="progress_activity" size={16} /> Сохраняем...
-            </span>
-          )}
-          {saveState === 'saved' && (
+          {manualSaved && (
             <span className="af-save saved">
               <Icon name="check_circle" size={16} /> Сохранено
-            </span>
-          )}
-          {saveState === 'error' && (
-            <span className="af-save err">
-              <Icon name="error" size={16} /> Ошибка сохранения
             </span>
           )}
         </div>
@@ -559,14 +529,14 @@ export default function ApplicationFormSection() {
                       <SectionFields
                         section={section}
                         value={form[section.key] || {}}
-                        onChange={(v) => setForm({ ...form, [section.key]: v })}
+                        onChange={(v) => updateForm({ ...form, [section.key]: v })}
                       />
                     )}
                     {section.table && (
                       <TableSection
                         section={section}
                         rows={form[section.key] || []}
-                        onChange={(rows) => setForm({ ...form, [section.key]: rows })}
+                        onChange={(rows) => updateForm({ ...form, [section.key]: rows })}
                       />
                     )}
                   </motion.div>
@@ -581,13 +551,15 @@ export default function ApplicationFormSection() {
             type="button"
             className="btn btn-primary af-save-btn"
             onClick={onManualSave}
-            disabled={manualSaving}
+            disabled={manualSaving || !dirty}
           >
             <Icon name="save" size={18} />
             {manualSaving ? 'Сохраняем...' : manualSaved ? 'Сохранено ✓' : 'Сохранить анкету'}
           </button>
           <div className="af-save-hint">
-            Анкета также сохраняется автоматически при каждом изменении
+            {dirty
+              ? 'Не забудьте нажать «Сохранить» — иначе изменения потеряются при уходе со страницы'
+              : 'Все изменения сохранены'}
           </div>
         </div>
       </div>

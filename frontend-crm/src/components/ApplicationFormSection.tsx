@@ -13,6 +13,7 @@ import {
 import { updateStudentForm } from '../api/students';
 import Icon from '../Icon';
 import PhoneInput from './PhoneInput';
+import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
 
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -419,16 +420,9 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
     setExternalConflict(false);
   }, [JSON.stringify(initialForm)]);
 
-  // Защита от случайного закрытия вкладки с несохранёнными правками
-  useEffect(() => {
-    if (!dirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [dirty]);
+  // Защита от потери несохранённых изменений: beforeunload + клики по
+  // внутренним ссылкам + кнопка "назад" в браузере.
+  useUnsavedChangesGuard(dirty);
 
   const onManualSave = async () => {
     if (!form || manualSaving || !dirty) return;
