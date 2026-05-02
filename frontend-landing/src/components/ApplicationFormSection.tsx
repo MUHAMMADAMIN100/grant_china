@@ -64,6 +64,14 @@ function Field({
   const error = touched ? validateField(def, value, rowContext) : undefined;
   const sanitizeText = (raw: string): string => {
     if (def.kind === 'tel') return raw;
+    if (def.lettersOnly) {
+      // ТОЛЬКО латинские буквы + пробел + дефис + апостроф
+      return raw.replace(/[^A-Za-z\s'\-]/g, '');
+    }
+    if (def.latinDigits) {
+      // ТОЛЬКО латинские буквы и цифры (без пробелов и символов)
+      return raw.replace(/[^A-Za-z0-9]/g, '');
+    }
     if (def.digitsOnly) {
       // Целые числа: запрещаем точки, запятые, минусы и т. п.
       let digits = raw.replace(/[^\d]/g, '');
@@ -79,6 +87,10 @@ function Field({
       }
       return v;
     }
+    if (def.kind === 'email') {
+      // Email: только латиница, цифры и спецсимволы email — никакой кириллицы
+      return raw.replace(/[^A-Za-z0-9._%+\-@]/g, '');
+    }
     if (def.latin) {
       // Жёсткая фильтрация: только латиница / цифры / разрешённые знаки пунктуации
       return raw.replace(/[^A-Za-z0-9 .,'\-/()&+#@]/g, '');
@@ -92,21 +104,28 @@ function Field({
     onChange: (e: any) => onChange(sanitizeText(e.target.value)),
     onBlur: () => setTouched(true),
     onKeyDown: (e: any) => {
-      if (def.digitsOnly) {
-        if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+      // Пропускаем служебные клавиши (Backspace, стрелки, Tab, Enter, Ctrl+...)
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (def.lettersOnly && !/[A-Za-z\s'\-]/.test(e.key)) {
+        e.preventDefault();
+      } else if (def.latinDigits && !/[A-Za-z0-9]/.test(e.key)) {
+        e.preventDefault();
+      } else if (def.digitsOnly) {
+        if (!/\d/.test(e.key)) e.preventDefault();
       } else if (def.kind === 'number') {
         if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
+      } else if (def.kind === 'email' && !/[A-Za-z0-9._%+\-@]/.test(e.key)) {
+        e.preventDefault();
       }
     },
     onPaste: (e: any) => {
-      if (def.digitsOnly || def.kind === 'number') {
-        const pasted = e.clipboardData.getData('text');
-        const ok = def.digitsOnly ? /^\d+$/.test(pasted) : /^\d+([.,]\d+)?$/.test(pasted);
-        if (!ok) {
-          e.preventDefault();
-          const cleaned = sanitizeText(pasted);
-          if (cleaned) onChange(cleaned);
-        }
+      // На любой paste — пропускаем через sanitizeText, чтобы запрещённые
+      // символы не попали в значение даже через буфер обмена.
+      const pasted = e.clipboardData.getData('text');
+      const cleaned = sanitizeText(pasted);
+      if (cleaned !== pasted) {
+        e.preventDefault();
+        if (cleaned) onChange((value || '') + cleaned);
       }
     },
     placeholder: def.placeholder,
