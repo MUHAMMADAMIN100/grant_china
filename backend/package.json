@@ -10,6 +10,7 @@
     "start:prod": "prisma db push --accept-data-loss && (SEED_IF_EMPTY=1 ts-node prisma/seed-programs.ts || echo 'seed:programs failed, continuing') && node dist/main",
     "seed": "ts-node prisma/seed.ts",
     "seed:programs": "ts-node prisma/seed-programs.ts",
+    "reset:admin": "ts-node prisma/reset-admin-password.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "postinstall": "prisma generate"
