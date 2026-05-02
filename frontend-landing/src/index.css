@@ -1608,3 +1608,51 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .password-toggle:hover { color: var(--primary, #d52b2b); background: rgba(0,0,0,0.04); }
 .password-toggle:focus-visible { outline: 2px solid var(--primary, #d52b2b); outline-offset: 1px; }
+
+/* Unsaved-changes confirmation dialog */
+.uc-dialog-backdrop {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 19, 32, 0.55);
+  backdrop-filter: blur(4px);
+  padding: 16px;
+}
+.uc-dialog-card {
+  background: white;
+  border-radius: 18px;
+  padding: 28px 26px 22px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(15, 19, 32, 0.28);
+}
+.uc-dialog-icon {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger, #ef4444);
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 14px;
+}
+.uc-dialog-title {
+  font-size: 20px; font-weight: 700; color: var(--text);
+  margin-bottom: 8px;
+}
+.uc-dialog-message {
+  font-size: 15px; color: var(--text-soft);
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+.uc-dialog-actions {
+  display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+}
+.uc-dialog-actions .btn { min-width: 140px; justify-content: center; }
+.uc-dialog-danger {
+  background: var(--danger, #ef4444) !important;
+  border-color: var(--danger, #ef4444) !important;
+  color: white !important;
+}
+.uc-dialog-danger:hover { background: #dc2626 !important; border-color: #dc2626 !important; }
+@media (max-width: 480px) {
+  .uc-dialog-actions .btn { width: 100%; min-width: 0; }
+}

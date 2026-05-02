@@ -1,24 +1,38 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState, createElement } from 'react';
+import type { ReactElement } from 'react';
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 /**
  * Защита от потери несохранённых данных формы.
  *
  * Когда `when=true`:
  *  1. beforeunload — браузер показывает нативное предупреждение при
- *     закрытии вкладки или перезагрузке страницы.
+ *     закрытии вкладки или перезагрузке страницы (это политика безопасности
+ *     браузера — кастомный UI здесь невозможен).
  *  2. click capture — перехватывает клики по внутренним ссылкам (<a> /
- *     <Link>) и спрашивает подтверждение через window.confirm().
- *  3. popstate — кнопка "назад" / "вперёд" в браузере: если юзер
- *     отменяет — возвращаем history на текущий URL.
+ *     <Link>) и показывает кастомную модалку <UnsavedChangesDialog>.
+ *  3. popstate — кнопка "назад" / "вперёд" в браузере: возвращает history
+ *     на текущий URL и показывает ту же модалку.
  *
- * Не перехватывает программный navigate() из react-router внутри кода.
- * Это сознательное решение: переопределение history.pushState ломает
- * внутреннее состояние router и приводит к рассинхрону.
+ * Возвращает `{ modal }` — JSX модалки, который нужно отрендерить в JSX
+ * компонента, например `<>...{modal}</>`.
+ *
+ * Не перехватывает программный navigate() из react-router внутри кода —
+ * переопределение history.pushState ломает внутреннее состояние router.
  */
 export function useUnsavedChangesGuard(
   when: boolean,
-  message = 'У вас есть несохранённые изменения в анкете. Уйти без сохранения?',
-) {
+  message?: string,
+): { modal: ReactElement } {
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const lastHrefRef = useRef<string>(typeof window !== 'undefined' ? window.location.href : '');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      lastHrefRef.current = window.location.href;
+    }
+  }, []);
+
   useEffect(() => {
     if (!when) return;
 
@@ -39,30 +53,21 @@ export function useUnsavedChangesGuard(
         const url = new URL(anchor.href);
         if (url.origin !== window.location.origin) return;
         if (url.pathname === window.location.pathname) {
-          // Только хеш меняется — не блокируем (якорь внутри страницы)
           if (url.search === window.location.search) return;
         }
       } catch {
         return;
       }
-      if (!window.confirm(message)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setPendingHref(anchor.href);
     };
 
-    // popstate стреляет ПОСЛЕ изменения истории, поэтому если юзер
-    // отменил — возвращаем history на предыдущий URL форсированно.
-    let lastHref = window.location.href;
     const onPopState = () => {
-      if (window.location.href === lastHref) return;
+      if (window.location.href === lastHrefRef.current) return;
       const goingTo = window.location.href;
-      if (window.confirm(message)) {
-        lastHref = goingTo;
-      } else {
-        // отменяем переход — возвращаемся
-        window.history.pushState(null, '', lastHref);
-      }
+      window.history.pushState(null, '', lastHrefRef.current);
+      setPendingHref(goingTo);
     };
 
     window.addEventListener('beforeunload', beforeUnload);
@@ -74,5 +79,29 @@ export function useUnsavedChangesGuard(
       document.removeEventListener('click', onClick, true);
       window.removeEventListener('popstate', onPopState);
     };
-  }, [when, message]);
+  }, [when]);
+
+  useEffect(() => {
+    if (!when && typeof window !== 'undefined') {
+      lastHrefRef.current = window.location.href;
+    }
+  }, [when]);
+
+  const onConfirm = () => {
+    if (pendingHref) {
+      window.location.href = pendingHref;
+    }
+    setPendingHref(null);
+  };
+
+  const onCancel = () => setPendingHref(null);
+
+  const modal = createElement(UnsavedChangesDialog, {
+    open: pendingHref !== null,
+    onConfirm,
+    onCancel,
+    message,
+  });
+
+  return { modal };
 }

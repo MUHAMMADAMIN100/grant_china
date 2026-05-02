@@ -429,8 +429,9 @@ export default function ApplicationFormSection() {
   }, []);
 
   // Защита от потери несохранённых изменений: beforeunload + клики по
-  // внутренним ссылкам + кнопка "назад" в браузере.
-  useUnsavedChangesGuard(dirty);
+  // внутренним ссылкам + кнопка "назад" в браузере. Модалку рендерим
+  // в конце компонента (после основного контента).
+  const { modal: unsavedChangesModal } = useUnsavedChangesGuard(dirty);
 
   if (loading || !form) {
     return (
@@ -563,6 +564,7 @@ export default function ApplicationFormSection() {
           </div>
         </div>
       </div>
+      {unsavedChangesModal}
     </section>
   );
 }

@@ -421,8 +421,9 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
   }, [JSON.stringify(initialForm)]);
 
   // Защита от потери несохранённых изменений: beforeunload + клики по
-  // внутренним ссылкам + кнопка "назад" в браузере.
-  useUnsavedChangesGuard(dirty);
+  // внутренним ссылкам + кнопка "назад" в браузере. Модалку рендерим
+  // в конце компонента (после основного контента).
+  const { modal: unsavedChangesModal } = useUnsavedChangesGuard(dirty);
 
   const onManualSave = async () => {
     if (!form || manualSaving || !dirty) return;
@@ -579,6 +580,7 @@ export default function ApplicationFormSection({ studentId, initialForm, canEdit
           </div>
         )}
       </div>
+      {unsavedChangesModal}
     </section>
   );
 }

@@ -1,24 +1,39 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState, createElement } from 'react';
+import type { ReactElement } from 'react';
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 /**
  * Защита от потери несохранённых данных формы.
  *
  * Когда `when=true`:
  *  1. beforeunload — браузер показывает нативное предупреждение при
- *     закрытии вкладки или перезагрузке страницы.
+ *     закрытии вкладки или перезагрузке страницы (это политика безопасности
+ *     браузера — кастомный UI здесь невозможен).
  *  2. click capture — перехватывает клики по внутренним ссылкам (<a> /
- *     <Link>) и спрашивает подтверждение через window.confirm().
- *  3. popstate — кнопка "назад" / "вперёд" в браузере: если юзер
- *     отменяет — возвращаем history на текущий URL.
+ *     <Link>) и показывает кастомную модалку <UnsavedChangesDialog>.
+ *  3. popstate — кнопка "назад" / "вперёд" в браузере: возвращает history
+ *     на текущий URL и показывает ту же модалку.
  *
- * Не перехватывает программный navigate() из react-router внутри кода.
- * Это сознательное решение: переопределение history.pushState ломает
- * внутреннее состояние router и приводит к рассинхрону.
+ * Возвращает `{ modal }` — JSX модалки, который нужно отрендерить в JSX
+ * компонента, например `<>...{modal}</>`.
+ *
+ * Не перехватывает программный navigate() из react-router внутри кода —
+ * переопределение history.pushState ломает внутреннее состояние router.
  */
 export function useUnsavedChangesGuard(
   when: boolean,
-  message = 'У вас есть несохранённые изменения в анкете. Уйти без сохранения?',
-) {
+  message?: string,
+): { modal: ReactElement } {
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  // popstate-related: помним предыдущий URL чтобы откатить назад
+  const lastHrefRef = useRef<string>(typeof window !== 'undefined' ? window.location.href : '');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      lastHrefRef.current = window.location.href;
+    }
+  }, []);
+
   useEffect(() => {
     if (!when) return;
 
@@ -44,21 +59,17 @@ export function useUnsavedChangesGuard(
       } catch {
         return;
       }
-      if (!window.confirm(message)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setPendingHref(anchor.href);
     };
 
-    let lastHref = window.location.href;
     const onPopState = () => {
-      if (window.location.href === lastHref) return;
+      if (window.location.href === lastHrefRef.current) return;
       const goingTo = window.location.href;
-      if (window.confirm(message)) {
-        lastHref = goingTo;
-      } else {
-        window.history.pushState(null, '', lastHref);
-      }
+      // Откатываем history обратно на предыдущий URL
+      window.history.pushState(null, '', lastHrefRef.current);
+      setPendingHref(goingTo);
     };
 
     window.addEventListener('beforeunload', beforeUnload);
@@ -70,5 +81,32 @@ export function useUnsavedChangesGuard(
       document.removeEventListener('click', onClick, true);
       window.removeEventListener('popstate', onPopState);
     };
-  }, [when, message]);
+  }, [when]);
+
+  // Когда юзер сохранил/dirty=false, обновляем "последний URL" чтобы
+  // popstate не срабатывал на старом значении.
+  useEffect(() => {
+    if (!when && typeof window !== 'undefined') {
+      lastHrefRef.current = window.location.href;
+    }
+  }, [when]);
+
+  const onConfirm = () => {
+    if (pendingHref) {
+      // Полная навигация — это гарантирует уход независимо от router
+      window.location.href = pendingHref;
+    }
+    setPendingHref(null);
+  };
+
+  const onCancel = () => setPendingHref(null);
+
+  const modal = createElement(UnsavedChangesDialog, {
+    open: pendingHref !== null,
+    onConfirm,
+    onCancel,
+    message,
+  });
+
+  return { modal };
 }
