@@ -44,27 +44,39 @@ export async function generateStudentsReport(params: {
 
   const BORDER = { style: BorderStyle.SINGLE, size: 4, color: 'D5D9DF' };
   const cellBorders = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
+  const cellMargins = { top: 80, bottom: 80, left: 100, right: 100 };
 
-  const headerCell = (text: string, width?: number) =>
+  // Ширина страницы A4 landscape = 16838 twips; минус margins 720*2 = 720
+  // ⇒ доступная ширина для таблицы 15398 twips. Округляем до 15400.
+  const TABLE_WIDTH = 15400;
+  // Доли колонок — сумма ровно 1.0, проценты выбраны под реальный контент:
+  // длинные ФИО и Менеджер шире, № и Кабинет узкие.
+  const COL_RATIOS = [0.04, 0.22, 0.13, 0.06, 0.10, 0.13, 0.18, 0.14];
+  const COL_WIDTHS = COL_RATIOS.map((r) => Math.round(TABLE_WIDTH * r));
+
+  const headerCell = (text: string, colIdx: number) =>
     new TableCell({
-      width: width ? { size: width, type: WidthType.DXA } : undefined,
+      width: { size: COL_WIDTHS[colIdx], type: WidthType.DXA },
       borders: cellBorders,
+      margins: cellMargins,
       shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'D52B2B' },
       children: [
         new Paragraph({
           alignment: AlignmentType.LEFT,
-          children: [new TextRun({ text, bold: true, color: 'FFFFFF', size: 20 })],
+          children: [new TextRun({ text, bold: true, color: 'FFFFFF', size: 18 })],
         }),
       ],
     });
 
-  const bodyCell = (text: string, alt = false) =>
+  const bodyCell = (text: string, colIdx: number, alt = false) =>
     new TableCell({
+      width: { size: COL_WIDTHS[colIdx], type: WidthType.DXA },
       borders: cellBorders,
+      margins: cellMargins,
       shading: alt ? { type: ShadingType.CLEAR, color: 'auto', fill: 'F8FAFC' } : undefined,
       children: [
         new Paragraph({
-          children: [new TextRun({ text: text || '—', size: 18 })],
+          children: [new TextRun({ text: text || '—', size: 16 })],
         }),
       ],
     });
@@ -73,28 +85,28 @@ export async function generateStudentsReport(params: {
     new TableRow({
       tableHeader: true,
       children: [
-        headerCell('№'),
-        headerCell('ФИО'),
-        headerCell('Направление'),
-        headerCell('Кабинет'),
-        headerCell('Статус'),
-        headerCell('Телефон'),
-        headerCell('Менеджер'),
-        headerCell('Дата'),
+        headerCell('№', 0),
+        headerCell('ФИО', 1),
+        headerCell('Направление', 2),
+        headerCell('Кабинет', 3),
+        headerCell('Статус', 4),
+        headerCell('Телефон', 5),
+        headerCell('Менеджер', 6),
+        headerCell('Дата', 7),
       ],
     }),
     ...students.map(
       (s, i) =>
         new TableRow({
           children: [
-            bodyCell(String(i + 1), i % 2 === 1),
-            bodyCell(s.fullName, i % 2 === 1),
-            bodyCell(DIRECTION_LABEL[s.direction], i % 2 === 1),
-            bodyCell(String(s.cabinet), i % 2 === 1),
-            bodyCell(STUDENT_STATUS_LABEL[s.status], i % 2 === 1),
-            bodyCell(s.phones.join(', '), i % 2 === 1),
-            bodyCell(s.manager?.fullName || '—', i % 2 === 1),
-            bodyCell(fmtDate(s.createdAt), i % 2 === 1),
+            bodyCell(String(i + 1), 0, i % 2 === 1),
+            bodyCell(s.fullName, 1, i % 2 === 1),
+            bodyCell(DIRECTION_LABEL[s.direction], 2, i % 2 === 1),
+            bodyCell(String(s.cabinet), 3, i % 2 === 1),
+            bodyCell(STUDENT_STATUS_LABEL[s.status], 4, i % 2 === 1),
+            bodyCell(s.phones.join(', '), 5, i % 2 === 1),
+            bodyCell(s.manager?.fullName || '—', 6, i % 2 === 1),
+            bodyCell(fmtDate(s.createdAt), 7, i % 2 === 1),
           ],
         }),
     ),
@@ -196,7 +208,10 @@ export async function generateStudentsReport(params: {
           new Paragraph({ text: '', spacing: { after: 200 } }),
 
           new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
+            // Явная ширина в DXA + columnWidths — иначе Word схлопывает
+            // колонки до min-content (по букве на строку).
+            width: { size: TABLE_WIDTH, type: WidthType.DXA },
+            columnWidths: COL_WIDTHS,
             rows: tableRows,
           }),
         ],
