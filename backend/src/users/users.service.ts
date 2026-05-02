@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -6,6 +12,8 @@ import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async findAll(filters: { search?: string } = {}) {
@@ -53,22 +61,57 @@ export class UsersService {
   async update(id: string, dto: UpdateUserDto) {
     await this.findOne(id);
     const data: any = {};
+    // DTO уже tримит/лоуэркейсит через @Transform — здесь повторно
+    // нормализуем только как страховка (на случай если кто-то когда-то
+    // вызовет сервис не через HTTP-pipeline, например из тестов или сидера).
     if (dto.email) data.email = dto.email.trim().toLowerCase();
-    if (dto.fullName) data.fullName = dto.fullName;
+    if (dto.fullName) data.fullName = dto.fullName.trim();
     if (dto.role) data.role = dto.role;
+
+    let passwordToVerify: string | null = null;
     if (dto.password) {
-      // Нормализуем так же, как в auth.service: иначе при login сравнение
-      // bcrypt.compare(plain, hashOfPlainWithSpaces) всегда вернёт false.
       const trimmed = dto.password.trim();
       data.password = await bcrypt.hash(trimmed, 10);
+      passwordToVerify = trimmed;
     }
 
     const user = await this.prisma.user.update({
       where: { id },
       data,
-      select: { id: true, email: true, fullName: true, role: true, createdAt: true },
+      // Включаем password в результат ТОЛЬКО для self-проверки ниже,
+      // потом скрываем перед возвратом клиенту.
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        createdAt: true,
+        password: passwordToVerify ? true : false,
+      } as any,
     });
-    return user;
+
+    // Sanity-check: если пользователь сменил пароль — сразу проверяем что
+    // bcrypt.compare с тем же паролем даёт true. Если нет — значит запись
+    // в БД не сохранилась корректно (transaction issue, пишущий триггер,
+    // и т.п.). Тогда явно бросаем ошибку, чтобы admin увидел проблему,
+    // а не получил ложный «успех».
+    if (passwordToVerify) {
+      const stored = (user as any).password as string | undefined;
+      const ok = stored ? await bcrypt.compare(passwordToVerify, stored) : false;
+      if (!ok) {
+        this.logger.error(
+          `Password verify failed after update for user ${id} — stored hash does not match the new password`,
+        );
+        throw new InternalServerErrorException(
+          'Не удалось сохранить новый пароль. Попробуйте ещё раз.',
+        );
+      }
+      this.logger.log(`Password updated and verified for user ${id} (${user.email})`);
+    }
+
+    // Скрываем password из ответа клиенту
+    const { password: _omit, ...safe } = user as any;
+    return safe;
   }
 
   async remove(id: string) {
