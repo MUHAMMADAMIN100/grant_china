@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { studentLogin, getToken } from '../studentApi';
 import Icon from '../Icon';
+import PasswordInput from '../components/PasswordInput';
 import { compose, email as emailRule, hasErrors, passwordRule, required } from '../validators';
 
 export default function StudentLogin() {
@@ -93,8 +94,7 @@ export default function StudentLogin() {
           </div>
           <div className="form-row">
             <label>Пароль *</label>
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, password: true }))}

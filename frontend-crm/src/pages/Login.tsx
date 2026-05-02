@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../store/auth';
 import { compose, email as emailRule, hasErrors, minLen, required, validateAll } from '../utils/validators';
+import PasswordInput from '../components/PasswordInput';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -97,8 +98,7 @@ export default function Login() {
           transition={{ delay: 0.4, duration: 0.3 }}
         >
           <label>Пароль</label>
-          <input
-            type="password"
+          <PasswordInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onBlur={() => setTouched((t) => ({ ...t, password: true }))}

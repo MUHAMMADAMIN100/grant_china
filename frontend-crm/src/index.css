@@ -1634,3 +1634,32 @@ select.input-error {
   .pagination-controls { justify-content: center; }
   .pagination-info { text-align: center; }
 }
+
+/* Password input with eye-toggle button */
+.password-input-wrap {
+  position: relative;
+  display: block;
+}
+.password-input-wrap input {
+  width: 100%;
+}
+.password-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-soft, #6b7280);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color .15s, background .15s;
+  padding: 0;
+}
+.password-toggle:hover { color: var(--primary, #d52b2b); background: rgba(0,0,0,0.04); }
+.password-toggle:focus-visible { outline: 2px solid var(--primary, #d52b2b); outline-offset: 1px; }

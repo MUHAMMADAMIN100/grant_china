@@ -4,6 +4,7 @@ import { changePassword } from '../api/auth';
 import { updateUser } from '../api/users';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
+import PasswordInput from './PasswordInput';
 
 type Mode =
   | { kind: 'self' }
@@ -113,8 +114,7 @@ export default function ChangePasswordModal({ open, mode, onClose }: Props) {
             {mode.kind === 'self' && (
               <div className="form-group" style={{ textAlign: 'left', marginBottom: 12 }}>
                 <label>Текущий пароль</label>
-                <input
-                  type="password"
+                <PasswordInput
                   value={current}
                   onChange={(e) => setCurrent(e.target.value)}
                   required
@@ -125,8 +125,7 @@ export default function ChangePasswordModal({ open, mode, onClose }: Props) {
             )}
             <div className="form-group" style={{ textAlign: 'left', marginBottom: 12 }}>
               <label>Новый пароль (мин. 8 симв.)</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={next}
                 onChange={(e) => setNext(e.target.value)}
                 required
@@ -137,8 +136,7 @@ export default function ChangePasswordModal({ open, mode, onClose }: Props) {
             </div>
             <div className="form-group" style={{ textAlign: 'left', marginBottom: 16 }}>
               <label>Повторите новый пароль</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 required
