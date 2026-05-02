@@ -9,8 +9,11 @@ import { useAuth } from '../store/auth';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import DirectionOptions from '../components/DirectionOptions';
+import Pagination from '../components/Pagination';
 
 type Scope = 'all' | 'mine';
+
+const PAGE_SIZE = 5;
 
 export default function Applications() {
   const navigate = useNavigate();
@@ -25,6 +28,7 @@ export default function Applications() {
   // Менеджер видит только свои заявки; админ может переключать.
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
   const load = () => {
     setLoading(true);
@@ -40,10 +44,20 @@ export default function Applications() {
   };
 
   useEffect(() => {
+    setPage(1); // при смене любого фильтра — на первую страницу
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, status, direction, scope, manager]);
+
+  // При изменении набора заявок извне (realtime/удаление) — корректируем
+  // текущую страницу, чтобы не остаться на пустой.
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    if (page > totalPages) setPage(totalPages);
+  }, [items.length, page]);
+
+  const pagedItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Список пользователей для фильтра по менеджерам — только админу
   useEffect(() => {
@@ -134,7 +148,7 @@ export default function Applications() {
                   animate="show"
                   variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04 } } }}
                 >
-                  {items.map((a) => (
+                  {pagedItems.map((a) => (
                     <motion.tr
                       key={a.id}
                       onClick={() => navigate(`/applications/${a.id}`)}
@@ -181,6 +195,15 @@ export default function Applications() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {!loading && (
+          <Pagination
+            page={page}
+            total={items.length}
+            pageSize={PAGE_SIZE}
+            onChange={setPage}
+          />
+        )}
       </div>
     </motion.div>
   );

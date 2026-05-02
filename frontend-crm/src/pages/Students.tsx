@@ -10,30 +10,12 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { generateStudentsReport } from '../utils/studentsReport';
 import DirectionOptions from '../components/DirectionOptions';
+import Pagination from '../components/Pagination';
 import Icon from '../Icon';
 
 type Scope = 'all' | 'mine';
 
 const PAGE_SIZE = 5;
-
-/**
- * Возвращает массив элементов пагинации в стиле Google: номера страниц
- * с эллипсисами вокруг текущей. Пример при 50 страницах и текущей 6:
- * `[1, '…', 4, 5, 6, 7, 8, '…', 50]`.
- */
-function buildPageRange(current: number, total: number): (number | '…')[] {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
-  }
-  const out: (number | '…')[] = [1];
-  const start = Math.max(2, current - 2);
-  const end = Math.min(total - 1, current + 2);
-  if (start > 2) out.push('…');
-  for (let i = start; i <= end; i++) out.push(i);
-  if (end < total - 1) out.push('…');
-  out.push(total);
-  return out;
-}
 
 export default function Students() {
   const navigate = useNavigate();
@@ -104,11 +86,7 @@ export default function Students() {
     if (page > totalPages) setPage(totalPages);
   }, [filteredItems.length, page]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
   const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const pageRange = buildPageRange(page, totalPages);
-  const rangeStart = filteredItems.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const rangeEnd = Math.min(page * PAGE_SIZE, filteredItems.length);
 
   // Список пользователей для фильтра по менеджерам — только админу
   useEffect(() => {
@@ -346,46 +324,13 @@ export default function Students() {
           )}
         </AnimatePresence>
 
-        {!loading && filteredItems.length > PAGE_SIZE && (
-          <div className="pagination">
-            <div className="pagination-info">
-              Показано {rangeStart}–{rangeEnd} из {filteredItems.length}
-            </div>
-            <div className="pagination-controls">
-              <button
-                className="pg-btn pg-arrow"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                title="Предыдущая страница"
-              >
-                <Icon name="chevron_left" size={16} />
-                Назад
-              </button>
-              {pageRange.map((p, i) =>
-                p === '…' ? (
-                  <span key={`gap-${i}`} className="pg-gap">…</span>
-                ) : (
-                  <button
-                    key={p}
-                    className={`pg-btn pg-num${p === page ? ' active' : ''}`}
-                    onClick={() => setPage(p)}
-                    aria-current={p === page ? 'page' : undefined}
-                  >
-                    {p}
-                  </button>
-                ),
-              )}
-              <button
-                className="pg-btn pg-arrow"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                title="Следующая страница"
-              >
-                Далее
-                <Icon name="chevron_right" size={16} />
-              </button>
-            </div>
-          </div>
+        {!loading && (
+          <Pagination
+            page={page}
+            total={filteredItems.length}
+            pageSize={PAGE_SIZE}
+            onChange={setPage}
+          />
         )}
       </div>
 
