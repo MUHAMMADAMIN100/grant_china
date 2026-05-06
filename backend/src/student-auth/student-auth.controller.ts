@@ -33,9 +33,11 @@ const uploadStorage = diskStorage({
   },
 });
 
+// Видео — любое (`video/...`), формат не важен.
 const ALLOWED_DOC_MIME_RE =
-  /^(image\/(jpeg|jpg|png|webp|heic|heif|gif)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|zip|x-zip-compressed|x-rar-compressed|vnd\.rar)|text\/plain)$/i;
-const ALLOWED_DOC_EXT_RE = /\.(jpe?g|png|webp|heic|heif|gif|pdf|docx?|xlsx?|zip|rar|txt)$/i;
+  /^(image\/(jpeg|jpg|png|webp|heic|heif|gif)|video\/.+|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|zip|x-zip-compressed|x-rar-compressed|vnd\.rar)|text\/plain)$/i;
+const ALLOWED_DOC_EXT_RE =
+  /\.(jpe?g|png|webp|heic|heif|gif|pdf|docx?|xlsx?|zip|rar|txt|mp4|mov|m4v|webm|mkv|avi|wmv|flv|3gp|ogv)$/i;
 
 const docFileFilter = (
   _req: any,
@@ -47,11 +49,26 @@ const docFileFilter = (
   }
   cb(
     new BadRequestException(
-      'Недопустимый тип файла. Разрешены: PDF, изображения, Word, Excel, ZIP/RAR, TXT.',
+      'Недопустимый тип файла. Разрешены: PDF, изображения, видео (MP4/MOV/WEBM/...), Word, Excel, ZIP/RAR, TXT.',
     ),
     false,
   );
 };
+
+/**
+ * Multer кладёт original filename в latin1 (HTTP RFC). Кириллица превращается
+ * в "Đ¤Đ¾Ñ‚Đ¾_34.jpg" вместо "Фото_34.jpg". Конвертируем обратно в UTF-8.
+ */
+function fixFilenameEncoding(name: string): string {
+  if (!name) return name;
+  try {
+    const utf8 = Buffer.from(name, 'latin1').toString('utf8');
+    if (!utf8.includes('�')) return utf8;
+  } catch {
+    // ignore
+  }
+  return name;
+}
 
 @Controller('student-auth')
 export class StudentAuthController {
@@ -130,7 +147,7 @@ export class StudentAuthController {
       data: {
         studentId: user.id,
         filename: file.filename,
-        originalName: file.originalname,
+        originalName: fixFilenameEncoding(file.originalname),
         mimeType: file.mimetype,
         size: file.size,
         url,
