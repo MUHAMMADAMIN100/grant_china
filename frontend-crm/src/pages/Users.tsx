@@ -99,12 +99,6 @@ export default function Users() {
         {canEdit && !creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Добавить</button>}
       </div>
       <div className="card-body">
-        {!canEdit && (
-          <div className="info-banner" style={{ marginBottom: 16, padding: 12, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, color: '#9a3412', fontSize: 14 }}>
-            Только <b>Основатель</b> может редактировать сотрудников, менять пароли и назначать роли.
-            У вас доступен только просмотр.
-          </div>
-        )}
         <div className="filters">
           <input
             placeholder="Поиск по email или ФИО..."
