@@ -9,7 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 
-type JwtPayload = { sub: string; email: string; role: 'ADMIN' | 'EMPLOYEE' | 'STUDENT' };
+type JwtPayload = { sub: string; email: string; role: 'FOUNDER' | 'ADMIN' | 'EMPLOYEE' | 'STUDENT' };
 
 @Injectable()
 @WebSocketGateway({
@@ -64,7 +64,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       (client.data as any) = { userId: id, role };
 
-      if (role === 'ADMIN' || role === 'EMPLOYEE') {
+      if (role === 'FOUNDER' || role === 'ADMIN' || role === 'EMPLOYEE') {
         client.join('staff');
         client.join(`user:${id}`);
       } else if (role === 'STUDENT') {

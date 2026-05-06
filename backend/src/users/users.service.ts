@@ -43,6 +43,19 @@ export class UsersService {
     return user;
   }
 
+  /** Без выкидывания исключения — для проверок в контроллере. */
+  async findOneRaw(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true },
+    });
+  }
+
+  /** Количество пользователей с указанной ролью (для защиты "последнего FOUNDER"). */
+  async countByRole(role: 'FOUNDER' | 'ADMIN' | 'EMPLOYEE') {
+    return this.prisma.user.count({ where: { role } });
+  }
+
   async create(dto: CreateUserDto) {
     const email = (dto.email || '').trim().toLowerCase();
     const rawPassword = (dto.password || '').trim();

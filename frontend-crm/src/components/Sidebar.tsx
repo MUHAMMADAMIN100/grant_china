@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../store/auth';
+import { isPrivileged, ROLE_LABEL } from '../api/types';
 import Icon from '../Icon';
 import ChangePasswordModal from './ChangePasswordModal';
 
@@ -17,7 +18,9 @@ export default function Sidebar() {
     { to: '/students', icon: 'school', label: 'Студенты' },
     { to: '/programs', icon: 'menu_book', label: 'Программы' },
     { to: '/tasks', icon: 'task_alt', label: 'Задачи' },
-    ...(user?.role === 'ADMIN' ? [
+    // FOUNDER + ADMIN видят активность и список пользователей.
+    // На странице /users редактирование доступно только FOUNDER (бэк проверяет).
+    ...(isPrivileged(user?.role) ? [
       { to: '/activity', icon: 'history', label: 'Активность' },
       { to: '/users', icon: 'group', label: 'Пользователи' },
     ] : []),
@@ -85,7 +88,7 @@ export default function Sidebar() {
         </motion.div>
         <div className="user-info">
           <div className="user-name">{user?.fullName}</div>
-          <div className="user-role">{user?.role === 'ADMIN' ? 'Администратор' : 'Сотрудник'}</div>
+          <div className="user-role">{user?.role ? ROLE_LABEL[user.role] : ''}</div>
         </div>
         <motion.button
           className="logout-btn"

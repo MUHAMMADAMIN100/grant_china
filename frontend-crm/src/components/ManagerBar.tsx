@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ManagerInfo, User } from '../api/types';
+import { isPrivileged, ROLE_LABEL } from '../api/types';
 import { listUsers } from '../api/users';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
@@ -89,7 +90,7 @@ function Slot({
                       <div>
                         <div className="manager-dropdown-name">{u.fullName}</div>
                         <div className="manager-dropdown-role">
-                          {u.role === 'ADMIN' ? 'Администратор' : 'Сотрудник'}
+                          {ROLE_LABEL[u.role] || u.role}
                         </div>
                       </div>
                     </button>
@@ -120,7 +121,7 @@ export default function ManagerBar({ manager, chinaManager, onReassign }: Props)
   const [users, setUsers] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const isAdmin = me?.role === 'ADMIN';
+  const isAdmin = isPrivileged(me?.role);
 
   useEffect(() => {
     if (isAdmin) listUsers().then(setUsers).catch(() => {});

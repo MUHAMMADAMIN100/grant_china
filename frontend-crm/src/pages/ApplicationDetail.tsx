@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { assignApplicationManager, deleteApplication, getApplication, updateApplication } from '../api/applications';
 import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import type { Application, ApplicationStatus, Direction, Student, StudentStatus } from '../api/types';
-import { APPLICATION_STAGES, DIRECTION_LABEL, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL } from '../api/types';
+import { APPLICATION_STAGES, DIRECTION_LABEL, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -182,7 +182,7 @@ export default function ApplicationDetail() {
 
   const isNew = app.status === 'NEW';
   const isEnrolled = app.status === 'ENROLLED';
-  const isAdmin = me?.role === 'ADMIN';
+  const isAdmin = isPrivileged(me?.role);
   const assigned = !!app.managerId || !!app.chinaManagerId;
   const isMine = !assigned || app.managerId === me?.id || app.chinaManagerId === me?.id;
   const canAct = isAdmin || isMine;

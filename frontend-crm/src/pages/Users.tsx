@@ -1,11 +1,19 @@
 import { useEffect, useState } from 'react';
 import { createUser, deleteUser, listUsers, updateUser } from '../api/users';
 import type { Role, User } from '../api/types';
+import { ROLE_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, required, validateAll } from '../utils/validators';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 
+/**
+ * Управление сотрудниками.
+ *  - FOUNDER (Основатель) — может всё: создавать/удалять/редактировать
+ *    сотрудников, менять им пароли, назначать роли (включая FOUNDER).
+ *  - ADMIN — видит список read-only, без кнопок.
+ *  - EMPLOYEE — на эту страницу не попадёт (роутинг блокирует).
+ */
 export default function Users() {
   const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
@@ -16,6 +24,9 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [pwdTarget, setPwdTarget] = useState<User | null>(null);
+
+  const isFounder = me?.role === 'FOUNDER';
+  const canEdit = isFounder; // только Основатель может всё менять
 
   const formErrors = validateAll(
     form,
@@ -52,8 +63,12 @@ export default function Users() {
   };
 
   const onChangeRole = async (u: User, role: Role) => {
-    await updateUser(u.id, { role });
-    load();
+    try {
+      await updateUser(u.id, { role });
+      load();
+    } catch (e: any) {
+      toast(e.response?.data?.message?.toString() || 'Не удалось изменить роль', 'error');
+    }
   };
 
   const onDelete = async (u: User) => {
@@ -68,18 +83,28 @@ export default function Users() {
       danger: true,
     });
     if (!ok) return;
-    await deleteUser(u.id);
-    toast('Пользователь удалён', 'success');
-    load();
+    try {
+      await deleteUser(u.id);
+      toast('Пользователь удалён', 'success');
+      load();
+    } catch (e: any) {
+      toast(e.response?.data?.message?.toString() || 'Не удалось удалить', 'error');
+    }
   };
 
   return (
     <div className="card">
       <div className="card-header">
         <h2 className="card-title">Пользователи системы</h2>
-        {!creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Добавить</button>}
+        {canEdit && !creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Добавить</button>}
       </div>
       <div className="card-body">
+        {!canEdit && (
+          <div className="info-banner" style={{ marginBottom: 16, padding: 12, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, color: '#9a3412', fontSize: 14 }}>
+            Только <b>Основатель</b> может редактировать сотрудников, менять пароли и назначать роли.
+            У вас доступен только просмотр.
+          </div>
+        )}
         <div className="filters">
           <input
             placeholder="Поиск по email или ФИО..."
@@ -87,7 +112,7 @@ export default function Users() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        {creating && (
+        {canEdit && creating && (
           <form onSubmit={onCreate} style={{ marginBottom: 22, padding: 18, background: '#f5f7fb', borderRadius: 10 }}>
             {error && <div className="error-banner">{error}</div>}
             <div className="form-grid-2">
@@ -133,6 +158,7 @@ export default function Users() {
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
                   <option value="EMPLOYEE">Сотрудник</option>
                   <option value="ADMIN">Администратор</option>
+                  <option value="FOUNDER">Основатель</option>
                 </select>
               </div>
             </div>
@@ -151,7 +177,13 @@ export default function Users() {
         <div className="table-wrap">
           <table className="table">
             <thead>
-              <tr><th>ФИО</th><th>Email</th><th>Роль</th><th>Создан</th><th></th></tr>
+              <tr>
+                <th>ФИО</th>
+                <th>Email</th>
+                <th>Роль</th>
+                <th>Создан</th>
+                {canEdit && <th></th>}
+              </tr>
             </thead>
             <tbody>
               {items.map((u) => (
@@ -159,26 +191,37 @@ export default function Users() {
                   <td><strong>{u.fullName}</strong>{u.id === me?.id && <span style={{ color: '#5b6478', fontSize: 12 }}> (вы)</span>}</td>
                   <td data-label="Email">{u.email}</td>
                   <td data-label="Роль">
-                    <select value={u.role} onChange={(e) => onChangeRole(u, e.target.value as Role)} disabled={u.id === me?.id}>
-                      <option value="EMPLOYEE">Сотрудник</option>
-                      <option value="ADMIN">Администратор</option>
-                    </select>
+                    {canEdit ? (
+                      <select
+                        value={u.role}
+                        onChange={(e) => onChangeRole(u, e.target.value as Role)}
+                        disabled={u.id === me?.id}
+                      >
+                        <option value="EMPLOYEE">Сотрудник</option>
+                        <option value="ADMIN">Администратор</option>
+                        <option value="FOUNDER">Основатель</option>
+                      </select>
+                    ) : (
+                      <span>{ROLE_LABEL[u.role] || u.role}</span>
+                    )}
                   </td>
                   <td data-label="Создан">{u.createdAt ? new Date(u.createdAt).toLocaleDateString('ru-RU') : '—'}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button
-                        className="btn btn-sm btn-secondary"
-                        onClick={() => setPwdTarget(u)}
-                        title="Сменить пароль"
-                      >
-                        Пароль
-                      </button>
-                      <button className="btn btn-sm btn-danger" onClick={() => onDelete(u)} disabled={u.id === me?.id}>
-                        Удалить
-                      </button>
-                    </div>
-                  </td>
+                  {canEdit && (
+                    <td>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => setPwdTarget(u)}
+                          title="Сменить пароль"
+                        >
+                          Пароль
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => onDelete(u)} disabled={u.id === me?.id}>
+                          Удалить
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

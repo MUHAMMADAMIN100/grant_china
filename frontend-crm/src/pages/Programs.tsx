@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createProgram, deleteProgram, listPrograms, programImageUrl, updateProgram, uploadProgramImage, type Program } from '../api/programs';
 import type { Direction } from '../api/types';
-import { DIRECTION_LABEL } from '../api/types';
+import { DIRECTION_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -27,7 +27,7 @@ const emptyForm: Partial<Program> = {
 export default function Programs() {
   const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
-  const isAdmin = me?.role === 'ADMIN';
+  const isAdmin = isPrivileged(me?.role);
   const [items, setItems] = useState<Program[]>([]);
   const [city, setCity] = useState('');
   const [major, setMajor] = useState('');

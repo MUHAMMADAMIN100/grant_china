@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listApplications } from '../api/applications';
 import { listUsers } from '../api/users';
 import type { Application, ApplicationStatus, Direction, User } from '../api/types';
-import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL } from '../api/types';
+import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
@@ -24,7 +24,7 @@ export default function Applications() {
   const [status, setStatus] = useState<ApplicationStatus | ''>('');
   const [direction, setDirection] = useState<Direction | ''>('');
   const [manager, setManager] = useState<string>('');
-  const isAdmin = me?.role === 'ADMIN';
+  const isAdmin = isPrivileged(me?.role);
   // Менеджер видит только свои заявки; админ может переключать.
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
   const [loading, setLoading] = useState(true);

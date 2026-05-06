@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
 import { listUsers } from '../api/users';
 import type { Direction, Student, User } from '../api/types';
-import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL } from '../api/types';
+import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -30,7 +30,8 @@ export default function Students() {
   const [stageFilter, setStageFilter] = useState<string>('');
   const [cabinet, setCabinet] = useState('');
   const [manager, setManager] = useState<string>('');
-  const isAdmin = me?.role === 'ADMIN';
+  // FOUNDER + ADMIN видят всех студентов; EMPLOYEE — только своих.
+  const isAdmin = isPrivileged(me?.role);
   // Менеджер видит только своих студентов; админ может переключать.
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
   const [loading, setLoading] = useState(true);

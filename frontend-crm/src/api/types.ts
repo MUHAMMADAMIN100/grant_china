@@ -1,4 +1,22 @@
-export type Role = 'ADMIN' | 'EMPLOYEE';
+export type Role = 'FOUNDER' | 'ADMIN' | 'EMPLOYEE';
+
+export const ROLE_LABEL: Record<Role, string> = {
+  FOUNDER: 'Основатель',
+  ADMIN: 'Администратор',
+  EMPLOYEE: 'Сотрудник',
+};
+
+/**
+ * "Привилегированная" роль — может видеть все заявки/студентов и
+ * редактировать любые записи (FOUNDER + ADMIN).
+ * EMPLOYEE — только свои назначенные.
+ *
+ * NB: для управления сотрудниками (страница /users → POST/PATCH/DELETE)
+ * используется отдельная проверка `role === 'FOUNDER'` напрямую,
+ * потому что ADMIN там только read-only.
+ */
+export const isPrivileged = (role?: Role | null): boolean =>
+  role === 'FOUNDER' || role === 'ADMIN';
 export type Direction =
   | 'BACHELOR'
   | 'MASTER'

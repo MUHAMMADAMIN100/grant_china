@@ -121,7 +121,9 @@ export class ApplicationsService {
       },
     });
 
-    await this.notifications.notifyAllStaff({
+    // Новая публичная заявка ещё не имеет менеджера — её должны увидеть
+    // только FOUNDER и ADMIN, чтобы кто-то её назначил.
+    await this.notifications.notifyAdminsAndFounders({
       type: 'APPLICATION_NEW',
       title: 'Новая заявка',
       message: `${app.fullName} — ${DIRECTION_LABEL[app.direction]}, ${app.phone}`,
@@ -226,7 +228,7 @@ export class ApplicationsService {
     app: { managerId: string | null; chinaManagerId?: string | null },
     user: CurrentUser,
   ) {
-    if (user.role === 'ADMIN') return;
+    if (user.role === 'FOUNDER' || user.role === 'ADMIN') return;
     const assigned = app.managerId || app.chinaManagerId;
     if (!assigned) return; // ещё не назначен — любой может взять в работу
     if (app.managerId === user.id || app.chinaManagerId === user.id) return;
@@ -404,9 +406,11 @@ export class ApplicationsService {
         })
         .catch(() => undefined);
 
-      // Уведомления staff (всем) о переназначении
+      // Уведомление о переназначении — только FOUNDER+ADMIN+новые/старые
+      // менеджеры заявки. EMPLOYEE без отношения к заявке не получит
+      // (иначе кликнет на уведомление и получит 403 на странице заявки).
       this.notifications
-        .notifyAllStaff({
+        .notifyForApplication(updated.id, {
           type: 'MANAGER_CHANGE',
           title: 'Менеджер изменён',
           message: `${updated.fullName}: ${details}`,
