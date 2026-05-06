@@ -12,6 +12,7 @@
     "seed:programs": "ts-node prisma/seed-programs.ts",
     "reset:admin": "ts-node prisma/reset-admin-password.ts",
     "upgrade:founder": "ts-node prisma/upgrade-founder.ts",
+    "create:founder": "ts-node prisma/create-founder.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "postinstall": "prisma generate"
