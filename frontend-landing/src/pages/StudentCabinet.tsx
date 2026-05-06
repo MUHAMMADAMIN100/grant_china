@@ -443,7 +443,7 @@ export default function StudentCabinet() {
                         </div>
                       ))}
                       <button
-                        className="btn btn-outline btn-small"
+                        className="btn btn-outline btn-small stu-doc-add-more"
                         style={{ marginTop: 8 }}
                         onClick={() => inputs.current[req.type]?.click()}
                         disabled={loading}

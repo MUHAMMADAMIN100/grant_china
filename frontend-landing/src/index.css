@@ -1609,6 +1609,34 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .password-toggle:hover { color: var(--primary, #d52b2b); background: rgba(0,0,0,0.04); }
 .password-toggle:focus-visible { outline: 2px solid var(--primary, #d52b2b); outline-offset: 1px; }
 
+/* "Добавить ещё" в карточках документов студента (личный кабинет).
+   Перебивает конфликт двух глобальных .btn-outline:hover правил —
+   гарантирует что при hover текст НЕ пропадает: красный текст и
+   border на светло-розовом фоне. */
+.stu-doc-add-more {
+  background: white !important;
+  color: var(--primary, #d52b2b) !important;
+  border: 1.5px solid var(--primary, #d52b2b) !important;
+  transition: background .15s, transform .12s !important;
+}
+.stu-doc-add-more:hover {
+  background: rgba(213, 43, 43, 0.08) !important;
+  color: var(--primary, #d52b2b) !important;
+  border-color: var(--primary, #d52b2b) !important;
+  transform: translateY(-1px);
+}
+.stu-doc-add-more:hover .material-symbols-rounded {
+  color: var(--primary, #d52b2b) !important;
+}
+.stu-doc-add-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.stu-doc-add-more:disabled:hover {
+  background: white !important;
+  transform: none;
+}
+
 /* Unsaved-changes confirmation dialog */
 .uc-dialog-backdrop {
   position: fixed; inset: 0; z-index: 9999;
