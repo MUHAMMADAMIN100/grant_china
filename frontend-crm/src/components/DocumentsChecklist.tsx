@@ -56,6 +56,24 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
+
+    // Раздел "Прочие документы" допускает видео-презентации, поэтому ограничиваем
+    // размер каждого файла 100 МБ. Backend MAX_FILE_SIZE = 200 МБ — это
+    // дополнительная клиентская граница, чтобы менеджер сразу видел ошибку.
+    if (type === 'OTHER') {
+      const MAX_OTHER_BYTES = 100 * 1024 * 1024;
+      const tooBig = files.find((f) => f.size > MAX_OTHER_BYTES);
+      if (tooBig) {
+        const sizeMb = (tooBig.size / 1024 / 1024).toFixed(1);
+        toast(
+          `Файл "${tooBig.name}" слишком большой (${sizeMb} МБ). Максимум: 100 МБ.`,
+          'error',
+        );
+        e.target.value = '';
+        return;
+      }
+    }
+
     setUploadingType(type);
     try {
       for (const file of files) {
@@ -298,13 +316,40 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => otherRef.current?.click()}
+              disabled={uploadingType === 'OTHER'}
             >
-              <Icon name="attach_file" size={16} style={{ marginRight: 4 }} />
-              Загрузить другой документ
+              <Icon
+                name={uploadingType === 'OTHER' ? 'progress_activity' : 'attach_file'}
+                size={16}
+                style={{ marginRight: 4 }}
+              />
+              {uploadingType === 'OTHER' ? 'Загрузка...' : 'Загрузить другой документ'}
             </button>
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 13,
+                color: 'var(--text-soft, #5b6478)',
+                lineHeight: 1.45,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+              }}
+            >
+              <Icon
+                name="info"
+                size={14}
+                style={{ marginTop: 2, color: 'var(--primary, #d52b2b)' }}
+              />
+              <span>
+                Можно загрузить <b>видео-презентацию студента</b> (mp4, mov, webm) или любой
+                другой документ. <b>Максимум 100 МБ</b> на файл.
+              </span>
+            </div>
             <input
               ref={otherRef}
               type="file"
+              accept="video/mp4,video/quicktime,video/webm,video/*,image/*,application/pdf,.doc,.docx"
               hidden
               onChange={(e) => handleUpload(e, 'OTHER')}
             />
