@@ -104,6 +104,22 @@ export default function StudentCabinet() {
   const onUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
+
+    // Раздел "Другие файлы" допускает видео-презентации, поэтому ограничиваем
+    // размер каждого файла 100 МБ (в backend MAX_FILE_SIZE 200 МБ — это
+    // дополнительная клиентская граница чтобы юзер сразу видел ошибку, а не
+    // ждал минуты загрузки впустую).
+    if (type === 'OTHER') {
+      const MAX_OTHER_BYTES = 100 * 1024 * 1024;
+      const tooBig = files.find((f) => f.size > MAX_OTHER_BYTES);
+      if (tooBig) {
+        const sizeMb = (tooBig.size / 1024 / 1024).toFixed(1);
+        showToast('err', `Файл "${tooBig.name}" слишком большой (${sizeMb} МБ). Максимум: 100 МБ.`);
+        e.target.value = '';
+        return;
+      }
+    }
+
     setUploading(type);
     try {
       for (const file of files) {
@@ -482,9 +498,33 @@ export default function StudentCabinet() {
               onClick={() => otherRef.current?.click()}
               disabled={uploading === 'OTHER'}
             >
-              <Icon name="attach_file" size={14} /> Загрузить другой файл
+              <Icon name="attach_file" size={14} />{' '}
+              {uploading === 'OTHER' ? 'Загрузка...' : 'Загрузить другой файл'}
             </button>
-            <input ref={otherRef} type="file" hidden onChange={(e) => onUpload(e, 'OTHER')} />
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 13,
+                color: 'var(--text-soft)',
+                lineHeight: 1.45,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+              }}
+            >
+              <Icon name="info" size={14} style={{ marginTop: 2, color: 'var(--primary)' }} />
+              <span>
+                Можно загрузить <b>видео-презентацию о себе</b> (mp4, mov, webm) или любой другой
+                документ. <b>Максимум 100 МБ</b> на файл.
+              </span>
+            </div>
+            <input
+              ref={otherRef}
+              type="file"
+              accept="video/mp4,video/quicktime,video/webm,video/*,image/*,application/pdf,.doc,.docx"
+              hidden
+              onChange={(e) => onUpload(e, 'OTHER')}
+            />
           </div>
         </motion.section>
 
