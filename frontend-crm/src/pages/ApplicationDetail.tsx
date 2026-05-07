@@ -7,7 +7,7 @@ import { APPLICATION_STAGES, DIRECTION_LABEL, STAGE_INDEX, STATUS_BADGE, STATUS_
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
-import DocumentsChecklist, { REQUIRED_DOCUMENTS } from '../components/DocumentsChecklist';
+import DocumentsChecklist from '../components/DocumentsChecklist';
 import DirectionOptions from '../components/DirectionOptions';
 import ManagerBar from '../components/ManagerBar';
 import ApplicationFormSection from '../components/ApplicationFormSection';
@@ -190,18 +190,15 @@ export default function ApplicationDetail() {
   // Админ и назначенный менеджер (TJ/CN) могут редактировать заявку на любом этапе
   // — как данные студента, так и анкету.
   const canEdit = !!student && canAct;
-  const uploadedTypes = new Set((student?.documents || []).map((d) => d.type).filter((t) => t && t !== 'OTHER'));
-  const missingDocs = REQUIRED_DOCUMENTS.filter((r) => !uploadedTypes.has(r.type));
   const nextStage = APPLICATION_STAGES[currentIdx + 1];
   const prevStage = currentIdx > 0 ? APPLICATION_STAGES[currentIdx - 1] : null;
 
   const handleNext = async () => {
     if (!nextStage) return;
-    // Гейт на "Подача документов" — нужны все 10 файлов
-    if (nextStage === 'DOCS_SUBMITTED' && missingDocs.length > 0) {
-      toast(`Загрузите все документы (не хватает: ${missingDocs.length})`, 'error');
-      return;
-    }
+    // Гейт на "Подача документов" удалён по запросу: менеджер сам решает,
+    // когда переводить заявку на следующий этап. Документы могут быть
+    // переданы по другим каналам (Telegram, лично) или клиент торопит.
+    // Backend тоже не блокирует этот переход (см. коммит `3293525`).
     await onStatus(nextStage);
   };
 
@@ -266,11 +263,7 @@ export default function ApplicationDetail() {
                 <button
                   className="btn btn-sm btn-primary"
                   onClick={handleNext}
-                  title={
-                    nextStage === 'DOCS_SUBMITTED' && missingDocs.length > 0
-                      ? `Сначала загрузите все документы (не хватает: ${missingDocs.length})`
-                      : `Перейти: ${STATUS_LABEL[nextStage]}`
-                  }
+                  title={`Перейти: ${STATUS_LABEL[nextStage]}`}
                 >
                   {STATUS_LABEL[nextStage]}
                   <Icon name="arrow_forward" size={16} style={{ marginLeft: 4 }} />
