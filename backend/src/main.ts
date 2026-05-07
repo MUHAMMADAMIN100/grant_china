@@ -64,5 +64,14 @@ async function bootstrap() {
   const port = parseInt(config.get<string>('PORT') || '3001', 10);
   await app.listen(port);
   console.log(`🚀 GrantChina API: http://localhost:${port}/api`);
+
+  // Логируем egress (исходящий) IP при старте — нужен чтобы добавить
+  // его в IP-whitelist у внешних провайдеров (Payom.tj, и т.п.) которые
+  // требуют whitelist для API. Railway меняет IP при редеплое — после
+  // каждого старта смотри в логах актуальное значение.
+  fetch('https://api.ipify.org')
+    .then((r) => r.text())
+    .then((ip) => console.log(`🌐 OUTBOUND_IP: ${ip}  (добавь в Payom whitelist если SMS падают с 403)`))
+    .catch((e) => console.log(`🌐 OUTBOUND_IP: не удалось определить (${(e as Error).message})`));
 }
 bootstrap();
