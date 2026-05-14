@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents } from '../api/students';
@@ -12,8 +12,7 @@ import { generateStudentsReport } from '../utils/studentsReport';
 import DirectionOptions from '../components/DirectionOptions';
 import Pagination from '../components/Pagination';
 import Icon from '../Icon';
-
-type Scope = 'all' | 'mine';
+import { useUrlFilter } from '../hooks/useUrlFilter';
 
 const PAGE_SIZE = 5;
 
@@ -21,25 +20,38 @@ export default function Students() {
   const navigate = useNavigate();
   const me = useAuth((s) => s.user);
   const { toast } = useUI();
-  const [items, setItems] = useState<Student[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [search, setSearch] = useState('');
-  const [direction, setDirection] = useState<Direction | ''>('');
-  // Один объединённый фильтр: либо этап заявки (NEW/DOCS_REVIEW/.../ENROLLED),
-  // либо особый студенческий статус (PAUSED/GRADUATED/ARCHIVED).
-  const [stageFilter, setStageFilter] = useState<string>('');
-  const [cabinet, setCabinet] = useState('');
-  const [manager, setManager] = useState<string>('');
   // FOUNDER + ADMIN видят всех студентов; EMPLOYEE — только своих.
   const isAdmin = isPrivileged(me?.role);
-  // Менеджер видит только своих студентов; админ может переключать.
-  const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
+
+  // Все фильтры — в URL, чтобы при возврате назад они восстанавливались.
+  const defaults = useMemo(
+    () => ({
+      search: '',
+      direction: '',
+      stageFilter: '',
+      cabinet: '',
+      manager: '',
+      scope: isAdmin ? 'all' : 'mine',
+      page: '1',
+    }),
+    [isAdmin],
+  );
+  const [filters, setFilter] = useUrlFilter(defaults);
+  const search = filters.search;
+  const direction = filters.direction as Direction | '';
+  const stageFilter = filters.stageFilter;
+  const cabinet = filters.cabinet;
+  const manager = filters.manager;
+  const scope = filters.scope as 'all' | 'mine';
+  const page = Math.max(1, parseInt(filters.page, 10) || 1);
+
+  const [items, setItems] = useState<Student[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportFrom, setReportFrom] = useState('');
   const [reportTo, setReportTo] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [page, setPage] = useState(1);
 
   const load = () => {
     setLoading(true);
@@ -55,7 +67,6 @@ export default function Students() {
   };
 
   useEffect(() => {
-    setPage(1); // при смене любого фильтра — на первую страницу
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,9 +76,6 @@ export default function Students() {
   // статусы студента (PAUSED/GRADUATED/ARCHIVED) тоже идут через этот же
   // фильтр для удобства.
   const SPECIAL_STUDENT_STATUSES = ['PAUSED', 'GRADUATED', 'ARCHIVED'];
-  useEffect(() => {
-    setPage(1);
-  }, [stageFilter]);
 
   const filteredItems = stageFilter
     ? items.filter((s) => {
@@ -84,10 +92,20 @@ export default function Students() {
   // текущую страницу, чтобы не остаться на пустой.
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
-    if (page > totalPages) setPage(totalPages);
-  }, [filteredItems.length, page]);
+    if (page > totalPages) setFilter('page', String(totalPages));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredItems.length]);
 
   const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // При смене любого фильтра сбрасываем страницу на 1
+  const onFilterChange = (
+    key: 'search' | 'direction' | 'stageFilter' | 'cabinet' | 'manager' | 'scope',
+    value: string,
+  ) => {
+    setFilter(key, value);
+    setFilter('page', '1');
+  };
 
   // Список пользователей для фильтра по менеджерам — только админу
   useEffect(() => {
@@ -157,14 +175,14 @@ export default function Students() {
             <div className="scope-switch">
               <button
                 className={`scope-btn${scope === 'mine' ? ' active' : ''}`}
-                onClick={() => setScope('mine')}
+                onClick={() => onFilterChange('scope', 'mine')}
               >
                 <Icon name="person" size={16} />
                 Мои
               </button>
               <button
                 className={`scope-btn${scope === 'all' ? ' active' : ''}`}
-                onClick={() => setScope('all')}
+                onClick={() => onFilterChange('scope', 'all')}
               >
                 <Icon name="groups" size={16} />
                 Все
@@ -193,14 +211,14 @@ export default function Students() {
       </div>
       <div className="card-body">
         <div className="filters">
-          <input placeholder="Поиск по ФИО или телефону..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
+          <input placeholder="Поиск по ФИО или телефону..." value={search} onChange={(e) => onFilterChange('search', e.target.value)} />
+          <select value={direction} onChange={(e) => onFilterChange('direction', e.target.value)}>
             <option value="">Все направления</option>
             <DirectionOptions />
           </select>
           <select
             value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
+            onChange={(e) => onFilterChange('stageFilter', e.target.value)}
             title="Фильтр по этапу заявки"
           >
             <option value="">Все статусы</option>
@@ -218,7 +236,7 @@ export default function Students() {
               <option value="ARCHIVED">В архиве</option>
             </optgroup>
           </select>
-          <select value={cabinet} onChange={(e) => setCabinet(e.target.value)}>
+          <select value={cabinet} onChange={(e) => onFilterChange('cabinet', e.target.value)}>
             <option value="">Все кабинеты</option>
             <option value="1">Кабинет 1</option>
             <option value="2">Кабинет 2</option>
@@ -227,7 +245,7 @@ export default function Students() {
           {isAdmin && (
             <select
               value={manager}
-              onChange={(e) => setManager(e.target.value)}
+              onChange={(e) => onFilterChange('manager', e.target.value)}
               title="Фильтр по менеджеру"
             >
               <option value="">Все менеджеры</option>
@@ -330,7 +348,7 @@ export default function Students() {
             page={page}
             total={filteredItems.length}
             pageSize={PAGE_SIZE}
-            onChange={setPage}
+            onChange={(p) => setFilter('page', String(p))}
           />
         )}
       </div>

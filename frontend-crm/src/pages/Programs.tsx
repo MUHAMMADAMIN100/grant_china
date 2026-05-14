@@ -9,6 +9,11 @@ import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import DirectionOptions from '../components/DirectionOptions';
 import { compose, hasErrors, maxLen, minLen, positive, required, validateAll } from '../utils/validators';
+import { useUrlFilter } from '../hooks/useUrlFilter';
+
+// Дефолты фильтров вынесены за компонент — иначе useMemo на каждом рендере
+// создавал бы новую ссылку и URL-хук триггерился без причины.
+const PROGRAMS_FILTER_DEFAULTS = { city: '', major: '', direction: '' };
 
 const emptyForm: Partial<Program> = {
   name: '',
@@ -29,9 +34,11 @@ export default function Programs() {
   const { confirm, toast } = useUI();
   const isAdmin = isPrivileged(me?.role);
   const [items, setItems] = useState<Program[]>([]);
-  const [city, setCity] = useState('');
-  const [major, setMajor] = useState('');
-  const [direction, setDirection] = useState<Direction | ''>('');
+  // Фильтры — в URL, чтобы при возврате назад они восстанавливались.
+  const [filters, setFilter] = useUrlFilter(PROGRAMS_FILTER_DEFAULTS);
+  const city = filters.city;
+  const major = filters.major;
+  const direction = filters.direction as Direction | '';
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Partial<Program> | null>(null);
   const [saving, setSaving] = useState(false);
@@ -193,9 +200,9 @@ export default function Programs() {
       </div>
       <div className="card-body">
         <div className="filters">
-          <input placeholder="Город" value={city} onChange={(e) => setCity(e.target.value)} />
-          <input placeholder="Специальность" value={major} onChange={(e) => setMajor(e.target.value)} />
-          <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
+          <input placeholder="Город" value={city} onChange={(e) => setFilter('city', e.target.value)} />
+          <input placeholder="Специальность" value={major} onChange={(e) => setFilter('major', e.target.value)} />
+          <select value={direction} onChange={(e) => setFilter('direction', e.target.value)}>
             <option value="">Все направления</option>
             <DirectionOptions />
           </select>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listApplications } from '../api/applications';
@@ -10,25 +10,40 @@ import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import DirectionOptions from '../components/DirectionOptions';
 import Pagination from '../components/Pagination';
-
-type Scope = 'all' | 'mine';
+import { useUrlFilter } from '../hooks/useUrlFilter';
 
 const PAGE_SIZE = 5;
 
 export default function Applications() {
   const navigate = useNavigate();
   const me = useAuth((s) => s.user);
+  const isAdmin = isPrivileged(me?.role);
+
+  // Все фильтры хранятся в URL — при возврате назад/обновлении страницы
+  // они автоматически восстанавливаются. Дефолт scope зависит от роли:
+  // привилегированные видят 'all', сотрудники — 'mine'.
+  const defaults = useMemo(
+    () => ({
+      search: '',
+      status: '',
+      direction: '',
+      manager: '',
+      scope: isAdmin ? 'all' : 'mine',
+      page: '1',
+    }),
+    [isAdmin],
+  );
+  const [filters, setFilter] = useUrlFilter(defaults);
+  const search = filters.search;
+  const status = filters.status as ApplicationStatus | '';
+  const direction = filters.direction as Direction | '';
+  const manager = filters.manager;
+  const scope = filters.scope as 'all' | 'mine';
+  const page = Math.max(1, parseInt(filters.page, 10) || 1);
+
   const [items, setItems] = useState<Application[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<ApplicationStatus | ''>('');
-  const [direction, setDirection] = useState<Direction | ''>('');
-  const [manager, setManager] = useState<string>('');
-  const isAdmin = isPrivileged(me?.role);
-  // Менеджер видит только свои заявки; админ может переключать.
-  const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
 
   const load = () => {
     setLoading(true);
@@ -44,7 +59,6 @@ export default function Applications() {
   };
 
   useEffect(() => {
-    setPage(1); // при смене любого фильтра — на первую страницу
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -54,8 +68,9 @@ export default function Applications() {
   // текущую страницу, чтобы не остаться на пустой.
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
-    if (page > totalPages) setPage(totalPages);
-  }, [items.length, page]);
+    if (page > totalPages) setFilter('page', String(totalPages));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
 
   const pagedItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -71,6 +86,12 @@ export default function Applications() {
     'application:deleted': () => load(),
   });
 
+  // При смене фильтра сбрасываем страницу на 1
+  const onFilterChange = (key: 'search' | 'status' | 'direction' | 'manager' | 'scope', value: string) => {
+    setFilter(key, value);
+    setFilter('page', '1');
+  };
+
   return (
     <motion.div
       className="card"
@@ -84,14 +105,14 @@ export default function Applications() {
           <div className="scope-switch">
             <button
               className={`scope-btn${scope === 'mine' ? ' active' : ''}`}
-              onClick={() => setScope('mine')}
+              onClick={() => onFilterChange('scope', 'mine')}
             >
               <Icon name="person" size={16} />
               Мои
             </button>
             <button
               className={`scope-btn${scope === 'all' ? ' active' : ''}`}
-              onClick={() => setScope('all')}
+              onClick={() => onFilterChange('scope', 'all')}
             >
               <Icon name="groups" size={16} />
               Все
@@ -101,8 +122,12 @@ export default function Applications() {
       </div>
       <div className="card-body">
         <div className="filters">
-          <input placeholder="Поиск по ФИО, телефону, email..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select value={status} onChange={(e) => setStatus(e.target.value as any)}>
+          <input
+            placeholder="Поиск по ФИО, телефону, email..."
+            value={search}
+            onChange={(e) => onFilterChange('search', e.target.value)}
+          />
+          <select value={status} onChange={(e) => onFilterChange('status', e.target.value)}>
             <option value="">Все статусы</option>
             <option value="NEW">Новая заявка</option>
             <option value="DOCS_REVIEW">Документы на проверке</option>
@@ -112,14 +137,14 @@ export default function Applications() {
             <option value="ENROLLED">Зачислен</option>
           </select>
           {isAdmin && (
-            <select value={manager} onChange={(e) => setManager(e.target.value)} title="Фильтр по менеджеру">
+            <select value={manager} onChange={(e) => onFilterChange('manager', e.target.value)} title="Фильтр по менеджеру">
               <option value="">Все менеджеры</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>{u.fullName}</option>
               ))}
             </select>
           )}
-          <select value={direction} onChange={(e) => setDirection(e.target.value as any)}>
+          <select value={direction} onChange={(e) => onFilterChange('direction', e.target.value)}>
             <option value="">Все направления</option>
             <DirectionOptions />
           </select>
@@ -201,7 +226,7 @@ export default function Applications() {
             page={page}
             total={items.length}
             pageSize={PAGE_SIZE}
-            onChange={setPage}
+            onChange={(p) => setFilter('page', String(p))}
           />
         )}
       </div>
