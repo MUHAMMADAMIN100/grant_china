@@ -33,7 +33,7 @@ export default function Applications() {
     }),
     [isAdmin],
   );
-  const [filters, setFilter] = useUrlFilter(defaults);
+  const [filters, setFilter, setFilters] = useUrlFilter(defaults);
   const search = filters.search;
   const status = filters.status as ApplicationStatus | '';
   const direction = filters.direction as Direction | '';
@@ -86,10 +86,10 @@ export default function Applications() {
     'application:deleted': () => load(),
   });
 
-  // При смене фильтра сбрасываем страницу на 1
+  // При смене фильтра сбрасываем страницу на 1 — атомарно через setFilters,
+  // иначе два setFilter подряд гонятся (второй перетирает первый).
   const onFilterChange = (key: 'search' | 'status' | 'direction' | 'manager' | 'scope', value: string) => {
-    setFilter(key, value);
-    setFilter('page', '1');
+    setFilters({ [key]: value, page: '1' });
   };
 
   return (

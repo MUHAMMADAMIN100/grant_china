@@ -36,7 +36,7 @@ export default function Students() {
     }),
     [isAdmin],
   );
-  const [filters, setFilter] = useUrlFilter(defaults);
+  const [filters, setFilter, setFilters] = useUrlFilter(defaults);
   const search = filters.search;
   const direction = filters.direction as Direction | '';
   const stageFilter = filters.stageFilter;
@@ -98,13 +98,13 @@ export default function Students() {
 
   const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // При смене любого фильтра сбрасываем страницу на 1
+  // При смене любого фильтра сбрасываем страницу на 1 — атомарно через
+  // setFilters, иначе два setFilter подряд гонятся (второй перетирает первый).
   const onFilterChange = (
     key: 'search' | 'direction' | 'stageFilter' | 'cabinet' | 'manager' | 'scope',
     value: string,
   ) => {
-    setFilter(key, value);
-    setFilter('page', '1');
+    setFilters({ [key]: value, page: '1' });
   };
 
   // Список пользователей для фильтра по менеджерам — только админу
