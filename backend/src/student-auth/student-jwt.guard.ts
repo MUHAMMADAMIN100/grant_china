@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -42,7 +43,8 @@ export class StudentJwtGuard implements CanActivate {
     const req = context.switchToHttp().getRequest();
     const token = this.extractToken(req);
     if (!token) {
-      throw new ForbiddenException('Требуется авторизация студента');
+      // 401 чтобы frontend interceptor редиректил на /login
+      throw new UnauthorizedException('Требуется авторизация студента');
     }
 
     const studentSecret = this.config.get<string>('STUDENT_JWT_SECRET');
@@ -65,11 +67,13 @@ export class StudentJwtGuard implements CanActivate {
       try {
         payload = await this.jwt.verifyAsync(token, { secret: legacySecret });
       } catch {
-        throw new ForbiddenException('Неверный или просроченный токен');
+        throw new UnauthorizedException('Неверный или просроченный токен');
       }
     }
 
     if (payload.role !== 'STUDENT') {
+      // 403 — токен валидный, но не та роль (например staff пытается зайти
+      // в студенческую зону)
       throw new ForbiddenException('Эта зона только для студентов');
     }
 

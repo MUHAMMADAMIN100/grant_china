@@ -18,10 +18,28 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+/**
+ * Считаем что юзер «не авторизован» если backend вернул:
+ *  - 401 (правильный код от наших новых guard'ов)
+ *  - 403 + сообщение содержащее "авторизац" (legacy форма от старых ошибок
+ *    типа "Требуется авторизация" — была до миграции на 401).
+ */
+function isAuthError(err: any): boolean {
+  const status = err?.response?.status;
+  if (status === 401) return true;
+  if (status === 403) {
+    const msg: string = String(err?.response?.data?.message || '').toLowerCase();
+    if (msg.includes('авторизац') || msg.includes('требуется') || msg.includes('просрочен')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err.response?.status === 401) {
+    if (isAuthError(err)) {
       // Учитываем basename CRM (/admin) — после basename идёт /login
       const loginPath = '/admin/login';
       if (!location.pathname.endsWith('/login')) {
