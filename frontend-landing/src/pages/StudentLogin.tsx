@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { studentLogin, getToken } from '../studentApi';
+import { studentLogin, isLoggedIn } from '../studentApi';
 import Icon from '../Icon';
 import PasswordInput from '../components/PasswordInput';
 import { compose, email as emailRule, hasErrors, passwordRule, required } from '../validators';
@@ -22,7 +22,14 @@ export default function StudentLogin() {
   const isInvalid = hasErrors(errors);
 
   useEffect(() => {
-    if (getToken()) navigate('/cabinet', { replace: true });
+    // Если cookie уже валидна — сразу в кабинет.
+    let cancelled = false;
+    isLoggedIn().then((ok) => {
+      if (ok && !cancelled) navigate('/cabinet', { replace: true });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [navigate]);
 
   const onSubmit = async (e: React.FormEvent) => {

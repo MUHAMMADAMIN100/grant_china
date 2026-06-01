@@ -4,14 +4,17 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { Direction } from '@prisma/client';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -24,6 +27,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { StudentForgotPasswordDto, StudentLoginDto } from './dto/student-login.dto';
+import { clearStudentCookie, setStudentCookie } from '../auth/cookie-helpers';
 
 const uploadStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -81,8 +85,24 @@ export class StudentAuthController {
   // Лимит: 10 попыток входа в минуту с одного IP — защита от брутфорса.
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
-  login(@Body() body: StudentLoginDto) {
-    return this.auth.login(body.email, body.password);
+  async login(
+    @Body() body: StudentLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.auth.login(body.email, body.password);
+    if (result?.token) {
+      setStudentCookie(res, result.token);
+    }
+    // Возвращаем `token` для legacy-клиентов; новые читают только cookie.
+    return result;
+  }
+
+  /** Логаут студента — очищает httpOnly cookie. */
+  @Post('logout')
+  @HttpCode(200)
+  logout(@Res({ passthrough: true }) res: Response) {
+    clearStudentCookie(res);
+    return { ok: true };
   }
 
   // Forgot password: студент вводит email — на него высылается новый

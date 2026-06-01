@@ -3,9 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   API_BASE,
-  clearToken,
-  getToken,
   studentDeleteDocument,
+  studentLogout,
   studentMe,
   studentUploadDocument,
   type StudentMe,
@@ -67,12 +66,9 @@ export default function StudentCabinet() {
   };
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      navigate('/login', { replace: true });
-      return;
-    }
-    if (!getSocket()) connectStudentRealtime(token);
+    // Проверка авторизации теперь через GET /me (cookie); первый load()
+    // словит 401 если cookie мёртвая — там и редирект на /login.
+    if (!getSocket()) connectStudentRealtime();
     load(true); // первый заход — показать спиннер
   }, []);
 
@@ -89,15 +85,16 @@ export default function StudentCabinet() {
       const data = await studentMe();
       setMe(data);
     } catch {
-      clearToken();
+      // Cookie мёртвая / 401 — logout очистит её и редиректнем
+      await studentLogout();
       navigate('/login', { replace: true });
     } finally {
       if (showSpinner) setLoading(false);
     }
   };
 
-  const logout = () => {
-    clearToken();
+  const logout = async () => {
+    await studentLogout();
     navigate('/login');
   };
 

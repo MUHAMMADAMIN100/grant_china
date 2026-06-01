@@ -1,42 +1,48 @@
 import { create } from 'zustand';
 import type { User } from '../api/types';
-import { login as apiLogin, me as apiMe } from '../api/auth';
+import { login as apiLogin, logout as apiLogout, me as apiMe } from '../api/auth';
 import { connectRealtime, disconnectRealtime } from '../realtime';
 
 interface AuthState {
   user: User | null;
   initialized: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   init: () => Promise<void>;
 }
 
+/**
+ * Аутентификация теперь через httpOnly cookies — токен НЕ хранится в
+ * localStorage и НЕ доступен JavaScript'у. XSS-эксплойт его не угонит.
+ *
+ * - login:  backend выставляет cookie, мы только сохраняем user в стейте
+ * - logout: backend очищает cookie, мы сбрасываем стейт
+ * - init:   просто пробуем GET /auth/me; если cookie живая — 200 + user;
+ *           если нет — 401 → не залогинены.
+ */
 export const useAuth = create<AuthState>((set) => ({
   user: null,
   initialized: false,
 
   async login(email, password) {
-    const { token, user } = await apiLogin(email, password);
-    localStorage.setItem('grantchina_token', token);
-    connectRealtime(token);
+    const { user } = await apiLogin(email, password);
+    // Realtime подхватит cookie через withCredentials на самом socket-клиенте
+    connectRealtime();
     set({ user });
   },
 
-  logout() {
-    localStorage.removeItem('grantchina_token');
+  async logout() {
+    await apiLogout();
     disconnectRealtime();
     set({ user: null });
   },
 
   async init() {
-    const token = localStorage.getItem('grantchina_token');
-    if (!token) { set({ initialized: true }); return; }
     try {
       const user = await apiMe();
-      connectRealtime(token);
+      connectRealtime();
       set({ user, initialized: true });
     } catch {
-      localStorage.removeItem('grantchina_token');
       set({ user: null, initialized: true });
     }
   },

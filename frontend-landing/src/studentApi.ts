@@ -4,24 +4,39 @@ import { connectStudentRealtime, disconnectStudentRealtime } from './realtime';
 const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
 export const API_BASE = API_URL.replace(/\/api$/, '');
 
-const TOKEN_KEY = 'grantchina_student_token';
+/**
+ * Аутентификация студента — теперь через httpOnly cookie `gc_student_token`,
+ * выдаваемую backend'ом при POST /student-auth/login. Токен НЕ в localStorage —
+ * XSS-эксплойт не угоняет сессию.
+ *
+ * Старый ключ `grantchina_student_token` чистим при инициализации модуля,
+ * чтобы оставшийся в браузере legacy-токен не путал realtime/UI.
+ */
+const LEGACY_TOKEN_KEY = 'grantchina_student_token';
+try {
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
+} catch {
+  /* SSR / non-browser env */
+}
 
-export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (t: string) => {
-  localStorage.setItem(TOKEN_KEY, t);
-  connectStudentRealtime(t);
-};
-export const clearToken = () => {
-  localStorage.removeItem(TOKEN_KEY);
-  disconnectStudentRealtime();
-};
-
-const client = axios.create({ baseURL: API_URL });
-client.interceptors.request.use((cfg) => {
-  const token = getToken();
-  if (token) cfg.headers.Authorization = `Bearer ${token}`;
-  return cfg;
+const client = axios.create({
+  baseURL: API_URL,
+  withCredentials: true, // браузер автоматически шлёт httpOnly cookie
 });
+
+/**
+ * Проверка «залогинены ли мы». Раньше делалось `!!localStorage.getItem(...)`,
+ * теперь — асинхронный пинг GET /student-auth/me. Лёгкий запрос; статус 200
+ * = есть валидная cookie, 401/403 = нет. Используется на старте кабинета.
+ */
+export async function isLoggedIn(): Promise<boolean> {
+  try {
+    await client.get('/student-auth/me');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type StudentDoc = {
   id: string;
@@ -52,12 +67,19 @@ export type StudentMe = {
 };
 
 export async function studentLogin(email: string, password: string) {
-  const { data } = await client.post<{ token: string; student: { id: string; email: string; fullName: string } }>(
+  const { data } = await client.post<{ student: { id: string; email: string; fullName: string } }>(
     '/student-auth/login',
     { email, password },
   );
-  setToken(data.token);
+  // Cookie уже установлена backend'ом — открываем socket-соединение,
+  // оно тоже использует withCredentials.
+  connectStudentRealtime();
   return data;
+}
+
+export async function studentLogout() {
+  await client.post('/student-auth/logout').catch(() => {});
+  disconnectStudentRealtime();
 }
 
 export async function studentMe() {

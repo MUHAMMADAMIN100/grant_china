@@ -8,8 +8,23 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { AUTH_COOKIE_NAME, STUDENT_COOKIE_NAME } from '../auth/cookie-helpers';
 
 type JwtPayload = { sub: string; email: string; role: 'FOUNDER' | 'ADMIN' | 'EMPLOYEE' | 'STUDENT' };
+
+/** Парсит cookie-заголовок в объект { name: value }. */
+function parseCookieHeader(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(/;\s*/)) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    const k = part.slice(0, idx).trim();
+    const v = decodeURIComponent(part.slice(idx + 1).trim());
+    if (k) out[k] = v;
+  }
+  return out;
+}
 
 @Injectable()
 @WebSocketGateway({
@@ -27,7 +42,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(private jwt: JwtService, private config: ConfigService) {}
 
   async handleConnection(client: Socket) {
+    // Извлекаем токен в порядке приоритета:
+    // 1. httpOnly cookie (`gc_token` для сотрудников, `gc_student_token` для студентов)
+    // 2. handshake.auth.token (legacy, передаваемый через socket.io-client)
+    // 3. query string
+    // 4. Authorization header
+    const cookies = parseCookieHeader(
+      (client.handshake.headers.cookie as string | undefined) || '',
+    );
+    const cookieToken = cookies[AUTH_COOKIE_NAME] || cookies[STUDENT_COOKIE_NAME];
     const token =
+      cookieToken ||
       (client.handshake.auth as any)?.token ||
       (client.handshake.query as any)?.token ||
       (client.handshake.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -39,8 +64,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     try {
-      const staffSecret =
-        this.config.get<string>('JWT_SECRET') || 'fallback-secret';
+      const staffSecret = this.config.get<string>('JWT_SECRET');
+      if (!staffSecret) {
+        this.logger.error('JWT_SECRET not configured — refusing socket connection');
+        client.disconnect();
+        return;
+      }
       const studentSecret = this.config.get<string>('STUDENT_JWT_SECRET');
 
       // Сначала пробуем как staff-токен (JWT_SECRET).

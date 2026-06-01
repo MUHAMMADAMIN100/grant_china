@@ -13,11 +13,16 @@ const setState = (s: ConnState) => {
   stateListeners.forEach((cb) => cb(s));
 };
 
-export function connectRealtime(token: string) {
+/**
+ * Подключение к Socket.io. Авторизация через httpOnly cookie
+ * `gc_token` — браузер пошлёт её автоматически благодаря
+ * `withCredentials: true`. Токен фронту не доступен.
+ */
+export function connectRealtime() {
   try {
     if (socket) socket.disconnect();
     socket = io(SOCKET_URL, {
-      auth: { token },
+      withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,

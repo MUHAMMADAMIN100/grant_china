@@ -1,17 +1,41 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
+import { clearAuthCookie, setAuthCookie } from './cookie-helpers';
 
 @Controller('auth')
 export class AuthController {
   constructor(private auth: AuthService) {}
 
+  /**
+   * Вход сотрудника. После успешного логина token уходит ТОЛЬКО в httpOnly
+   * cookie `gc_token` — JavaScript на фронте его не видит, XSS не угоняет.
+   * Поле `token` в ответе оставлено для legacy-клиентов (Socket.io старых
+   * сборок CRM). Новые сборки игнорируют это поле и опираются на cookie.
+   */
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto.email, dto.password);
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.auth.login(dto.email, dto.password);
+    setAuthCookie(res, result.token);
+    return { user: result.user };
+  }
+
+  /**
+   * Логаут. Очищает httpOnly cookie на стороне браузера. Сам JWT остаётся
+   * валидным до своего expiry (stateless), но клиент его больше не пошлёт.
+   */
+  @Post('logout')
+  @HttpCode(200)
+  logout(@Res({ passthrough: true }) res: Response) {
+    clearAuthCookie(res);
+    return { ok: true };
   }
 
   @UseGuards(JwtAuthGuard)

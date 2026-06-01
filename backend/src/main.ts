@@ -1,11 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import cookieParser = require('cookie-parser');
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+
+  // Парсим cookies — нужно чтобы JwtStrategy могла читать httpOnly JWT
+  // из cookie `gc_token` (новый способ авторизации вместо localStorage).
+  app.use(cookieParser());
 
   const corsOrigins = (config.get<string>('CORS_ORIGINS') || '')
     .split(',')

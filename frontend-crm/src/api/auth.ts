@@ -1,9 +1,18 @@
 import { api } from './client';
 import type { User } from './types';
 
+/**
+ * Логин. Backend выставит httpOnly cookie `gc_token` — фронт его не видит.
+ * Поле `token` в ответе осталось для backward-compat, но не используется.
+ */
 export async function login(email: string, password: string) {
-  const { data } = await api.post<{ token: string; user: User }>('/auth/login', { email, password });
+  const { data } = await api.post<{ user: User }>('/auth/login', { email, password });
   return data;
+}
+
+/** Логаут — backend очищает httpOnly cookie. */
+export async function logout() {
+  await api.post('/auth/logout').catch(() => {});
 }
 
 export async function me() {
