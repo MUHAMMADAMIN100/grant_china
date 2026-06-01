@@ -11,11 +11,15 @@ function generatePassword(length = 8): string {
   return out;
 }
 
+// Soft-delete: при include'ах не подтягиваем удалённые документы/заявки.
 const STUDENT_INCLUDE = {
-  documents: true,
+  documents: { where: { deletedAt: null } },
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
-  applications: { select: { id: true, status: true, createdAt: true } },
+  applications: {
+    where: { deletedAt: null },
+    select: { id: true, status: true, createdAt: true },
+  },
 } as const;
 
 @Injectable()
@@ -34,7 +38,8 @@ export class StudentAuthService {
   async forgotPassword(emailRaw: string) {
     if (!emailRaw) throw new BadRequestException('Укажите email');
     const email = emailRaw.trim().toLowerCase();
-    const student = await this.prisma.student.findFirst({ where: { email } });
+    // Soft-delete: удалённого студента не реактивируем через forgot-password.
+    const student = await this.prisma.student.findFirst({ where: { email, deletedAt: null } });
     if (!student) {
       // Молчим (anti-enumeration). Возвращаем тот же ответ.
       return { ok: true };
@@ -70,7 +75,10 @@ export class StudentAuthService {
       throw new BadRequestException('Укажите email и пароль');
     }
     const normalized = email.trim().toLowerCase();
-    const student = await this.prisma.student.findFirst({ where: { email: normalized } });
+    // Soft-delete: удалённый студент не может войти.
+    const student = await this.prisma.student.findFirst({
+      where: { email: normalized, deletedAt: null },
+    });
     if (!student || !student.password) {
       throw new UnauthorizedException('Неверный email или пароль');
     }
@@ -95,8 +103,10 @@ export class StudentAuthService {
   }
 
   async me(studentId: string) {
-    const student = await this.prisma.student.findUnique({
-      where: { id: studentId },
+    // Soft-delete: удалённый студент получает 401 при попытке зайти
+    // в кабинет (даже с валидным JWT).
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, deletedAt: null },
       include: STUDENT_INCLUDE,
     });
     if (!student) throw new UnauthorizedException('Студент не найден');

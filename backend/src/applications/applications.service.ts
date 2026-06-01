@@ -172,7 +172,8 @@ export class ApplicationsService {
     currentUserId?: string;
     currentUserRole?: Role;
   }) {
-    const where: Prisma.ApplicationWhereInput = {};
+    // Soft-delete: всегда исключаем удалённые заявки
+    const where: Prisma.ApplicationWhereInput = { deletedAt: null };
     const and: Prisma.ApplicationWhereInput[] = [];
     if (filters.status) where.status = filters.status;
     if (filters.direction) where.direction = filters.direction;
@@ -216,8 +217,9 @@ export class ApplicationsService {
   }
 
   async findOne(id: string) {
-    const app = await this.prisma.application.findUnique({
-      where: { id },
+    // Soft-delete: удалённая заявка скрыта от API (404).
+    const app = await this.prisma.application.findFirst({
+      where: { id, deletedAt: null },
       include: MANAGER_INCLUDE,
     });
     if (!app) throw new NotFoundException('Заявка не найдена');
@@ -350,14 +352,14 @@ export class ApplicationsService {
     const data: any = {};
     if (patch.managerId !== undefined) {
       if (patch.managerId) {
-        const exists = await this.prisma.user.findUnique({ where: { id: patch.managerId } });
+        const exists = await this.prisma.user.findFirst({ where: { id: patch.managerId, deletedAt: null } });
         if (!exists) throw new NotFoundException('Локальный менеджер не найден');
       }
       data.managerId = patch.managerId;
     }
     if (patch.chinaManagerId !== undefined) {
       if (patch.chinaManagerId) {
-        const exists = await this.prisma.user.findUnique({ where: { id: patch.chinaManagerId } });
+        const exists = await this.prisma.user.findFirst({ where: { id: patch.chinaManagerId, deletedAt: null } });
         if (!exists) throw new NotFoundException('Китайский менеджер не найден');
       }
       data.chinaManagerId = patch.chinaManagerId;
@@ -431,24 +433,35 @@ export class ApplicationsService {
     return REQUIRED_DOCUMENT_TYPES.filter((t) => !uploaded.has(t.type)).map((t) => t.label);
   }
 
+  /**
+   * Soft delete: помечаем deletedAt. Если у заявки есть студент — его
+   * тоже soft-delete'им. Данные остаются в БД и могут быть восстановлены.
+   */
   async remove(id: string, user: CurrentUser) {
     const app = await this.findOne(id);
     this.ensureCanEdit(app, user);
+    const now = new Date();
     if (app.studentId) {
-      await this.prisma.student.delete({ where: { id: app.studentId } }).catch(() => undefined);
+      await this.prisma.student
+        .update({ where: { id: app.studentId }, data: { deletedAt: now } })
+        .catch(() => undefined);
     }
-    await this.prisma.application.delete({ where: { id } }).catch(() => undefined);
+    await this.prisma.application
+      .update({ where: { id }, data: { deletedAt: now } })
+      .catch(() => undefined);
     this.realtime.emitStaff('application:deleted', { id });
     return { ok: true };
   }
 
   async stats(user?: { id: string; role: Role }) {
-    // EMPLOYEE видит только свои заявки (где он либо локальный, либо китайский менеджер).
-    // ADMIN — все заявки.
-    const where: Prisma.ApplicationWhereInput | undefined =
+    // Soft-delete: считаем только активные заявки. EMPLOYEE видит только свои.
+    const where: Prisma.ApplicationWhereInput =
       user && user.role === 'EMPLOYEE'
-        ? { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] }
-        : undefined;
+        ? {
+            deletedAt: null,
+            OR: [{ managerId: user.id }, { chinaManagerId: user.id }],
+          }
+        : { deletedAt: null };
     const [total, byStatus, byDirection] = await Promise.all([
       this.prisma.application.count({ where }),
       this.prisma.application.groupBy({ by: ['status'], _count: true, where }),

@@ -36,7 +36,8 @@ export class ProgramsService {
     search?: string;
     publishedOnly?: boolean;
   }) {
-    const where: Prisma.ProgramWhereInput = {};
+    // Soft-delete: всегда исключаем удалённые программы
+    const where: Prisma.ProgramWhereInput = { deletedAt: null };
     if (filters.city) where.city = { contains: filters.city, mode: 'insensitive' };
     if (filters.major) where.major = { contains: filters.major, mode: 'insensitive' };
     if (filters.direction) where.direction = filters.direction;
@@ -61,7 +62,8 @@ export class ProgramsService {
   }
 
   async findOne(id: string) {
-    const p = await this.prisma.program.findUnique({ where: { id } });
+    // Soft-delete: удалённая программа скрыта от API.
+    const p = await this.prisma.program.findFirst({ where: { id, deletedAt: null } });
     if (!p) throw new NotFoundException('Программа не найдена');
     return p;
   }
@@ -129,7 +131,11 @@ export class ProgramsService {
       await this.notifyChannelDelete(existing).catch(() => undefined);
     }
 
-    await this.prisma.program.delete({ where: { id } });
+    // Soft delete: помечаем deletedAt, физически программу не удаляем.
+    await this.prisma.program.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
 
     this.realtime.emitStaff('program:deleted', { id });
     this.realtime.emitAllStudents('program:deleted', { id });
@@ -140,13 +146,13 @@ export class ProgramsService {
   async filters() {
     const [cities, majors] = await Promise.all([
       this.prisma.program.findMany({
-        where: { published: true },
+        where: { published: true, deletedAt: null },
         select: { city: true },
         distinct: ['city'],
         orderBy: { city: 'asc' },
       }),
       this.prisma.program.findMany({
-        where: { published: true },
+        where: { published: true, deletedAt: null },
         select: { major: true },
         distinct: ['major'],
         orderBy: { major: 'asc' },

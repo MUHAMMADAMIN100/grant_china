@@ -17,7 +17,13 @@ export class AuthService {
     const normEmail = (email || '').trim().toLowerCase();
     const normPassword = (password || '').trim();
 
-    const user = await this.prisma.user.findUnique({ where: { email: normEmail } });
+    // Soft-delete: ищем только активного. Удалённый юзер (deletedAt != null)
+    // не должен иметь возможности войти, даже если злоумышленник как-то знает
+    // его старый пароль. Также его email имеет tombstone-суффикс — обычная
+    // выборка по чистому email его не найдёт, но фильтр оставляем явно.
+    const user = await this.prisma.user.findFirst({
+      where: { email: normEmail, deletedAt: null },
+    });
     if (!user) throw new UnauthorizedException('Неверный логин или пароль');
 
     const ok = await bcrypt.compare(normPassword, user.password);

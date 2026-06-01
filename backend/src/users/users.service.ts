@@ -9,6 +9,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { notDeleted, tombstoneEmail } from '../common/soft-delete';
 
 @Injectable()
 export class UsersService {
@@ -18,14 +19,13 @@ export class UsersService {
 
   async findAll(filters: { search?: string } = {}) {
     const search = (filters.search || '').trim();
-    const where = search
-      ? {
-          OR: [
-            { email: { contains: search, mode: 'insensitive' as const } },
-            { fullName: { contains: search, mode: 'insensitive' as const } },
-          ],
-        }
-      : {};
+    const where: any = { ...notDeleted };
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' as const } },
+        { fullName: { contains: search, mode: 'insensitive' as const } },
+      ];
+    }
     const users = await this.prisma.user.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -35,8 +35,8 @@ export class UsersService {
   }
 
   async findOne(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
+    const user = await this.prisma.user.findFirst({
+      where: { id, ...notDeleted },
       select: { id: true, email: true, fullName: true, role: true, createdAt: true },
     });
     if (!user) throw new NotFoundException('Пользователь не найден');
@@ -45,22 +45,24 @@ export class UsersService {
 
   /** Без выкидывания исключения — для проверок в контроллере. */
   async findOneRaw(id: string) {
-    return this.prisma.user.findUnique({
-      where: { id },
+    return this.prisma.user.findFirst({
+      where: { id, ...notDeleted },
       select: { id: true, role: true },
     });
   }
 
   /** Количество пользователей с указанной ролью (для защиты "последнего FOUNDER"). */
   async countByRole(role: 'FOUNDER' | 'ADMIN' | 'EMPLOYEE') {
-    return this.prisma.user.count({ where: { role } });
+    return this.prisma.user.count({ where: { role, ...notDeleted } });
   }
 
   async create(dto: CreateUserDto) {
     const email = (dto.email || '').trim().toLowerCase();
     const rawPassword = (dto.password || '').trim();
 
-    const exists = await this.prisma.user.findUnique({ where: { email } });
+    // Проверяем уникальность среди НЕ-удалённых. Удалённые с этим email
+    // имеют tombstone-email вида `<email>.deleted.<ts>`, так что не блокируют.
+    const exists = await this.prisma.user.findFirst({ where: { email, ...notDeleted } });
     if (exists) throw new ConflictException('Email уже занят');
 
     const password = await bcrypt.hash(rawPassword, 10);
@@ -127,9 +129,22 @@ export class UsersService {
     return safe;
   }
 
+  /**
+   * Soft delete: помечаем deletedAt = now() и переименовываем email через
+   * tombstone, чтобы освободить адрес для возможного нового сотрудника.
+   * Физически из БД ничего НЕ удаляется — данные можно восстановить (FOUNDER
+   * выставит deletedAt = null и вернёт оригинальный email).
+   */
   async remove(id: string) {
-    await this.findOne(id);
-    await this.prisma.user.delete({ where: { id } });
+    const existing = await this.findOne(id);
+    await this.prisma.user.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        email: tombstoneEmail(existing.email),
+      },
+    });
+    this.logger.log(`User ${id} (${existing.email}) soft-deleted`);
     return { ok: true };
   }
 }

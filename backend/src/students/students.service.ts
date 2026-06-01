@@ -24,12 +24,16 @@ const CABINET_BY_DIRECTION: Record<Direction, number> = {
   COLLEGE: 6,
 };
 
+// Soft-delete: при include'ах не подтягиваем удалённые документы/заявки.
 const STUDENT_INCLUDE = {
-  documents: true,
+  documents: { where: { deletedAt: null } },
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
   program: true,
-  applications: { orderBy: { createdAt: 'desc' as const } },
+  applications: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: 'desc' as const },
+  },
 } as const;
 
 type CurrentUser = { id: string; role: Role };
@@ -61,11 +65,11 @@ export class StudentsService {
     const emailNormalized = dto.email.trim().toLowerCase();
 
     // Проверяем уникальность email среди студентов и пользователей
-    const dupStudent = await this.prisma.student.findFirst({ where: { email: emailNormalized } });
+    const dupStudent = await this.prisma.student.findFirst({ where: { email: emailNormalized, deletedAt: null } });
     if (dupStudent) {
       throw new BadRequestException('Студент с таким email уже существует');
     }
-    const dupUser = await this.prisma.user.findUnique({ where: { email: emailNormalized } });
+    const dupUser = await this.prisma.user.findFirst({ where: { email: emailNormalized, deletedAt: null } });
     if (dupUser) {
       throw new BadRequestException('Этот email уже занят сотрудником');
     }
@@ -126,7 +130,7 @@ export class StudentsService {
     const student = await this.findOne(id);
     this.ensureCanEdit(student, user);
     const existing = await this.prisma.application.findFirst({
-      where: { studentId: id },
+      where: { studentId: id, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
     if (existing) {
@@ -172,7 +176,8 @@ export class StudentsService {
     currentUserId?: string;
     currentUserRole?: Role;
   }) {
-    const where: Prisma.StudentWhereInput = {};
+    // Soft-delete: всегда исключаем удалённых студентов
+    const where: Prisma.StudentWhereInput = { deletedAt: null };
     if (filters.direction) where.direction = filters.direction;
     if (filters.status) where.status = filters.status;
     if (filters.cabinet) where.cabinet = filters.cabinet;
@@ -216,9 +221,11 @@ export class StudentsService {
   }
 
   async findOne(id: string) {
-    const student = await this.prisma.student.findUnique({
-      where: { id },
-      include: { ...STUDENT_INCLUDE, applications: true },
+    // Soft-delete: удалённого не возвращаем (атакующий не получит
+    // данные через GET /students/:id, даже если знает id).
+    const student = await this.prisma.student.findFirst({
+      where: { id, deletedAt: null },
+      include: STUDENT_INCLUDE,
     });
     if (!student) throw new NotFoundException('Студент не найден');
     return student;
@@ -327,14 +334,14 @@ export class StudentsService {
     const data: any = {};
     if (patch.managerId !== undefined) {
       if (patch.managerId) {
-        const exists = await this.prisma.user.findUnique({ where: { id: patch.managerId } });
+        const exists = await this.prisma.user.findFirst({ where: { id: patch.managerId, deletedAt: null } });
         if (!exists) throw new NotFoundException('Локальный менеджер не найден');
       }
       data.managerId = patch.managerId;
     }
     if (patch.chinaManagerId !== undefined) {
       if (patch.chinaManagerId) {
-        const exists = await this.prisma.user.findUnique({ where: { id: patch.chinaManagerId } });
+        const exists = await this.prisma.user.findFirst({ where: { id: patch.chinaManagerId, deletedAt: null } });
         if (!exists) throw new NotFoundException('Китайский менеджер не найден');
       }
       data.chinaManagerId = patch.chinaManagerId;
@@ -354,10 +361,17 @@ export class StudentsService {
     return updated;
   }
 
+  /**
+   * Soft delete: помечаем deletedAt = now(). Физически студент остаётся
+   * в БД со всеми документами и заявками — данные восстанавливаемы.
+   */
   async remove(id: string, user: CurrentUser) {
     const existing = await this.findOne(id);
     this.ensureCanEdit(existing, user);
-    await this.prisma.student.delete({ where: { id } });
+    await this.prisma.student.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
     return { ok: true };
   }
 
@@ -389,13 +403,18 @@ export class StudentsService {
   }
 
   async removeDocument(documentId: string, user: CurrentUser) {
-    const doc = await this.prisma.document.findUnique({
-      where: { id: documentId },
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, deletedAt: null },
       include: { student: { select: { managerId: true } } },
     });
     if (!doc) throw new NotFoundException('Документ не найден');
     if (doc.student) this.ensureCanEdit(doc.student, user);
-    await this.prisma.document.delete({ where: { id: documentId } });
+    // Soft delete: помечаем deletedAt. Файл на диске остаётся, но в UI и
+    // в архивах студентов больше не отображается. Восстановление = снять метку.
+    await this.prisma.document.update({
+      where: { id: documentId },
+      data: { deletedAt: new Date() },
+    });
     const studentId = (doc as any).studentId;
     if (studentId) {
       this.realtime.emitStudentAndStaff(studentId, 'document:deleted', { studentId, docId: documentId });
@@ -405,11 +424,14 @@ export class StudentsService {
   }
 
   async stats(user?: { id: string; role: Role }) {
-    // EMPLOYEE видит только своих студентов (где он либо локальный, либо китайский менеджер).
-    const where: Prisma.StudentWhereInput | undefined =
+    // Soft-delete: считаем только активных. EMPLOYEE видит только своих.
+    const where: Prisma.StudentWhereInput =
       user && user.role === 'EMPLOYEE'
-        ? { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] }
-        : undefined;
+        ? {
+            deletedAt: null,
+            OR: [{ managerId: user.id }, { chinaManagerId: user.id }],
+          }
+        : { deletedAt: null };
     const [total, byCabinet, byDirection] = await Promise.all([
       this.prisma.student.count({ where }),
       this.prisma.student.groupBy({

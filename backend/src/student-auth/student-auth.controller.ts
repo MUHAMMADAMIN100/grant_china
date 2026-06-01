@@ -161,7 +161,12 @@ export class StudentAuthController {
     const url = `/uploads/${file.filename}`;
     const docType = type || 'OTHER';
     if (docType !== 'OTHER') {
-      await this.prisma.document.deleteMany({ where: { studentId: user.id, type: docType } });
+      // Soft-delete старые документы того же типа — заменяются на новый.
+      // updateMany вместо deleteMany: данные физически остаются в БД.
+      await this.prisma.document.updateMany({
+        where: { studentId: user.id, type: docType, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
     }
     const doc = await this.prisma.document.create({
       data: {
@@ -190,7 +195,7 @@ export class StudentAuthController {
     @Query('maxCost') maxCost?: string,
     @Query('search') search?: string,
   ) {
-    const where: any = { published: true };
+    const where: any = { published: true, deletedAt: null };
     if (city) where.city = { contains: city, mode: 'insensitive' };
     if (major) where.major = { contains: major, mode: 'insensitive' };
     if (direction) where.direction = direction;
@@ -218,13 +223,13 @@ export class StudentAuthController {
   async programFilters() {
     const [cities, majors] = await Promise.all([
       this.prisma.program.findMany({
-        where: { published: true },
+        where: { published: true, deletedAt: null },
         select: { city: true },
         distinct: ['city'],
         orderBy: { city: 'asc' },
       }),
       this.prisma.program.findMany({
-        where: { published: true },
+        where: { published: true, deletedAt: null },
         select: { major: true },
         distinct: ['major'],
         orderBy: { major: 'asc' },
@@ -239,11 +244,17 @@ export class StudentAuthController {
   @UseGuards(StudentJwtGuard)
   @Delete('documents/:docId')
   async removeDocument(@CurrentUser() user: any, @Param('docId') docId: string) {
-    const doc = await this.prisma.document.findUnique({ where: { id: docId } });
+    // Soft-delete: ищем только активный, помечаем deletedAt.
+    const doc = await this.prisma.document.findFirst({
+      where: { id: docId, deletedAt: null },
+    });
     if (!doc || doc.studentId !== user.id) {
       throw new BadRequestException('Документ не найден');
     }
-    await this.prisma.document.delete({ where: { id: docId } });
+    await this.prisma.document.update({
+      where: { id: docId },
+      data: { deletedAt: new Date() },
+    });
     this.realtime.emitStudentAndStaff(user.id, 'document:deleted', { studentId: user.id, docId });
     this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
     return { ok: true };

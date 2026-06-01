@@ -46,14 +46,21 @@ enum TaskStatus {
   DONE
 }
 
+// Soft delete: вместо физического удаления через `prisma.X.delete()`
+// сервисы выставляют `deletedAt = now()`. Все списки/findUnique фильтруют
+// `where: { deletedAt: null }`. Даже если атакующий вызовет DELETE-эндпоинт
+// или прямой SQL, данные останутся в БД и могут быть восстановлены FOUNDER'ом
+// через установку deletedAt обратно в null. Бэкапы (Daily/Weekly/Monthly на
+// Railway) — вторая линия обороны.
 model User {
-  id         String   @id @default(uuid())
-  email      String   @unique
+  id         String    @id @default(uuid())
+  email      String    @unique
   password   String
   fullName   String
-  role       Role     @default(EMPLOYEE)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  role       Role      @default(EMPLOYEE)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
 
   notifications      Notification[]
   managedApplications      Application[] @relation("ApplicationManager")
@@ -62,6 +69,8 @@ model User {
   managedChinaStudents     Student[]     @relation("StudentChinaManager")
   assignedTasks            Task[]        @relation("TaskAssignee")
   createdTasks             Task[]        @relation("TaskCreator")
+
+  @@index([deletedAt])
 }
 
 // Заявка на обучение: создаётся через лендинг (POST /applications/public),
@@ -93,12 +102,14 @@ model Application {
   program         Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
+  deletedAt  DateTime?
 
   @@index([status])
   @@index([direction])
   @@index([managerId])
   @@index([chinaManagerId])
   @@index([programId])
+  @@index([deletedAt])
 }
 
 model Student {
@@ -121,6 +132,7 @@ model Student {
   program           Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
 
   documents    Document[]
   applications Application[]
@@ -131,24 +143,27 @@ model Student {
   @@index([managerId])
   @@index([chinaManagerId])
   @@index([programId])
+  @@index([deletedAt])
 }
 
 // Документ студента (10 типов + OTHER).
 // При удалении студента документы каскадно удаляются (Cascade) — это сейчас
 // единственная Cascade-связь в схеме. Заявки и менеджеры используют SetNull.
 model Document {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   studentId  String
-  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student    Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   filename   String
   originalName String
   mimeType   String
   size       Int
   url        String
-  type       String   @default("OTHER")
-  createdAt  DateTime @default(now())
+  type       String    @default("OTHER")
+  createdAt  DateTime  @default(now())
+  deletedAt  DateTime?
 
   @@index([studentId, type])
+  @@index([deletedAt])
 }
 
 model Task {
@@ -185,6 +200,7 @@ model Program {
   telegramHasPhoto   Boolean   @default(false)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
 
   applications Application[]
   students     Student[]
@@ -193,6 +209,7 @@ model Program {
   @@index([major])
   @@index([direction])
   @@index([published])
+  @@index([deletedAt])
 }
 
 model Notification {
