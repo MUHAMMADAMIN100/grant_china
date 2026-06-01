@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import cookieParser = require('cookie-parser');
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 
@@ -12,13 +13,44 @@ async function bootstrap() {
   // из cookie `gc_token` (новый способ авторизации вместо localStorage).
   app.use(cookieParser());
 
+  // === HTTP security headers (Helmet) ===
+  // - HSTS: форсируем HTTPS на 6 месяцев + preload
+  // - X-Content-Type-Options: nosniff
+  // - X-Frame-Options: SAMEORIGIN (защита от clickjacking)
+  // - Referrer-Policy: no-referrer
+  // - X-DNS-Prefetch-Control, X-Download-Options, X-Permitted-Cross-Domain-Policies
+  // - Cross-Origin-Resource-Policy: same-origin (но для /uploads/ ниже мягче)
+  //
+  // CSP мы отключаем глобально: backend отдаёт API (JSON) + статику /uploads
+  // (юзер-загруженные файлы). CSP — забота фронтенда (Vercel). Если включить
+  // здесь, поломает PWA лендинга и embed-картинки CRM.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' }, // /uploads нужен фронту
+      crossOriginEmbedderPolicy: false,
+      hsts: {
+        maxAge: 60 * 60 * 24 * 180, // 180 дней
+        includeSubDomains: true,
+        preload: true,
+      },
+      referrerPolicy: { policy: 'no-referrer' },
+      frameguard: { action: 'sameorigin' },
+    }),
+  );
+
+  // === CORS ===
+  // Строже чем раньше:
+  //  - Если CORS_ORIGINS не задан — НЕ разрешаем всё (раньше было `return true`).
+  //    Теперь оставляем только хардкод-список основных доменов проекта.
+  //  - Для запросов БЕЗ Origin (curl, server-to-server) — пропускаем (это не
+  //    браузер, CSRF/cookie-attack не применим).
+  //  - Wildcard `*.vercel.app` оставлен (нужен для preview-деплоев Vercel).
   const corsOrigins = (config.get<string>('CORS_ORIGINS') || '')
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
 
-  // Всегда разрешаем основные домены проекта (даже если их забыли в env).
-  // Wildcard *.grantchina.tj и *.vercel.app поддерживаются ниже.
   const ALWAYS_ALLOWED_HOSTS = [
     'grantchina.tj',
     'www.grantchina.tj',
@@ -29,22 +61,19 @@ async function bootstrap() {
   ];
 
   const checkOrigin = (origin: string | undefined, cb: (err: any, ok?: boolean) => void) => {
-    if (!origin) return cb(null, true); // запросы без Origin (curl, server-to-server)
+    if (!origin) return cb(null, true); // server-to-server / curl
     try {
       const url = new URL(origin);
       const host = url.host;
-      // Точные совпадения из env
       if (corsOrigins.some((o) => o === origin || o === `${url.protocol}//${host}` || o === host)) {
         return cb(null, true);
       }
-      // Хардкод: основные домены проекта
       if (ALWAYS_ALLOWED_HOSTS.includes(host)) return cb(null, true);
-      // Wildcard *.grantchina.tj и *.vercel.app
       if (host.endsWith('.grantchina.tj') || host.endsWith('.vercel.app')) {
         return cb(null, true);
       }
-      // Если CORS_ORIGINS не задан — разрешаем всё (как раньше)
-      if (corsOrigins.length === 0) return cb(null, true);
+      // Чужой Origin — блокируем безусловно. Никакого «если env пуст —
+      // разрешаем всё», это была дыра.
       return cb(new Error(`CORS blocked for origin: ${origin}`), false);
     } catch {
       return cb(new Error('Bad Origin'), false);

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Post, Res, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -16,7 +17,11 @@ export class AuthController {
    * cookie `gc_token` — JavaScript на фронте его не видит, XSS не угоняет.
    * Поле `token` в ответе оставлено для legacy-клиентов (Socket.io старых
    * сборок CRM). Новые сборки игнорируют это поле и опираются на cookie.
+   *
+   * Rate-limit: 5 попыток в минуту с одного IP — защита от brute-force.
+   * Раньше staff-login был без throttling, в отличие от студенческого.
    */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login')
   async login(
     @Body() dto: LoginDto,
