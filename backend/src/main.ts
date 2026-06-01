@@ -9,6 +9,15 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
 
+  // Railway/Vercel/любой reverse proxy терминирует TLS у себя и отправляет
+  // запрос дальше по plain HTTP с заголовком X-Forwarded-Proto=https.
+  // Без trust proxy Express считает запрос insecure, и cookie с Secure=true
+  // браузер бы отверг. Доверяем ровно одному hop (Railway edge).
+  const expressInstance = app.getHttpAdapter().getInstance();
+  if (expressInstance?.set) {
+    expressInstance.set('trust proxy', 1);
+  }
+
   // Парсим cookies — нужно чтобы JwtStrategy могла читать httpOnly JWT
   // из cookie `gc_token` (новый способ авторизации вместо localStorage).
   app.use(cookieParser());

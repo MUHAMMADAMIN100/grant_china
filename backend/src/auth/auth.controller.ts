@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -25,10 +25,11 @@ export class AuthController {
   @Post('login')
   async login(
     @Body() dto: LoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.auth.login(dto.email, dto.password);
-    setAuthCookie(res, result.token);
+    setAuthCookie(res, result.token, req);
     return { user: result.user };
   }
 
@@ -38,8 +39,8 @@ export class AuthController {
    */
   @Post('logout')
   @HttpCode(200)
-  logout(@Res({ passthrough: true }) res: Response) {
-    clearAuthCookie(res);
+  logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    clearAuthCookie(res, req);
     return { ok: true };
   }
 

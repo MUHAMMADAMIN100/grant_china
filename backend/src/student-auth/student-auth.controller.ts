@@ -9,12 +9,13 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { Direction } from '@prisma/client';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -87,11 +88,12 @@ export class StudentAuthController {
   @Post('login')
   async login(
     @Body() body: StudentLoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.auth.login(body.email, body.password);
     if (result?.token) {
-      setStudentCookie(res, result.token);
+      setStudentCookie(res, result.token, req);
     }
     // Возвращаем `token` для legacy-клиентов; новые читают только cookie.
     return result;
@@ -100,8 +102,8 @@ export class StudentAuthController {
   /** Логаут студента — очищает httpOnly cookie. */
   @Post('logout')
   @HttpCode(200)
-  logout(@Res({ passthrough: true }) res: Response) {
-    clearStudentCookie(res);
+  logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    clearStudentCookie(res, req);
     return { ok: true };
   }
 

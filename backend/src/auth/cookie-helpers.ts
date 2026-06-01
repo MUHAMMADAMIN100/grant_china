@@ -1,4 +1,4 @@
-import type { Response, CookieOptions } from 'express';
+import type { Request, Response, CookieOptions } from 'express';
 
 /**
  * Имя cookie с JWT-токеном сотрудников CRM.
@@ -13,35 +13,37 @@ export const AUTH_COOKIE_NAME = 'gc_token';
 export const STUDENT_COOKIE_NAME = 'gc_student_token';
 
 /**
- * Настройки httpOnly cookie с auth-токеном.
+ * Определяет httpOnly cookie-настройки исходя из протокола конкретного
+ * запроса:
+ *  - запрос по HTTPS (или через прокси с X-Forwarded-Proto=https) →
+ *    SameSite=None + Secure (cross-origin Vercel↔Railway работает)
+ *  - запрос по plain HTTP (localhost dev) →
+ *    SameSite=Lax + Secure=false (браузер примет cookie без TLS)
  *
- * Логика SameSite:
- *  - В production по умолчанию `none + secure` — потому что CRM и backend
- *    почти всегда на разных eTLD+1 (Vercel + Railway), и без этого
- *    cookie не вернётся на следующий запрос (cross-site).
- *  - В dev (localhost) по умолчанию `lax` — same-origin, safer default.
- *  - Любой режим можно явно переопределить env-переменной COOKIE_SAMESITE
- *    (`lax` | `strict` | `none`).
+ * Любой режим можно явно переопределить env-переменной COOKIE_SAMESITE
+ * (`lax` | `strict` | `none`).
  *
- * `secure` форсируется true когда sameSite=none (требование браузеров).
- *
- * - httpOnly: JavaScript не может прочитать → XSS не угоняет.
- * - path: '/' — отправляется на любой backend-роут.
- * - maxAge: 7 дней (совпадает с JWT_EXPIRES_IN по умолчанию).
+ * Не полагаемся на NODE_ENV: Railway его не выставляет автоматически.
  */
-export function buildAuthCookieOptions(): CookieOptions {
-  const isProd = process.env.NODE_ENV === 'production';
+export function buildAuthCookieOptions(req?: Request): CookieOptions {
   const sameSiteEnv = (process.env.COOKIE_SAMESITE || '').toLowerCase();
+
+  // Express уважает trust proxy → req.secure читает X-Forwarded-Proto.
+  // Если req не передан (например в clearCookie без контекста), считаем
+  // что мы на проде https — это покрывает 99% случаев.
+  const isHttps = req ? req.secure || req.protocol === 'https' : true;
 
   let sameSite: CookieOptions['sameSite'];
   if (sameSiteEnv === 'none' || sameSiteEnv === 'strict' || sameSiteEnv === 'lax') {
     sameSite = sameSiteEnv;
   } else {
-    // Дефолт: prod = none (cross-origin Vercel↔Railway), dev = lax (localhost)
-    sameSite = isProd ? 'none' : 'lax';
+    // HTTPS-запросы (Vercel/Railway) → cross-origin требует None.
+    // HTTP-запросы (localhost dev) → Lax, иначе браузер cookie не примет
+    // с Secure=true без TLS.
+    sameSite = isHttps ? 'none' : 'lax';
   }
   // SameSite=None обязательно требует Secure (политика всех браузеров).
-  const secure = sameSite === 'none' ? true : isProd;
+  const secure = sameSite === 'none' ? true : isHttps;
   return {
     httpOnly: true,
     secure,
@@ -51,24 +53,24 @@ export function buildAuthCookieOptions(): CookieOptions {
   };
 }
 
-export function setAuthCookie(res: Response, token: string) {
-  res.cookie(AUTH_COOKIE_NAME, token, buildAuthCookieOptions());
+export function setAuthCookie(res: Response, token: string, req?: Request) {
+  res.cookie(AUTH_COOKIE_NAME, token, buildAuthCookieOptions(req));
 }
 
-export function clearAuthCookie(res: Response) {
+export function clearAuthCookie(res: Response, req?: Request) {
   // clearCookie должен использовать ТЕ ЖЕ path/sameSite/secure/domain,
   // иначе браузер не сматчит и не удалит.
-  const opts = buildAuthCookieOptions();
+  const opts = buildAuthCookieOptions(req);
   delete (opts as any).maxAge;
   res.clearCookie(AUTH_COOKIE_NAME, opts);
 }
 
-export function setStudentCookie(res: Response, token: string) {
-  res.cookie(STUDENT_COOKIE_NAME, token, buildAuthCookieOptions());
+export function setStudentCookie(res: Response, token: string, req?: Request) {
+  res.cookie(STUDENT_COOKIE_NAME, token, buildAuthCookieOptions(req));
 }
 
-export function clearStudentCookie(res: Response) {
-  const opts = buildAuthCookieOptions();
+export function clearStudentCookie(res: Response, req?: Request) {
+  const opts = buildAuthCookieOptions(req);
   delete (opts as any).maxAge;
   res.clearCookie(STUDENT_COOKIE_NAME, opts);
 }
