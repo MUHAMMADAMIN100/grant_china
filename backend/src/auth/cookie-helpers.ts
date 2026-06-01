@@ -15,24 +15,32 @@ export const STUDENT_COOKIE_NAME = 'gc_student_token';
 /**
  * Настройки httpOnly cookie с auth-токеном.
  *
- * - httpOnly:    JavaScript НЕ может прочитать токен → XSS не угоняет сессию.
- * - secure:      Только HTTPS в production (в dev по http тоже работает).
- * - sameSite:    'lax' — защищает от CSRF в большинстве сценариев. Если
- *                CRM и backend на разных eTLD+1 (cross-site), нужно 'none'
- *                + secure, иначе браузер cookie не пошлёт. Управляется
- *                env-переменной COOKIE_SAMESITE.
- * - path: '/'   доступен для любого запроса к backend.
- * - maxAge:     7 дней — совпадает с JWT_EXPIRES_IN.
+ * Логика SameSite:
+ *  - В production по умолчанию `none + secure` — потому что CRM и backend
+ *    почти всегда на разных eTLD+1 (Vercel + Railway), и без этого
+ *    cookie не вернётся на следующий запрос (cross-site).
+ *  - В dev (localhost) по умолчанию `lax` — same-origin, safer default.
+ *  - Любой режим можно явно переопределить env-переменной COOKIE_SAMESITE
+ *    (`lax` | `strict` | `none`).
+ *
+ * `secure` форсируется true когда sameSite=none (требование браузеров).
+ *
+ * - httpOnly: JavaScript не может прочитать → XSS не угоняет.
+ * - path: '/' — отправляется на любой backend-роут.
+ * - maxAge: 7 дней (совпадает с JWT_EXPIRES_IN по умолчанию).
  */
 export function buildAuthCookieOptions(): CookieOptions {
   const isProd = process.env.NODE_ENV === 'production';
   const sameSiteEnv = (process.env.COOKIE_SAMESITE || '').toLowerCase();
-  const sameSite: CookieOptions['sameSite'] =
-    sameSiteEnv === 'none' || sameSiteEnv === 'strict'
-      ? sameSiteEnv
-      : 'lax';
-  // sameSite:'none' требует secure:true (политика браузеров),
-  // поэтому в этом случае secure форсируется true даже в dev.
+
+  let sameSite: CookieOptions['sameSite'];
+  if (sameSiteEnv === 'none' || sameSiteEnv === 'strict' || sameSiteEnv === 'lax') {
+    sameSite = sameSiteEnv;
+  } else {
+    // Дефолт: prod = none (cross-origin Vercel↔Railway), dev = lax (localhost)
+    sameSite = isProd ? 'none' : 'lax';
+  }
+  // SameSite=None обязательно требует Secure (политика всех браузеров).
   const secure = sameSite === 'none' ? true : isProd;
   return {
     httpOnly: true,
