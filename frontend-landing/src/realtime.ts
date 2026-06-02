@@ -1,7 +1,12 @@
 import { io, Socket } from 'socket.io-client';
 import { useEffect, useRef, useState } from 'react';
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
+// Same-origin: socket.io подключается через Vercel rewrite на тот же
+// домен где открыт сайт (cookie работают без cross-origin проблем).
+const isDev = (import.meta as any).env?.DEV;
+const API_URL =
+  (import.meta as any).env?.VITE_API_URL ||
+  (isDev ? 'http://localhost:3001/api' : '/api');
 const SOCKET_URL = API_URL.replace(/\/api$/, '');
 
 let socket: Socket | null = null;

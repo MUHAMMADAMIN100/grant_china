@@ -1,7 +1,12 @@
 import { io, Socket } from 'socket.io-client';
 import { useEffect, useRef, useState } from 'react';
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
+// Same-origin: socket.io подключается к тому же домену через Vercel rewrite
+// `/admin/socket.io/*` → Railway backend. В dev — на localhost напрямую.
+const isDev = (import.meta as any).env?.DEV;
+const API_URL =
+  (import.meta as any).env?.VITE_API_URL ||
+  (isDev ? 'http://localhost:3001/api' : '/admin/api');
 const SOCKET_URL = API_URL.replace(/\/api$/, '');
 
 let socket: Socket | null = null;

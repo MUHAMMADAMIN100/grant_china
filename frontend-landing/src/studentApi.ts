@@ -1,7 +1,13 @@
 import axios from 'axios';
 import { connectStudentRealtime, disconnectStudentRealtime } from './realtime';
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
+// Same-origin: в production используем `/api` (Vercel rewrite в vercel.json
+// проксирует на Railway backend). Так browser считает запросы same-origin
+// и cookies работают с SameSite=Lax во ВСЕХ браузерах.
+const isDev = (import.meta as any).env?.DEV;
+const API_URL =
+  (import.meta as any).env?.VITE_API_URL ||
+  (isDev ? 'http://localhost:3001/api' : '/api');
 export const API_BASE = API_URL.replace(/\/api$/, '');
 
 /**

@@ -3,6 +3,9 @@
     { "source": "/", "destination": "/admin", "permanent": false }
   ],
   "rewrites": [
+    { "source": "/admin/api/(.*)", "destination": "https://grantchina-production.up.railway.app/api/$1" },
+    { "source": "/admin/uploads/(.*)", "destination": "https://grantchina-production.up.railway.app/uploads/$1" },
+    { "source": "/admin/socket.io/(.*)", "destination": "https://grantchina-production.up.railway.app/socket.io/$1" },
     { "source": "/admin/assets/(.*)", "destination": "/assets/$1" },
     { "source": "/admin/(.+\\.[a-zA-Z0-9]+)", "destination": "/$1" },
     { "source": "/admin", "destination": "/index.html" },

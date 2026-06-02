@@ -1,6 +1,24 @@
 import axios from 'axios';
 
-const baseURL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
+/**
+ * BaseURL для API.
+ *
+ * В production по умолчанию используем относительный путь `/admin/api` —
+ * Vercel rewrite в `frontend-crm/vercel.json` проксирует его на Railway
+ * backend. Это делает запросы same-origin (с точки зрения браузера всё
+ * идёт на тот же домен где открыт CRM), и httpOnly cookies работают
+ * во ВСЕХ браузерах с SameSite=Lax — без проблем cross-origin SameSite=None
+ * у Safari/Brave/корпоративных WebView.
+ *
+ * В dev (vite dev server) дефолтим на абсолютный localhost.
+ *
+ * Можно переопределить через VITE_API_URL если очень нужно (на Vercel в
+ * production эту переменную лучше убрать чтобы использовался proxy).
+ */
+const isDev = (import.meta as any).env?.DEV;
+const baseURL =
+  (import.meta as any).env?.VITE_API_URL ||
+  (isDev ? 'http://localhost:3001/api' : '/admin/api');
 
 /**
  * Axios-клиент для CRM API.
