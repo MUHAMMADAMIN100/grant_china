@@ -2,7 +2,6 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './Sidebar';
 import NotificationBell from './NotificationBell';
-import RealtimeStatusBanner from './RealtimeStatusBanner';
 
 const TITLES: Record<string, string> = {
   '/dashboard': 'Дашборд',
@@ -17,7 +16,6 @@ export default function Layout() {
 
   return (
     <div className="app-layout">
-      <RealtimeStatusBanner />
       <Sidebar />
       <div className="main">
         <motion.div
