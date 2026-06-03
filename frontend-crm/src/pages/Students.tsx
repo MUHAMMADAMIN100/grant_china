@@ -48,9 +48,6 @@ export default function Students() {
   const [items, setItems] = useState<Student[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [reportOpen, setReportOpen] = useState(false);
-  const [reportFrom, setReportFrom] = useState('');
-  const [reportTo, setReportTo] = useState('');
   const [generating, setGenerating] = useState(false);
 
   const load = () => {
@@ -89,12 +86,17 @@ export default function Students() {
     : items;
 
   // При изменении набора студентов извне (realtime/удаление) — корректируем
-  // текущую страницу, чтобы не остаться на пустой.
+  // текущую страницу, чтобы не остаться на пустой. ВАЖНО: пропускаем пока
+  // данные ещё грузятся (loading=true) или filteredItems пустой, иначе
+  // при возврате назад с `?page=4` мгновенно сбрасывалось бы на 1 (потому
+  // что filteredItems на старте пустой ⇒ totalPages=1 ⇒ 4>1 ⇒ setFilter '1').
   useEffect(() => {
+    if (loading) return;
+    if (filteredItems.length === 0) return;
     const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
     if (page > totalPages) setFilter('page', String(totalPages));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredItems.length]);
+  }, [filteredItems.length, loading]);
 
   const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -119,41 +121,41 @@ export default function Students() {
     'application:updated': () => load(),
   });
 
-  const reportDatesValid =
-    !!reportFrom && !!reportTo && new Date(reportFrom) <= new Date(reportTo);
+  // Описание применённых фильтров — для шапки Word-отчёта. Если фильтров нет,
+  // вернёт пустую строку, и отчёт сам подпишет «Без фильтра — все студенты».
+  const buildFilterSummary = (): string => {
+    const parts: string[] = [];
+    if (scope === 'mine') parts.push('Только мои');
+    else if (isAdmin) parts.push('Все студенты');
+    if (search) parts.push(`Поиск: «${search}»`);
+    if (direction) parts.push(`Направление: ${DIRECTION_LABEL[direction as Direction]}`);
+    if (stageFilter) {
+      const label =
+        STATUS_LABEL[stageFilter as keyof typeof STATUS_LABEL] ||
+        STUDENT_STATUS_LABEL[stageFilter as keyof typeof STUDENT_STATUS_LABEL] ||
+        stageFilter;
+      parts.push(`Этап: ${label}`);
+    }
+    if (cabinet) parts.push(`Кабинет: ${cabinet}`);
+    if (manager) {
+      const u = users.find((x) => x.id === manager);
+      parts.push(`Менеджер: ${u?.fullName || manager}`);
+    }
+    return parts.join(' · ');
+  };
 
   const onDownloadReport = async () => {
-    if (!reportFrom || !reportTo) {
-      toast('Выберите обе даты: "От" и "До"', 'error');
-      return;
-    }
-    if (new Date(reportFrom) > new Date(reportTo)) {
-      toast('Дата "До" должна быть позже "От"', 'error');
+    if (filteredItems.length === 0) {
+      toast('По текущему фильтру нет студентов', 'error');
       return;
     }
     setGenerating(true);
     try {
-      const all = await listStudents({});
-      const from = new Date(reportFrom + 'T00:00:00');
-      const to = new Date(reportTo + 'T23:59:59');
-      const filtered = all.filter((s) => {
-        const d = new Date(s.createdAt);
-        return d >= from && d <= to;
-      });
-      if (filtered.length === 0) {
-        toast('За выбранный период нет студентов', 'error');
-        setGenerating(false);
-        return;
-      }
       await generateStudentsReport({
-        students: filtered,
-        from: reportFrom,
-        to: reportTo,
+        students: filteredItems,
+        filterSummary: buildFilterSummary(),
       });
-      toast(`Отчёт сгенерирован (${filtered.length} студентов)`, 'success');
-      setReportOpen(false);
-      setReportFrom('');
-      setReportTo('');
+      toast(`Отчёт сгенерирован (${filteredItems.length} студентов)`, 'success');
     } catch (e: any) {
       toast(e?.message || 'Ошибка генерации отчёта', 'error');
     } finally {
@@ -191,13 +193,14 @@ export default function Students() {
           )}
           <motion.button
             className="btn btn-secondary"
-            onClick={() => setReportOpen(true)}
+            onClick={onDownloadReport}
+            disabled={generating || filteredItems.length === 0}
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
-            title="Скачать отчёт в Word"
+            title={filteredItems.length === 0 ? 'Нет студентов по фильтру' : `Скачать ${filteredItems.length} студ. в Word`}
           >
             <Icon name="description" size={16} style={{ marginRight: 4 }} />
-            Отчёт Word
+            {generating ? 'Создание…' : 'Отчёт Word'}
           </motion.button>
           <motion.button
             className="btn btn-primary"
@@ -353,79 +356,6 @@ export default function Students() {
         )}
       </div>
 
-      <AnimatePresence>
-        {reportOpen && (
-          <motion.div
-            className="dialog-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => !generating && setReportOpen(false)}
-          >
-            <motion.div
-              className="dialog-card"
-              style={{ maxWidth: 460 }}
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              transition={{ duration: 0.22 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="dialog-icon">
-                <Icon name="description" size={28} />
-              </div>
-              <div className="dialog-title">Отчёт по студентам (Word)</div>
-              <div className="dialog-message">
-                Укажите обе даты — "От" и "До". В отчёт попадут студенты, зарегистрированные в этот период.
-              </div>
-
-              <div className="form-grid-2" style={{ textAlign: 'left', marginBottom: 20 }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label>От *</label>
-                  <input
-                    type="date"
-                    value={reportFrom}
-                    max={reportTo || undefined}
-                    onChange={(e) => setReportFrom(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label>До *</label>
-                  <input
-                    type="date"
-                    value={reportTo}
-                    min={reportFrom || undefined}
-                    onChange={(e) => setReportTo(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="dialog-actions">
-                <motion.button
-                  className="btn btn-secondary"
-                  onClick={() => setReportOpen(false)}
-                  disabled={generating}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  Отмена
-                </motion.button>
-                <motion.button
-                  className="btn btn-primary"
-                  onClick={onDownloadReport}
-                  disabled={generating || !reportDatesValid}
-                  whileTap={{ scale: 0.97 }}
-                  style={!reportDatesValid && !generating ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
-                  title={!reportDatesValid ? 'Выберите обе даты' : 'Скачать Word'}
-                >
-                  {generating ? 'Создание…' : 'Скачать Word'}
-                </motion.button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }

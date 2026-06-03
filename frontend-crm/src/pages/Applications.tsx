@@ -65,12 +65,16 @@ export default function Applications() {
   }, [search, status, direction, scope, manager]);
 
   // При изменении набора заявок извне (realtime/удаление) — корректируем
-  // текущую страницу, чтобы не остаться на пустой.
+  // текущую страницу, чтобы не остаться на пустой. ВАЖНО: пропускаем пока
+  // данные ещё грузятся (loading=true) или items пустой, иначе при возврате
+  // back с `?page=4` сбрасывалось бы на 1 на старте (items=[] ⇒ totalPages=1).
   useEffect(() => {
+    if (loading) return;
+    if (items.length === 0) return;
     const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
     if (page > totalPages) setFilter('page', String(totalPages));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length]);
+  }, [items.length, loading]);
 
   const pagedItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 

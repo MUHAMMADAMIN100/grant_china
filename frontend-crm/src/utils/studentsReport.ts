@@ -6,10 +6,12 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('ru-RU');
 
 export async function generateStudentsReport(params: {
   students: Student[];
-  from: string;
-  to: string;
+  /** Краткое описание применённых фильтров, например
+   *  «Статус: Подача документов · Менеджер: Иван Петров».
+   *  Пустая строка → «Без фильтра — все студенты». */
+  filterSummary?: string;
 }) {
-  const { students, from, to } = params;
+  const { students, filterSummary } = params;
 
   const {
     Document,
@@ -30,7 +32,9 @@ export async function generateStudentsReport(params: {
     PageNumber,
   } = await import('docx');
 
-  const periodText = `за период ${fmtDate(from)} — ${fmtDate(to)}`;
+  const periodText = filterSummary && filterSummary.trim().length > 0
+    ? `Фильтр: ${filterSummary}`
+    : 'Без фильтра — все студенты';
   const generatedAt = new Date().toLocaleString('ru-RU');
 
   const byStatus = students.reduce<Record<string, number>>((acc, s) => {
@@ -114,7 +118,7 @@ export async function generateStudentsReport(params: {
 
   const doc = new Document({
     creator: 'GrantChina CRM',
-    title: `Отчёт по студентам ${periodText}`,
+    title: `Отчёт по студентам`,
     styles: {
       default: {
         document: {
