@@ -5,10 +5,48 @@ import { connectStudentRealtime, disconnectStudentRealtime } from './realtime';
 // проксирует на Railway backend). Так browser считает запросы same-origin
 // и cookies работают с SameSite=Lax во ВСЕХ браузерах.
 const isDev = (import.meta as any).env?.DEV;
+const _envApiUrl: string | undefined = (import.meta as any).env?.VITE_API_URL;
+// В production игнорируем env-URL если он указывает на localhost — это
+// dev-default который мог остаться в Vercel env. Иначе на проде клик
+// по документу открыл бы http://localhost:3001/uploads/... и упал в
+// ERR_CONNECTION_REFUSED у юзера.
 const API_URL =
-  (import.meta as any).env?.VITE_API_URL ||
-  (isDev ? 'http://localhost:3001/api' : '/api');
+  _envApiUrl && (isDev || !/localhost|127\.0\.0\.1/.test(_envApiUrl))
+    ? _envApiUrl
+    : isDev
+      ? 'http://localhost:3001/api'
+      : '/api';
 export const API_BASE = API_URL.replace(/\/api$/, '');
+
+/**
+ * Строит URL для отдачи файла бэкендом (документ, фото студента, картинка
+ * программы). Защита от пары крайних случаев:
+ *  1. `url` уже абсолютный с localhost (старые сборки или env неправильно
+ *     заданы) → в production отрезаем хост и оставляем только path, чтобы
+ *     запрос пошёл через Vercel rewrite `/uploads/*` → Railway.
+ *  2. `url` уже абсолютный с другим хостом → возвращаем как есть.
+ *  3. `url` относительный (`/uploads/...`) → префиксим API_BASE (в
+ *     production это пустая строка → same-origin).
+ */
+export function buildFileUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  // Абсолютный URL
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      const u = new URL(url);
+      const isLocalhost = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+      if (isLocalhost && !isDev) {
+        // Заменяем localhost на текущий origin — Vercel перепроксирует
+        return `${u.pathname}${u.search}${u.hash}`;
+      }
+    } catch {
+      /* malformed — отдадим как есть */
+    }
+    return url;
+  }
+  // Относительный
+  return `${API_BASE}${url}`;
+}
 
 /**
  * Аутентификация студента — теперь через httpOnly cookie `gc_student_token`,

@@ -16,7 +16,7 @@ import Icon from '../Icon';
 import { motion } from 'framer-motion';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
 
-const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
+import { buildFileUrl } from '../utils/fileUrl';
 
 export default function ApplicationDetail() {
   const { id } = useParams();
@@ -313,7 +313,7 @@ export default function ApplicationDetail() {
               <div>
                 <div className={`detail-photo${isEnrolled ? ' is-enrolled' : ''}`}>
                   {student.photoUrl
-                    ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
+                    ? <img src={buildFileUrl(student.photoUrl)} alt="" />
                     : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
                 </div>
                 {isEnrolled && (

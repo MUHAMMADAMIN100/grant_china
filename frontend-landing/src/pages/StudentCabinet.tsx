@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   API_BASE,
+  buildFileUrl,
   studentDeleteDocument,
   studentLogout,
   studentMe,
@@ -308,7 +309,7 @@ export default function StudentCabinet() {
           <div className="stu-profile">
             <div className="stu-photo">
               {me.photoUrl ? (
-                <img src={`${API_BASE}${me.photoUrl}`} alt="" />
+                <img src={buildFileUrl(me.photoUrl)} alt="" />
               ) : (
                 <Icon name="person" size={60} />
               )}
@@ -421,7 +422,7 @@ export default function StudentCabinet() {
                     <>
                       {docs.map((doc) => (
                         <div key={doc.id} className="stu-doc-file">
-                          <a href={`${API_BASE}${doc.url}`} target="_blank" rel="noreferrer">
+                          <a href={buildFileUrl(doc.url)} target="_blank" rel="noreferrer">
                             <Icon name="description" size={16} /> {doc.originalName}
                           </a>
                           <div className="stu-doc-meta">
@@ -477,7 +478,7 @@ export default function StudentCabinet() {
               <div className="stu-other-list">
                 {other.map((d) => (
                   <div key={d.id} className="stu-other-item">
-                    <a href={`${API_BASE}${d.url}`} target="_blank" rel="noreferrer">
+                    <a href={buildFileUrl(d.url)} target="_blank" rel="noreferrer">
                       <Icon name="description" size={16} /> {d.originalName}
                     </a>
                     <button className="btn btn-danger btn-small" onClick={() => onDelete(d.id)}>

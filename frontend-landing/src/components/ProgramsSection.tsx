@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  API_BASE,
+  buildFileUrl,
   getStudentProgramFilters,
   listStudentPrograms,
   type StudentProgram,
@@ -186,7 +186,7 @@ export default function ProgramsSection() {
               {p.imageUrl && (
                 <div className="sp-item-img">
                   <img
-                    src={p.imageUrl.startsWith('http') ? p.imageUrl : `${API_BASE}${p.imageUrl}`}
+                    src={buildFileUrl(p.imageUrl)}
                     alt=""
                   />
                 </div>
@@ -236,7 +236,7 @@ export default function ProgramsSection() {
               {selected.imageUrl && (
                 <div className="sp-modal-img">
                   <img
-                    src={selected.imageUrl.startsWith('http') ? selected.imageUrl : `${API_BASE}${selected.imageUrl}`}
+                    src={buildFileUrl(selected.imageUrl)}
                     alt=""
                   />
                 </div>

@@ -41,7 +41,7 @@ function CredRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
+import { buildFileUrl } from '../utils/fileUrl';
 
 export default function StudentDetail() {
   const { id } = useParams();
@@ -305,7 +305,7 @@ export default function StudentDetail() {
           <div>
             <div className={`detail-photo${isEnrolled ? ' is-enrolled' : ''}`}>
               {student.photoUrl
-                ? <img src={`${API_BASE}${student.photoUrl}`} alt="" />
+                ? <img src={buildFileUrl(student.photoUrl)} alt="" />
                 : <Icon name="person" size={80} style={{ color: 'var(--text-light)' }} />}
             </div>
             {isEnrolled && (

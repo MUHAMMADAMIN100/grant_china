@@ -3,9 +3,8 @@ import { motion } from 'framer-motion';
 import type { Document } from '../api/types';
 import { deleteDocument, uploadDocument } from '../api/students';
 import { useUI } from '../ui/Dialogs';
+import { buildFileUrl } from '../utils/fileUrl';
 import Icon from '../Icon';
-
-const API_BASE = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');
 
 export const REQUIRED_DOCUMENTS: { type: string; label: string; hint?: string }[] = [
   { type: 'PHOTO', label: 'Фото 3/4', hint: 'В электронном формате' },
@@ -117,7 +116,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
         if (docs.length === 0) continue;
         for (let j = 0; j < docs.length; j++) {
           const doc = docs[j];
-          const res = await fetch(`${API_BASE}${doc.url}`);
+          const res = await fetch(buildFileUrl(doc.url));
           if (!res.ok) continue;
           const blob = await res.blob();
           const ext = doc.originalName.includes('.') ? doc.originalName.split('.').pop() : '';
@@ -131,7 +130,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
       if (otherDocs.length > 0) {
         const otherFolder = zip.folder('Прочее');
         for (const doc of otherDocs) {
-          const res = await fetch(`${API_BASE}${doc.url}`);
+          const res = await fetch(buildFileUrl(doc.url));
           if (!res.ok) continue;
           const blob = await res.blob();
           otherFolder?.file(sanitizeFileName(doc.originalName), blob);
@@ -235,7 +234,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
                   <div className="doc-slot-files">
                     {docs.map((doc) => (
                       <div key={doc.id} className="doc-slot-file">
-                        <a href={`${API_BASE}${doc.url}`} target="_blank" rel="noreferrer" className="doc-slot-filename">
+                        <a href={buildFileUrl(doc.url)} target="_blank" rel="noreferrer" className="doc-slot-filename">
                           <Icon name="description" size={18} />
                           <span>{doc.originalName}</span>
                         </a>
@@ -298,7 +297,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
                 <span className="doc-icon"><Icon name="description" size={20} /></span>
                 <div className="doc-info">
                   <div className="doc-name">
-                    <a href={`${API_BASE}${d.url}`} target="_blank" rel="noreferrer" style={{ color: '#d52b2b' }}>
+                    <a href={buildFileUrl(d.url)} target="_blank" rel="noreferrer" style={{ color: '#d52b2b' }}>
                       {d.originalName}
                     </a>
                   </div>
