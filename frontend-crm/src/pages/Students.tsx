@@ -14,7 +14,7 @@ import Pagination from '../components/Pagination';
 import Icon from '../Icon';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 10;
 
 export default function Students() {
   const navigate = useNavigate();

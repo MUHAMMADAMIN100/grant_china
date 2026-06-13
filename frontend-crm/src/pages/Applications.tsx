@@ -12,7 +12,7 @@ import DirectionOptions from '../components/DirectionOptions';
 import Pagination from '../components/Pagination';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 10;
 
 export default function Applications() {
   const navigate = useNavigate();
