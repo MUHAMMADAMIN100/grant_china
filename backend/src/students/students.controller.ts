@@ -88,6 +88,9 @@ export class StudentsController {
     @Query('search') search?: string,
     @Query('mine') mine?: string,
     @Query('manager') manager?: string,
+    @Query('stage') stage?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     return this.students.findAll({
       direction,
@@ -98,6 +101,9 @@ export class StudentsController {
       managerUserId: manager || undefined,
       currentUserId: user?.id,
       currentUserRole: user?.role,
+      stage: stage || undefined,
+      page: page ? parseInt(page, 10) : undefined,
+      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
     });
   }
 

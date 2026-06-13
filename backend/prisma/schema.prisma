@@ -110,6 +110,8 @@ model Application {
   @@index([chinaManagerId])
   @@index([programId])
   @@index([deletedAt])
+  // Composite для главного списка заявок (WHERE deletedAt IS NULL ORDER BY createdAt DESC)
+  @@index([deletedAt, createdAt(sort: Desc)])
 }
 
 model Student {
@@ -144,6 +146,10 @@ model Student {
   @@index([chinaManagerId])
   @@index([programId])
   @@index([deletedAt])
+  // Composite — для главного списка студентов:
+  // WHERE deletedAt IS NULL ORDER BY createdAt DESC. Без этого
+  // Postgres делает seq scan + sort даже на нашей таблице.
+  @@index([deletedAt, createdAt(sort: Desc)])
 }
 
 // Документ студента (10 типов + OTHER).

@@ -8,10 +8,24 @@ export interface AppFilters {
   mine?: boolean;
   /** Фильтр по конкретному менеджеру (TJ или CN) — userId */
   manager?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ApplicationsPage {
+  items: Application[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export async function listApplications(filters: AppFilters = {}) {
   const { data } = await api.get<Application[]>('/applications', { params: filters });
+  return data;
+}
+
+export async function listApplicationsPaged(filters: AppFilters & { page: number; pageSize: number }) {
+  const { data } = await api.get<ApplicationsPage>('/applications', { params: filters });
   return data;
 }
 

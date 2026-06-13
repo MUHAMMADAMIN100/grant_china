@@ -42,6 +42,15 @@ const MANAGER_INCLUDE = {
   program: true,
 };
 
+// Облегчённый include для СПИСКА заявок: только то, что нужно в таблице.
+// Не тащим вложенного студента с его programs/managers — это десятки полей
+// на заявку. Полная карточка получает MANAGER_INCLUDE через GET /:id.
+const APPLICATION_LIST_INCLUDE = {
+  student: { select: { id: true, fullName: true, photoUrl: true } },
+  manager: { select: { id: true, fullName: true } },
+  chinaManager: { select: { id: true, fullName: true } },
+};
+
 type CurrentUser = { id: string; role: Role };
 
 @Injectable()
@@ -171,6 +180,9 @@ export class ApplicationsService {
     managerUserId?: string;
     currentUserId?: string;
     currentUserRole?: Role;
+    /** Серверная пагинация. Если не передано — возвращаем массив (бэк-совместимость). */
+    page?: number;
+    pageSize?: number;
   }) {
     // Soft-delete: всегда исключаем удалённые заявки
     const where: Prisma.ApplicationWhereInput = { deletedAt: null };
@@ -209,11 +221,29 @@ export class ApplicationsService {
       });
     }
     if (and.length) where.AND = and;
-    return this.prisma.application.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: MANAGER_INCLUDE,
-    });
+
+    if (!filters.page || !filters.pageSize) {
+      return this.prisma.application.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: MANAGER_INCLUDE,
+      });
+    }
+
+    const page = Math.max(1, filters.page);
+    const pageSize = Math.min(100, Math.max(1, filters.pageSize));
+    const skip = (page - 1) * pageSize;
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.application.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        include: APPLICATION_LIST_INCLUDE,
+      }),
+      this.prisma.application.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
   }
 
   async findOne(id: string) {

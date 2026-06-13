@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { listApplications } from '../api/applications';
+import { listApplicationsPaged } from '../api/applications';
 import { listUsers } from '../api/users';
 import type { Application, ApplicationStatus, Direction, User } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, isPrivileged } from '../api/types';
@@ -42,19 +42,35 @@ export default function Applications() {
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
 
   const [items, setItems] = useState<Application[]>([]);
+  const [total, setTotal] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Debounce realtime: несколько событий за 500мс схлопываются в один load().
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReload = () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      load();
+    }, 500);
+  };
+
   const load = () => {
     setLoading(true);
-    listApplications({
+    listApplicationsPaged({
       search: search || undefined,
       status: status || undefined,
       direction: direction || undefined,
       mine: scope === 'mine',
       manager: manager || undefined,
+      page,
+      pageSize: PAGE_SIZE,
     })
-      .then(setItems)
+      .then((res) => {
+        setItems(res.items);
+        setTotal(res.total);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -62,21 +78,19 @@ export default function Applications() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, direction, scope, manager]);
+  }, [search, status, direction, scope, manager, page]);
 
-  // При изменении набора заявок извне (realtime/удаление) — корректируем
-  // текущую страницу, чтобы не остаться на пустой. ВАЖНО: пропускаем пока
-  // данные ещё грузятся (loading=true) или items пустой, иначе при возврате
-  // back с `?page=4` сбрасывалось бы на 1 на старте (items=[] ⇒ totalPages=1).
+  // При перезагрузке после realtime/удаления — если страница перешла
+  // за пределы, сдвигаемся на ближайшую существующую.
   useEffect(() => {
     if (loading) return;
-    if (items.length === 0) return;
-    const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    if (total === 0) return;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     if (page > totalPages) setFilter('page', String(totalPages));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length, loading]);
+  }, [total, loading]);
 
-  const pagedItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pagedItems = items;
 
   // Список пользователей для фильтра по менеджерам — только админу
   useEffect(() => {
@@ -85,9 +99,9 @@ export default function Applications() {
   }, [isAdmin]);
 
   useRealtime({
-    'application:new': () => load(),
-    'application:updated': () => load(),
-    'application:deleted': () => load(),
+    'application:new': () => scheduleReload(),
+    'application:updated': () => scheduleReload(),
+    'application:deleted': () => scheduleReload(),
   });
 
   // При смене фильтра сбрасываем страницу на 1 — атомарно через setFilters,
@@ -159,7 +173,7 @@ export default function Applications() {
             <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               Загрузка...
             </motion.div>
-          ) : items.length === 0 ? (
+          ) : total === 0 ? (
             <motion.div key="empty" className="empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <div className="empty-icon"><Icon name="inbox" size={48} /></div>
               {scope === 'mine' ? 'У вас пока нет назначенных заявок' : 'Заявок не найдено'}
@@ -228,7 +242,7 @@ export default function Applications() {
         {!loading && (
           <Pagination
             page={page}
-            total={items.length}
+            total={total}
             pageSize={PAGE_SIZE}
             onChange={(p) => setFilter('page', String(p))}
           />

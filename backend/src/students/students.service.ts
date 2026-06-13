@@ -25,6 +25,7 @@ const CABINET_BY_DIRECTION: Record<Direction, number> = {
 };
 
 // Soft-delete: при include'ах не подтягиваем удалённые документы/заявки.
+// Полный include — для карточки студента (detail). Возвращает всё.
 const STUDENT_INCLUDE = {
   documents: { where: { deletedAt: null } },
   manager: { select: { id: true, fullName: true, email: true } },
@@ -33,6 +34,22 @@ const STUDENT_INCLUDE = {
   applications: {
     where: { deletedAt: null },
     orderBy: { createdAt: 'desc' as const },
+  },
+} as const;
+
+// Облегчённый include для СПИСКА студентов в CRM-таблице.
+// Не грузим documents (по 5+ файлов на студента — для списка не нужны).
+// Из applications берём только id+status+createdAt последней заявки,
+// чтобы UI мог показать «этап» в badge и фильтровать по stageFilter.
+// На 80 студентов это уменьшает payload с ~500КБ до ~30КБ.
+const STUDENT_LIST_INCLUDE = {
+  manager: { select: { id: true, fullName: true } },
+  chinaManager: { select: { id: true, fullName: true } },
+  applications: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: { id: true, status: true, createdAt: true },
   },
 } as const;
 
@@ -175,6 +192,12 @@ export class StudentsService {
     managerUserId?: string;
     currentUserId?: string;
     currentUserRole?: Role;
+    /** Фильтр по этапу — либо ApplicationStatus последней заявки,
+     *  либо специальный StudentStatus (PAUSED/GRADUATED/ARCHIVED). */
+    stage?: string;
+    /** Серверная пагинация. Если не передано — возвращаем всё (бэк-совместимость). */
+    page?: number;
+    pageSize?: number;
   }) {
     // Soft-delete: всегда исключаем удалённых студентов
     const where: Prisma.StudentWhereInput = { deletedAt: null };
@@ -212,12 +235,51 @@ export class StudentsService {
         ],
       });
     }
+    // stageFilter — на бэкенд. Был клиентским (фильтр по applications[0]),
+    // теперь делаем через relational query чтобы не тащить всё на фронт.
+    const SPECIAL_STUDENT_STATUSES = new Set(['PAUSED', 'GRADUATED', 'ARCHIVED']);
+    if (filters.stage) {
+      if (SPECIAL_STUDENT_STATUSES.has(filters.stage)) {
+        and.push({ status: filters.stage as StudentStatus });
+      } else {
+        // Студент активен И его последняя заявка имеет нужный статус.
+        // Используем `some` — Prisma не умеет «последнюю» из 1:N, но
+        // для практики достаточно «есть хотя бы одна с таким статусом»
+        // (у студента обычно одна активная заявка).
+        and.push({
+          status: 'ACTIVE',
+          applications: {
+            some: { status: filters.stage as any, deletedAt: null },
+          },
+        });
+      }
+    }
     if (and.length) where.AND = and;
-    return this.prisma.student.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: STUDENT_INCLUDE,
-    });
+
+    // Если пагинация не запрошена — возвращаем массив (старый API).
+    if (!filters.page || !filters.pageSize) {
+      return this.prisma.student.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: STUDENT_INCLUDE,
+      });
+    }
+
+    // Серверная пагинация: одним хитом count + slice.
+    const page = Math.max(1, filters.page);
+    const pageSize = Math.min(100, Math.max(1, filters.pageSize));
+    const skip = (page - 1) * pageSize;
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.student.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        include: STUDENT_LIST_INCLUDE,
+      }),
+      this.prisma.student.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
   }
 
   async findOne(id: string) {

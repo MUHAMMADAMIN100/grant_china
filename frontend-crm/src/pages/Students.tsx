@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { listStudents } from '../api/students';
+import { listStudents, listStudentsPaged } from '../api/students';
 import { listUsers } from '../api/users';
 import type { Direction, Student, User } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
@@ -46,20 +46,39 @@ export default function Students() {
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
 
   const [items, setItems] = useState<Student[]>([]);
+  const [total, setTotal] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
 
+  // Realtime debounce — несколько событий за 500мс схлопываются в один load().
+  // Без этого 'student:updated' + 'application:new' + 'application:updated'
+  // от одного действия делали 3 полных перезагрузки.
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReload = () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      load();
+    }, 500);
+  };
+
   const load = () => {
     setLoading(true);
-    listStudents({
+    listStudentsPaged({
       search: search || undefined,
       direction: direction || undefined,
       cabinet: cabinet ? parseInt(cabinet, 10) : undefined,
       mine: scope === 'mine',
       manager: manager || undefined,
+      stage: stageFilter || undefined,
+      page,
+      pageSize: PAGE_SIZE,
     })
-      .then(setItems)
+      .then((res) => {
+        setItems(res.items);
+        setTotal(res.total);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -67,38 +86,21 @@ export default function Students() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, direction, cabinet, scope, manager]);
+  }, [search, direction, cabinet, scope, manager, stageFilter, page]);
 
-  // Фильтр по этапу — клиентский, чтобы не трогать backend. Особые
-  // статусы студента (PAUSED/GRADUATED/ARCHIVED) тоже идут через этот же
-  // фильтр для удобства.
-  const SPECIAL_STUDENT_STATUSES = ['PAUSED', 'GRADUATED', 'ARCHIVED'];
-
-  const filteredItems = stageFilter
-    ? items.filter((s) => {
-        if (SPECIAL_STUDENT_STATUSES.includes(stageFilter)) {
-          return s.status === stageFilter;
-        }
-        // Этап заявки — берём последнюю, фильтруем активных
-        if (s.status !== 'ACTIVE') return false;
-        return s.applications?.[0]?.status === stageFilter;
-      })
-    : items;
-
-  // При изменении набора студентов извне (realtime/удаление) — корректируем
-  // текущую страницу, чтобы не остаться на пустой. ВАЖНО: пропускаем пока
-  // данные ещё грузятся (loading=true) или filteredItems пустой, иначе
-  // при возврате назад с `?page=4` мгновенно сбрасывалось бы на 1 (потому
-  // что filteredItems на старте пустой ⇒ totalPages=1 ⇒ 4>1 ⇒ setFilter '1').
+  // При перезагрузке после realtime/удаления — если страница перешла
+  // за пределы (например, удалили последнего на странице), сдвигаемся
+  // на ближайшую существующую.
   useEffect(() => {
     if (loading) return;
-    if (filteredItems.length === 0) return;
-    const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+    if (total === 0) return;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     if (page > totalPages) setFilter('page', String(totalPages));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredItems.length, loading]);
+  }, [total, loading]);
 
-  const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Серверная пагинация: items уже страница, total приходит отдельно.
+  const pagedItems = items;
 
   // При смене любого фильтра сбрасываем страницу на 1 — атомарно через
   // setFilters, иначе два setFilter подряд гонятся (второй перетирает первый).
@@ -116,9 +118,9 @@ export default function Students() {
   }, [isAdmin]);
 
   useRealtime({
-    'student:updated': () => load(),
-    'application:new': () => load(),
-    'application:updated': () => load(),
+    'student:updated': () => scheduleReload(),
+    'application:new': () => scheduleReload(),
+    'application:updated': () => scheduleReload(),
   });
 
   // Описание применённых фильтров — для шапки Word-отчёта. Если фильтров нет,
@@ -145,17 +147,27 @@ export default function Students() {
   };
 
   const onDownloadReport = async () => {
-    if (filteredItems.length === 0) {
+    if (total === 0) {
       toast('По текущему фильтру нет студентов', 'error');
       return;
     }
     setGenerating(true);
     try {
+      // Для отчёта надо ВСЕ студенты по фильтру, не одна страница.
+      // Дёргаем listStudents без page/pageSize → бэкенд вернёт массив.
+      const all = await listStudents({
+        search: search || undefined,
+        direction: direction || undefined,
+        cabinet: cabinet ? parseInt(cabinet, 10) : undefined,
+        mine: scope === 'mine',
+        manager: manager || undefined,
+        stage: stageFilter || undefined,
+      });
       await generateStudentsReport({
-        students: filteredItems,
+        students: all,
         filterSummary: buildFilterSummary(),
       });
-      toast(`Отчёт сгенерирован (${filteredItems.length} студентов)`, 'success');
+      toast(`Отчёт сгенерирован (${all.length} студентов)`, 'success');
     } catch (e: any) {
       toast(e?.message || 'Ошибка генерации отчёта', 'error');
     } finally {
@@ -194,10 +206,10 @@ export default function Students() {
           <motion.button
             className="btn btn-secondary"
             onClick={onDownloadReport}
-            disabled={generating || filteredItems.length === 0}
+            disabled={generating || total === 0}
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
-            title={filteredItems.length === 0 ? 'Нет студентов по фильтру' : `Скачать ${filteredItems.length} студ. в Word`}
+            title={total === 0 ? 'Нет студентов по фильтру' : `Скачать ${total} студ. в Word`}
           >
             <Icon name="description" size={16} style={{ marginRight: 4 }} />
             {generating ? 'Создание…' : 'Отчёт Word'}
@@ -264,7 +276,7 @@ export default function Students() {
             <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               Загрузка...
             </motion.div>
-          ) : filteredItems.length === 0 ? (
+          ) : total === 0 ? (
             <motion.div key="empty" className="empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <div className="empty-icon"><Icon name="school" size={48} /></div>
               {scope === 'mine' ? 'У вас пока нет назначенных студентов' : 'Студентов не найдено'}
@@ -349,7 +361,7 @@ export default function Students() {
         {!loading && (
           <Pagination
             page={page}
-            total={filteredItems.length}
+            total={total}
             pageSize={PAGE_SIZE}
             onChange={(p) => setFilter('page', String(p))}
           />

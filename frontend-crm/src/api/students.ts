@@ -9,10 +9,29 @@ export interface StudentFilters {
   mine?: boolean;
   /** Фильтр по менеджеру (TJ или CN) — userId */
   manager?: string;
+  /** Фильтр по этапу заявки (или специальный StudentStatus). */
+  stage?: string;
+  /** Серверная пагинация: страница (с 1) + размер. Если не передано —
+   *  бэкенд возвращает массив (старый поведение). */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface StudentsPage {
+  items: Student[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export async function listStudents(filters: StudentFilters = {}) {
   const { data } = await api.get<Student[]>('/students', { params: filters });
+  return data;
+}
+
+/** Серверная пагинация — всегда возвращает {items,total,page,pageSize}. */
+export async function listStudentsPaged(filters: StudentFilters & { page: number; pageSize: number }) {
+  const { data } = await api.get<StudentsPage>('/students', { params: filters });
   return data;
 }
 
