@@ -22,6 +22,27 @@ const STUDENT_INCLUDE = {
   },
 } as const;
 
+/**
+ * Типы документов, которые СТУДЕНТ загружает, но НЕ должен скачивать
+ * обратно из личного кабинета. Мед.справка и справка из банка содержат
+ * персональные / финансовые данные — доступны только сотрудникам CRM.
+ * Мы зануляем поле `url` в ответе /me и добавляем флаг `restricted`,
+ * чтобы фронт мог скрыть ссылку (при этом счётчик «загружено» и метка
+ * «прикреплено» остаются — студент видит что файл получен).
+ */
+const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL']);
+
+function sanitizeStudentDocuments<T extends { type: string; url: string }>(
+  docs: T[],
+): (T & { restricted?: boolean })[] {
+  return docs.map((d) => {
+    if (STUDENT_RESTRICTED_DOC_TYPES.has(d.type)) {
+      return { ...d, url: '', restricted: true };
+    }
+    return d;
+  });
+}
+
 @Injectable()
 export class StudentAuthService {
   constructor(
@@ -111,6 +132,10 @@ export class StudentAuthService {
     });
     if (!student) throw new UnauthorizedException('Студент не найден');
     const { password, ...safe } = student as any;
+    // Скрываем URL BANK/MEDICAL — студент не должен их скачивать.
+    if (safe.documents) {
+      safe.documents = sanitizeStudentDocuments(safe.documents);
+    }
     return safe;
   }
 }

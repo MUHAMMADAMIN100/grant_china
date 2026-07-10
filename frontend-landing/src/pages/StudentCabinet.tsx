@@ -422,11 +422,36 @@ export default function StudentCabinet() {
                     <>
                       {docs.map((doc) => (
                         <div key={doc.id} className="stu-doc-file">
-                          <a href={buildFileUrl(doc.url)} target="_blank" rel="noreferrer">
-                            <Icon name="description" size={16} /> {doc.originalName}
-                          </a>
+                          {doc.restricted ? (
+                            // Мед. / банковская справка — просмотр запрещён.
+                            // Показываем название без ссылки, с подсказкой.
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                color: '#6b7280',
+                                cursor: 'not-allowed',
+                              }}
+                              title="Файл получен. Доступ к содержимому — только у менеджера."
+                            >
+                              <Icon name="lock" size={16} /> {doc.originalName}
+                            </span>
+                          ) : (
+                            <a href={buildFileUrl(doc.url)} target="_blank" rel="noreferrer">
+                              <Icon name="description" size={16} /> {doc.originalName}
+                            </a>
+                          )}
                           <div className="stu-doc-meta">
                             {fmtBytes(doc.size)} · {new Date(doc.createdAt).toLocaleDateString('ru-RU')}
+                            {doc.restricted && (
+                              <>
+                                {' · '}
+                                <span style={{ color: '#6b7280' }}>
+                                  доступ у менеджера
+                                </span>
+                              </>
+                            )}
                           </div>
                           <div className="stu-doc-actions">
                             <button

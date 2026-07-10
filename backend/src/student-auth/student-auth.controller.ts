@@ -26,6 +26,10 @@ import { StudentAuthService } from './student-auth.service';
 import { StudentJwtGuard } from './student-jwt.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+
+// Совпадает со списком в student-auth.service. Держим локальную копию,
+// чтобы не тянуть импорт из сервиса ради одного Set.
+const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL']);
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { StudentForgotPasswordDto, StudentLoginDto } from './dto/student-login.dto';
 import { clearStudentCookie, setStudentCookie } from '../auth/cookie-helpers';
@@ -183,6 +187,11 @@ export class StudentAuthController {
     });
     this.realtime.emitStudentAndStaff(user.id, 'document:uploaded', { studentId: user.id, doc });
     this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
+    // Если это ограниченный тип — не отдаём URL самому студенту.
+    // Файл в БД и в /uploads остаётся, менеджер увидит его в CRM как обычно.
+    if (STUDENT_RESTRICTED_DOC_TYPES.has(docType)) {
+      return { ...doc, url: '', restricted: true };
+    }
     return doc;
   }
 

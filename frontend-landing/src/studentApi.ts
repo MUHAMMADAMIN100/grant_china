@@ -91,6 +91,8 @@ export type StudentDoc = {
   url: string;
   type: string;
   createdAt: string;
+  /** true → студент не может скачать файл (бэкенд занулил url). */
+  restricted?: boolean;
 };
 
 export type StudentMe = {
