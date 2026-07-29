@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, updateStudent, uploadPhoto } from '../api/students';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
-import { DIRECTION_LABEL, STUDENT_STATUS_LABEL } from '../api/types';
+import { DIRECTION_LABEL, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -55,6 +55,7 @@ export default function StudentDetail() {
   const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [error, setError] = useState<string | null>(null);
 
   const formErrors = form
     ? validateAll(
@@ -82,17 +83,31 @@ export default function StudentDetail() {
 
   const reload = async () => {
     if (!id) return;
-    const s = await getStudent(id);
-    setStudent(s);
-    setForm({
-      fullName: s.fullName,
-      phones: s.phones.join(', '),
-      email: s.email || '',
-      direction: s.direction,
-      cabinet: s.cabinet,
-      status: s.status,
-      comment: s.comment || '',
-    });
+    // ПРОБЛЕМА F аудита: раньше error не сбрасывался на успешном пути, и после
+    // одной ошибки (например realtime дёрнул reload() для карточки, доступ к
+    // которой уже закрыт) баннер оставался навечно — роут /students/:id не
+    // размонтируется при смене :id, а стейт компонента переживает переход.
+    // Сбрасываем в начале КАЖДОГО вызова, чтобы успешная загрузка следующего
+    // студента убирала баннер предыдущей ошибки.
+    setError(null);
+    try {
+      const s = await getStudent(id);
+      setStudent(s);
+      setForm({
+        fullName: s.fullName,
+        phones: s.phones.join(', '),
+        email: s.email || '',
+        direction: s.direction,
+        cabinet: s.cabinet,
+        status: s.status,
+        comment: s.comment || '',
+      });
+    } catch (e: any) {
+      // БАГ 2 аудита: после закрытия доступа к чужим карточкам EMPLOYEE
+      // с чужим UUID должен увидеть понятную ошибку, а не вечную «Загрузка...».
+      setStudent(null);
+      setError(e?.response?.data?.message || 'Нет доступа к этому студенту');
+    }
   };
 
   useEffect(() => { reload(); }, [id]);
@@ -103,7 +118,13 @@ export default function StudentDetail() {
     'document:deleted': (data: any) => { if (data?.studentId === id) reload(); },
     'form:updated': (data: any) => { if (data?.studentId === id) reload(); },
     'application:updated': (data: any) => {
-      if (data?.application?.studentId === id) reload();
+      // Бэкенд переходит на «тонкие» realtime-события: вместо всего объекта
+      // { application: {...} } может прийти { studentId } / { applicationId }
+      // без вложенного студента. Поддерживаем оба варианта payload'а; если
+      // событие вообще не сообщает, кого коснулось изменение — перезагружаем
+      // в любом случае (reload() дешёвый, а доступ всё равно перепроверит backend).
+      const studentId = data?.studentId ?? data?.application?.studentId;
+      if (studentId === undefined || studentId === id) reload();
     },
   });
 
@@ -201,9 +222,10 @@ export default function StudentDetail() {
     }
   };
 
+  if (error) return <div className="error-banner">{error}</div>;
   if (!student || !form) return <div className="empty">Загрузка...</div>;
 
-  const isAdmin = me?.role === 'ADMIN';
+  const isAdmin = isPrivileged(me?.role);
   const assigned = !!student.managerId || !!student.chinaManagerId;
   const isMine = !assigned || student.managerId === me?.id || student.chinaManagerId === me?.id;
   const canEdit = isAdmin || isMine;

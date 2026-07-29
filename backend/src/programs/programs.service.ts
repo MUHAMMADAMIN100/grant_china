@@ -6,6 +6,8 @@ import { CreateProgramDto } from './dto/create-program.dto';
 import { UpdateProgramDto } from './dto/update-program.dto';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { TelegramService } from '../telegram/telegram.service';
+import { isPrivileged } from '../common/roles';
+import { FileResolverService } from '../files/file-resolver.service';
 
 type CurrentUser = { id: string; role: Role };
 
@@ -25,6 +27,7 @@ export class ProgramsService {
     private realtime: RealtimeGateway,
     private telegram: TelegramService,
     private config: ConfigService,
+    private files: FileResolverService,
   ) {}
 
   async findAll(filters: {
@@ -61,16 +64,23 @@ export class ProgramsService {
     });
   }
 
-  async findOne(id: string) {
+  /**
+   * `publishedOnly` — используется публичным `GET /programs/public/:id`
+   * (без авторизации), чтобы неопубликованные черновики с внутренними
+   * ценами не были доступны анониму по прямой ссылке на id.
+   */
+  async findOne(id: string, publishedOnly = false) {
     // Soft-delete: удалённая программа скрыта от API.
-    const p = await this.prisma.program.findFirst({ where: { id, deletedAt: null } });
+    const where: Prisma.ProgramWhereInput = { id, deletedAt: null };
+    if (publishedOnly) where.published = true;
+    const p = await this.prisma.program.findFirst({ where });
     if (!p) throw new NotFoundException('Программа не найдена');
     return p;
   }
 
   async create(dto: CreateProgramDto, user: CurrentUser) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор может создавать программы');
+    if (!isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор может создавать программы');
     }
     const program = await this.prisma.program.create({
       data: {
@@ -89,8 +99,18 @@ export class ProgramsService {
       },
     });
 
-    this.realtime.emitStaff('program:new', { program });
-    this.realtime.emitAllStudents('program:new', { program });
+    // Проблема B аудита: раньше сюда летела вся `program` (в т.ч. черновики
+    // с published:false и внутренней ценой) — Programs.tsx/ProgramsSection.tsx
+    // на любое program:* просто перезапрашивают список по HTTP (у студента —
+    // только published:true, см. programs.service.findAll publishedOnly).
+    this.realtime.emitAllStaff('program:new', { id: program.id });
+    if (program.published) {
+      this.realtime.emitAllStudents('program:new', { id: program.id });
+    }
+
+    // Картинка программы теперь публично раздаётся files/uploads — сбрасываем
+    // TTL-кэш публичных имён, иначе анониму на лендинге до 60с будет 404.
+    this.files.invalidatePublicCache();
 
     // Шлём в канал и сохраняем message_id для последующего edit/delete
     this.notifyChannelNew(program).catch(() => undefined);
@@ -99,14 +119,20 @@ export class ProgramsService {
   }
 
   async update(id: string, dto: UpdateProgramDto, user: CurrentUser) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор может редактировать программы');
+    if (!isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор может редактировать программы');
     }
     const existing = await this.findOne(id);
     const updated = await this.prisma.program.update({ where: { id }, data: dto });
 
-    this.realtime.emitStaff('program:updated', { program: updated });
-    this.realtime.emitAllStudents('program:updated', { program: updated });
+    this.realtime.emitAllStaff('program:updated', { id: updated.id });
+    if (updated.published) {
+      this.realtime.emitAllStudents('program:updated', { id: updated.id });
+    }
+
+    // Картинка могла смениться (или программу опубликовали/сняли с публикации) —
+    // сбрасываем TTL-кэш публичных имён files/uploads.
+    this.files.invalidatePublicCache();
 
     // Если у программы был пост в канале — обновляем его
     if (existing.telegramMessageId) {
@@ -121,8 +147,8 @@ export class ProgramsService {
   }
 
   async remove(id: string, user: CurrentUser) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор может удалять программы');
+    if (!isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор может удалять программы');
     }
     const existing = await this.findOne(id);
 
@@ -137,7 +163,10 @@ export class ProgramsService {
       data: { deletedAt: new Date() },
     });
 
-    this.realtime.emitStaff('program:deleted', { id });
+    // Картинка удалённой программы больше не должна отдаваться анониму.
+    this.files.invalidatePublicCache();
+
+    this.realtime.emitAllStaff('program:deleted', { id });
     this.realtime.emitAllStudents('program:deleted', { id });
 
     return { ok: true };

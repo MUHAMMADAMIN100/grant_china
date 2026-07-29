@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
 import { listUsers } from '../api/users';
 import type { Task, TaskStatus, User } from '../api/types';
-import { TASK_STATUS_BADGE, TASK_STATUS_LABEL } from '../api/types';
+import { ROLE_LABEL, TASK_STATUS_BADGE, TASK_STATUS_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -15,7 +15,7 @@ type Scope = 'all' | 'mine';
 export default function Tasks() {
   const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
-  const isAdmin = me?.role === 'ADMIN';
+  const isAdmin = isPrivileged(me?.role);
   const [items, setItems] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
@@ -215,7 +215,7 @@ export default function Tasks() {
                   <option value="">— Выберите сотрудника —</option>
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.fullName} {u.role === 'ADMIN' ? '(Админ)' : '(Сотрудник)'}
+                      {u.fullName} ({ROLE_LABEL[u.role] || u.role})
                     </option>
                   ))}
                 </select>

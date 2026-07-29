@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { listActivity, ACTIVITY_LABEL, type ActivityAction, type ActivityEntry } from '../api/activity';
+import { ROLE_LABEL, type Role } from '../api/types';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 
@@ -16,18 +17,24 @@ const ACTION_BADGE: Record<ActivityAction, string> = {
 export default function Activity() {
   const [items, setItems] = useState<ActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<ActivityAction | ''>('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
   const load = () => {
     setLoading(true);
+    setError(null);
     listActivity({
       action: action || undefined,
       from: from ? new Date(from).toISOString() : undefined,
       to: to ? new Date(to + 'T23:59:59').toISOString() : undefined,
     })
       .then(setItems)
+      .catch((e: any) => {
+        setItems([]);
+        setError(e?.response?.data?.message || 'Не удалось загрузить журнал активности');
+      })
       .finally(() => setLoading(false));
   };
 
@@ -76,6 +83,7 @@ export default function Activity() {
           />
         </div>
 
+        {error && <div className="error-banner">{error}</div>}
         {loading ? (
           <div className="empty">Загрузка...</div>
         ) : items.length === 0 ? (
@@ -97,7 +105,7 @@ export default function Activity() {
                   <span className="activity-time">{new Date(e.createdAt).toLocaleString('ru-RU')}</span>
                 </div>
                 <div className="activity-actor">
-                  <Icon name="person" size={14} /> {e.actorName} <span className="activity-role">({e.actorRole === 'ADMIN' ? 'Админ' : 'Сотрудник'})</span>
+                  <Icon name="person" size={14} /> {e.actorName} <span className="activity-role">({ROLE_LABEL[e.actorRole as Role] || e.actorRole})</span>
                 </div>
                 {e.studentName && (
                   <div className="activity-student">

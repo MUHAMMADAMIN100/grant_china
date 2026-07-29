@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { useEffect, useRef, useState } from 'react';
+import { api } from './api/client';
 
 // Same-origin: socket.io подключается к тому же домену через Vercel rewrite
 // `/admin/socket.io/*` → Railway backend. В dev — на localhost напрямую.
@@ -33,7 +34,21 @@ export function connectRealtime() {
       reconnectionDelay: 1000,
     });
     socket.on('connect', () => setState('connected'));
-    socket.on('disconnect', () => setState('disconnected'));
+    socket.on('disconnect', (reason) => {
+      setState('disconnected');
+      // ПРОБЛЕМА A/F аудита: если backend разрывает сокет НАМЕРЕННО
+      // (socket.disconnect() на сервере — например при увольнении/смене роли
+      // сотрудника прямо во время открытой сессии), socket.io-client сам НЕ
+      // пытается переподключиться для reason === 'io server disconnect' —
+      // это штатное поведение библиотеки, зацикливания ретраев нет.
+      // Но пользователь при этом молча остаётся на странице со старыми
+      // данными в памяти без переподключения. Сверяем cookie-сессию через
+      // /auth/me: если она правда протухла (401), interceptor в
+      // api/client.ts сам разлогинит и уведёт на /login.
+      if (reason === 'io server disconnect') {
+        api.get('/auth/me').catch(() => {});
+      }
+    });
     socket.io.on('reconnect_attempt', () => setState('reconnecting'));
     socket.io.on('reconnect', () => setState('connected'));
     return socket;

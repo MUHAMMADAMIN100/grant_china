@@ -42,8 +42,25 @@ export default function App() {
         <Route path="/students/:id" element={<StudentDetail />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/programs" element={<Programs />} />
-        <Route path="/users" element={<Users />} />
-        <Route path="/activity" element={<Activity />} />
+        {/* /users и /activity — только FOUNDER и ADMIN (БАГ 3 аудита: раньше
+            роутинг это не проверял, доступ ограничивался лишь скрытием
+            пункта меню, что не мешало прямому переходу по URL). */}
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute roles={['FOUNDER', 'ADMIN']}>
+              <Users />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/activity"
+          element={
+            <ProtectedRoute roles={['FOUNDER', 'ADMIN']}>
+              <Activity />
+            </ProtectedRoute>
+          }
+        />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

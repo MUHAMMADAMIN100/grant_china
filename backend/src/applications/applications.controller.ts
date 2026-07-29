@@ -61,8 +61,8 @@ export class ApplicationsController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  one(@Param('id') id: string) {
-    return this.apps.findOne(id);
+  one(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.apps.findOne(id, user);
   }
 
   @UseGuards(JwtAuthGuard)

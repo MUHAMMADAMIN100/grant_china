@@ -1,16 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import {
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { SessionResolverService } from '../auth/session-resolver.service';
 import { AUTH_COOKIE_NAME, STUDENT_COOKIE_NAME } from '../auth/cookie-helpers';
-
-type JwtPayload = { sub: string; email: string; role: 'FOUNDER' | 'ADMIN' | 'EMPLOYEE' | 'STUDENT' };
+import { onUserCacheInvalidated } from '../auth/jwt.strategy';
+import { onStudentCacheInvalidated } from '../student-auth/student-jwt.guard';
+import { isPrivileged } from '../common/roles';
 
 /** Парсит cookie-заголовок в объект { name: value }. */
 function parseCookieHeader(header: string | undefined): Record<string, string> {
@@ -26,6 +27,9 @@ function parseCookieHeader(header: string | undefined): Record<string, string> {
   return out;
 }
 
+/** Минимальные данные, нужные для маршрутизации события к «своим» сотрудникам. */
+export type ManagerScope = { managerId?: string | null; chinaManagerId?: string | null };
+
 @Injectable()
 @WebSocketGateway({
   cors: {
@@ -33,13 +37,31 @@ function parseCookieHeader(header: string | undefined): Record<string, string> {
     credentials: true,
   },
 })
-export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   private readonly logger = new Logger(RealtimeGateway.name);
 
   @WebSocketServer()
   server: Server;
 
-  constructor(private jwt: JwtService, private config: ConfigService) {}
+  constructor(private session: SessionResolverService) {}
+
+  /**
+   * Проблема A аудита, пункт 4: как только роль/статус пользователя
+   * инвалидируются (увольнение, смена роли, soft-delete студента) — рвём
+   * его текущие сокеты. Без этого уволенный сотрудник со старой (но ещё не
+   * истёкшей) cookie продолжал бы получать поток событий в staff-комнатах
+   * до реконнекта, то есть до 7 дней — тот же баг, что HTTP-слой закрыл в
+   * Волне 0, только для WebSocket. Регистрируем слушатели в afterInit(),
+   * чтобы `this.server` уже был готов на момент первого вызова.
+   */
+  afterInit(): void {
+    onUserCacheInvalidated((userId) => this.forceDisconnectRoom(`user:${userId}`));
+    onStudentCacheInvalidated((studentId) => this.forceDisconnectRoom(`student:${studentId}`));
+  }
+
+  private forceDisconnectRoom(room: string): void {
+    this.server?.in(room).disconnectSockets(true);
+  }
 
   async handleConnection(client: Socket) {
     // Извлекаем токен в порядке приоритета:
@@ -47,64 +69,54 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     // 2. handshake.auth.token (legacy, передаваемый через socket.io-client)
     // 3. query string
     // 4. Authorization header
+    //
+    // Проблема A аудита: раньше здесь проверялась ТОЛЬКО подпись JWT, а
+    // роль бралась прямо из payload — ни role, ни deletedAt не сверялись
+    // с БД ни при подключении, ни потом. Уволенный сотрудник со старой
+    // cookie получал поток application:new/updated, activity:new,
+    // document:uploaded, notification:new ещё до 7 дней. Теперь личность
+    // резолвит SessionResolverService — тот же код и тот же TTL-кэш
+    // (jwt.strategy.ts/student-jwt.guard.ts), что уже используется в HTTP.
     const cookies = parseCookieHeader(
       (client.handshake.headers.cookie as string | undefined) || '',
     );
-    const cookieToken = cookies[AUTH_COOKIE_NAME] || cookies[STUDENT_COOKIE_NAME];
-    const token =
-      cookieToken ||
+    // Легаси-путь (не cookie) — оставлен для старых клиентов, которые ещё
+    // шлют токен через auth/query/Authorization. SessionResolverService
+    // читает только cookie, поэтому для этого пути кладём токен в
+    // «виртуальную» cookie с тем же именем, под которым его ожидает резолвер.
+    const legacyToken =
       (client.handshake.auth as any)?.token ||
       (client.handshake.query as any)?.token ||
       (client.handshake.headers.authorization || '').replace(/^Bearer\s+/i, '');
 
-    if (!token) {
-      this.logger.warn('Connection without token, disconnecting');
-      client.disconnect();
+    const identity = await this.session.resolve(
+      legacyToken && !cookies[AUTH_COOKIE_NAME] && !cookies[STUDENT_COOKIE_NAME]
+        ? { [AUTH_COOKIE_NAME]: legacyToken, [STUDENT_COOKIE_NAME]: legacyToken }
+        : cookies,
+    );
+
+    if (identity.kind === 'anonymous') {
+      this.logger.warn('Connection rejected: no valid session (staff or student)');
+      client.disconnect(true);
       return;
     }
 
-    try {
-      const staffSecret = this.config.get<string>('JWT_SECRET');
-      if (!staffSecret) {
-        this.logger.error('JWT_SECRET not configured — refusing socket connection');
-        client.disconnect();
-        return;
+    if (identity.kind === 'staff') {
+      (client.data as any) = { userId: identity.id, role: identity.role };
+      client.join('staff');
+      client.join(`user:${identity.id}`);
+      if (isPrivileged(identity.role)) {
+        client.join('staff:privileged');
       }
-      const studentSecret = this.config.get<string>('STUDENT_JWT_SECRET');
-
-      // Сначала пробуем как staff-токен (JWT_SECRET).
-      // Если не подошёл — пробуем как студенческий (STUDENT_JWT_SECRET, потом legacy JWT_SECRET).
-      let payload: JwtPayload | null = null;
-      try {
-        payload = await this.jwt.verifyAsync<JwtPayload>(token, { secret: staffSecret });
-      } catch {
-        if (studentSecret) {
-          try {
-            payload = await this.jwt.verifyAsync<JwtPayload>(token, { secret: studentSecret });
-          } catch {
-            // тоже не подошёл — fallthrough
-          }
-        }
-      }
-      if (!payload) throw new Error('Invalid token signature');
-
-      const role = payload.role;
-      const id = payload.sub;
-
-      (client.data as any) = { userId: id, role };
-
-      if (role === 'FOUNDER' || role === 'ADMIN' || role === 'EMPLOYEE') {
-        client.join('staff');
-        client.join(`user:${id}`);
-      } else if (role === 'STUDENT') {
-        client.join(`student:${id}`);
-        client.join('students');
-      }
-      this.logger.log(`Connected: ${role} ${id}`);
-    } catch (err) {
-      this.logger.warn(`Token verify failed: ${(err as Error).message}`);
-      client.disconnect();
+      this.logger.log(`Connected: ${identity.role} ${identity.id}`);
+      return;
     }
+
+    // identity.kind === 'student'
+    (client.data as any) = { userId: identity.id, role: 'STUDENT' };
+    client.join(`student:${identity.id}`);
+    client.join('students');
+    this.logger.log(`Connected: STUDENT ${identity.id}`);
   }
 
   handleDisconnect(client: Socket) {
@@ -112,8 +124,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.logger.log(`Disconnected: ${data.role} ${data.userId}`);
   }
 
-  /** Сотрудникам (все админы + сотрудники) */
-  emitStaff(event: string, payload: any) {
+  /**
+   * Всем сотрудникам без исключения. ТОЛЬКО для событий без привязки к
+   * конкретному студенту/заявке (программы, задачи, журнал активности —
+   * там GET-эндпоинт сам фильтрует видимость при перезапросе). Для
+   * событий, привязанных к студенту, используй emitForStudent() —
+   * иначе PII-adjacent сигнал (кто чей студент) уедет всем менеджерам
+   * компании, даже после того как payload обрезан до одних id.
+   */
+  emitAllStaff(event: string, payload: any) {
     this.server?.to('staff').emit(event, payload);
   }
 
@@ -132,9 +151,31 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server?.to('students').emit(event, payload);
   }
 
-  /** Всем кто касается этого студента — и сам студент, и staff */
-  emitStudentAndStaff(studentId: string, event: string, payload: any) {
-    this.emitStaff(event, payload);
-    this.emitStudent(studentId, event, payload);
+  /**
+   * Событие, привязанное к конкретному студенту/заявке. Адресаты:
+   *  - staff:privileged — FOUNDER/ADMIN видят всё всегда;
+   *  - user:<managerId> и user:<chinaManagerId> — назначенные менеджеры;
+   *  - если оба менеджера не назначены («свободная» запись) — общая
+   *    комната staff, ту же логику видимости использует hasAccess() в
+   *    students.service.ts/applications.service.ts (свободную запись
+   *    может взять в работу любой сотрудник);
+   *  - opts.studentId — дополнительно сам студент, в свой личный канал.
+   *
+   * Маршрутизация считается «в момент emit» по АКТУАЛЬНЫМ managerId/
+   * chinaManagerId — переназначение менеджера не требует join/leave
+   * комнат на каждое переподключение, следующее же событие само уедет
+   * новому менеджеру, а старый (не видящий запись через hasAccess())
+   * просто перестанет их получать.
+   */
+  emitForStudent(scope: ManagerScope, event: string, payload: any, opts?: { studentId?: string }) {
+    const rooms = new Set<string>(['staff:privileged']);
+    if (scope.managerId || scope.chinaManagerId) {
+      if (scope.managerId) rooms.add(`user:${scope.managerId}`);
+      if (scope.chinaManagerId) rooms.add(`user:${scope.chinaManagerId}`);
+    } else {
+      rooms.add('staff');
+    }
+    if (opts?.studentId) rooms.add(`student:${opts.studentId}`);
+    this.server?.to(Array.from(rooms)).emit(event, payload);
   }
 }

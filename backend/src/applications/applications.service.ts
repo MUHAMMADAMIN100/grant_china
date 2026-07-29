@@ -10,6 +10,10 @@ import { SmsService } from '../sms/sms.service';
 import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { REQUIRED_DOCUMENT_TYPES } from '../common/documents';
+import { isPrivileged } from '../common/roles';
+import { canAccessStudentRecord } from '../common/access';
+import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
+import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
@@ -31,7 +35,14 @@ const DIRECTION_LABEL: Record<Direction, string> = {
 
 const MANAGER_INCLUDE = {
   student: {
-    include: {
+    // select (не include!) — иначе Prisma подтягивает ВСЕ скалярные поля
+    // Student по умолчанию, включая `password` (bcrypt-хэш пароля личного
+    // кабинета студента). GET /applications и GET /applications/:id
+    // раньше отдавали этот хэш в каждом ответе через вложенного student.
+    // STUDENT_SAFE_FIELDS — общий с students.service.ts список (Проблема G
+    // аудита: раньше был продублирован здесь дословно).
+    select: {
+      ...STUDENT_SAFE_FIELDS,
       manager: { select: { id: true, fullName: true, email: true } },
       chinaManager: { select: { id: true, fullName: true, email: true } },
       program: true,
@@ -168,7 +179,12 @@ export class ApplicationsService {
       )
       .catch(() => undefined);
 
-    this.realtime.emitStaff('application:new', { application: app });
+    // Публичная заявка с лендинга всегда без менеджера — её должен увидеть
+    // весь staff, чтобы кто-то взял в работу. Payload — только id (Проблема B
+    // аудита: фронт (Applications.tsx) на любое application:* просто
+    // перезапрашивает список по HTTP, где авторизация уже проверена;
+    // сама заявка ещё не содержит studentId/PII на этом этапе).
+    this.realtime.emitAllStaff('application:new', { id: app.id });
     return app;
   }
 
@@ -246,24 +262,46 @@ export class ApplicationsService {
     return { items, total, page, pageSize };
   }
 
-  async findOne(id: string) {
+  /**
+   * `user` передаётся только из контроллера (публичный HTTP-запрос).
+   * Внутренние вызовы findOne(id) без user — из update/assignManager/remove,
+   * которые сами вызывают ensureCanEdit() ПОСЛЕ чтения (сохраняем прежние
+   * тексты и коды ошибок — 403, а не 404 — для этих сценариев).
+   */
+  async findOne(id: string, user?: CurrentUser) {
     // Soft-delete: удалённая заявка скрыта от API (404).
     const app = await this.prisma.application.findFirst({
       where: { id, deletedAt: null },
       include: MANAGER_INCLUDE,
     });
     if (!app) throw new NotFoundException('Заявка не найдена');
+    // БАГ 2 аудита: EMPLOYEE не должен прочитать чужую заявку по UUID.
+    // Отдаём 404 (не 403) — иначе ответ работает как оракул существования id.
+    if (user && !this.hasAccess(app, user)) {
+      throw new NotFoundException('Заявка не найдена');
+    }
     return app;
+  }
+
+  /**
+   * Единая проверка доступа к заявке: используется и для чтения (findOne),
+   * и для записи (ensureCanEdit) — правило одно и то же.
+   *  - FOUNDER и ADMIN видят/редактируют все заявки;
+   *  - EMPLOYEE — только назначенные лично ему (managerId/chinaManagerId),
+   *    либо ещё никому не назначенные («свободные» — их может взять любой).
+   */
+  private hasAccess(
+    app: { managerId: string | null; chinaManagerId?: string | null },
+    user: CurrentUser,
+  ): boolean {
+    return canAccessStudentRecord(app, user);
   }
 
   private ensureCanEdit(
     app: { managerId: string | null; chinaManagerId?: string | null },
     user: CurrentUser,
   ) {
-    if (user.role === 'FOUNDER' || user.role === 'ADMIN') return;
-    const assigned = app.managerId || app.chinaManagerId;
-    if (!assigned) return; // ещё не назначен — любой может взять в работу
-    if (app.managerId === user.id || app.chinaManagerId === user.id) return;
+    if (this.hasAccess(app, user)) return;
     throw new ForbiddenException(
       'Только назначенные менеджеры или администратор могут редактировать эту заявку',
     );
@@ -283,6 +321,9 @@ export class ApplicationsService {
       // Старый флоу (без email) — пропускаем, студент создастся при отдельном действии
       let studentId = existing.studentId;
       try {
+        // Проблема D аудита: копируем managerId/chinaManagerId с заявки —
+        // иначе авто-созданный студент рождается «бесхозным», даже если
+        // заявку уже назначили конкретному менеджеру.
         const studentData: any = {
           fullName: existing.fullName,
           phones: [existing.phone],
@@ -290,6 +331,8 @@ export class ApplicationsService {
           direction: existing.direction,
           cabinet: CABINET_BY_DIRECTION[existing.direction],
           comment: existing.comment,
+          managerId: existing.managerId,
+          chinaManagerId: existing.chinaManagerId,
         };
         const student = await this.prisma.student.create({ data: studentData });
         studentId = student.id;
@@ -301,7 +344,12 @@ export class ApplicationsService {
         data: { ...dto, ...(studentId ? { studentId } : {}) },
         include: MANAGER_INCLUDE,
       });
-      this.realtime.emitStaff('application:updated', { application: updated });
+      // Проблема B аудита: раньше сюда летел весь `updated` с MANAGER_INCLUDE
+      // (паспортные данные, дата рождения, phones, email вложенного student) —
+      // ВСЕМ сотрудникам в комнате staff. Теперь только id + маршрутизация
+      // по фактическим менеджерам заявки (emitForStudent), фронт (Applications.tsx,
+      // ApplicationDetail.tsx) перезапрашивает данные по HTTP с уже проверенными правами.
+      this.realtime.emitForStudent(updated, 'application:updated', { id: updated.id, studentId: updated.studentId });
       if (updated.studentId) {
         this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
       }
@@ -337,10 +385,18 @@ export class ApplicationsService {
       data: dto,
       include: MANAGER_INCLUDE,
     });
-    this.realtime.emitStaff('application:updated', { application: updated });
+    // Проблема B аудита: было {application: updated} с полными данными
+    // студента ВСЕМ сотрудникам — теперь id + маршрутизация по реальным
+    // менеджерам заявки, студент получает то же событие в свой канал
+    // (StudentCabinet.tsx слушает application:updated).
+    this.realtime.emitForStudent(
+      updated,
+      'application:updated',
+      { id: updated.id, studentId: updated.studentId },
+      updated.studentId ? { studentId: updated.studentId } : undefined,
+    );
     if (updated.studentId) {
       this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
-      this.realtime.emitStudent(updated.studentId, 'application:updated', { application: updated });
     }
 
     // SMS студенту при ЛЮБОЙ смене статуса (вперёд/назад/на ENROLLED)
@@ -374,8 +430,8 @@ export class ApplicationsService {
     patch: { managerId?: string | null; chinaManagerId?: string | null },
     user: CurrentUser,
   ) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор может переназначать менеджеров');
+    if (!isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор может переназначать менеджеров');
     }
     const existing = await this.findOne(id);
 
@@ -408,7 +464,10 @@ export class ApplicationsService {
       data,
       include: MANAGER_INCLUDE,
     });
-    this.realtime.emitStaff('application:updated', { application: updated });
+    // Роутим по НОВЫМ менеджерам — старый менеджер (если сменился) перестаёт
+    // получать события по этой заявке, что соответствует hasAccess() (он
+    // больше не видит её и через HTTP).
+    this.realtime.emitForStudent(updated, 'application:updated', { id: updated.id, studentId: updated.studentId });
     if (updated.studentId) {
       this.realtime.emitStudent(updated.studentId, 'student:updated', { studentId: updated.studentId });
     }
@@ -465,21 +524,34 @@ export class ApplicationsService {
 
   /**
    * Soft delete: помечаем deletedAt. Если у заявки есть студент — его
-   * тоже soft-delete'им. Данные остаются в БД и могут быть восстановлены.
+   * тоже soft-delete'им, НО только если права на СТУДЕНТА подтверждены
+   * отдельно. Данные остаются в БД и могут быть восстановлены.
    */
   async remove(id: string, user: CurrentUser) {
     const app = await this.findOne(id);
     this.ensureCanEdit(app, user);
     const now = new Date();
-    if (app.studentId) {
-      await this.prisma.student
-        .update({ where: { id: app.studentId }, data: { deletedAt: now } })
-        .catch(() => undefined);
+    if (app.studentId && app.student) {
+      // Проблема D аудита: раньше право удалить студента проверялось ЧЕРЕЗ
+      // ПРАВА НА ЗАЯВКУ — а у заявки и у связанного студента могут быть
+      // разные менеджеры (переназначить можно любую из сторон отдельно,
+      // плюс исторические записи, заведённые до этой правки). Рядовой
+      // менеджер, имея право редактировать «свою» заявку, мог тем самым
+      // soft-delete'нуть ЧУЖОГО студента. Теперь права на студента
+      // проверяются отдельно; нет прав — удаляем только заявку.
+      if (canAccessStudentRecord(app.student, user)) {
+        await this.prisma.student
+          .update({ where: { id: app.studentId }, data: { deletedAt: now } })
+          .catch(() => undefined);
+        // БАГ 4 аудита: сбрасываем кэш StudentJwtGuard сразу, иначе
+        // удалённый студент ещё до 30 секунд может ходить в ЛК по старому токену.
+        invalidateStudentCache(app.studentId);
+      }
     }
     await this.prisma.application
       .update({ where: { id }, data: { deletedAt: now } })
       .catch(() => undefined);
-    this.realtime.emitStaff('application:deleted', { id });
+    this.realtime.emitForStudent(app, 'application:deleted', { id });
     return { ok: true };
   }
 

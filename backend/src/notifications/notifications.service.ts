@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { notDeleted } from '../common/soft-delete';
 
 interface NotifyPayload {
   type: string;
@@ -13,11 +14,41 @@ interface NotifyPayload {
 export class NotificationsService {
   constructor(private prisma: PrismaService, private realtime: RealtimeGateway) {}
 
-  async notifyAllStaff(data: NotifyPayload) {
-    const users = await this.prisma.user.findMany({ select: { id: true } });
-    if (!users.length) return;
+  /**
+   * Уведомление об изменении студента. Получатели — ТОЛЬКО назначенные
+   * менеджеры этого студента плюс FOUNDER/ADMIN (им нужно видеть всё для
+   * контроля). Раньше это была notifyAllStaff() — уведомление (ФИО студента
+   * + дифф изменённых полей, включая телефоны/email) КАЖДОМУ сотруднику
+   * компании, независимо от того, назначен он на этого студента или нет
+   * (Проблема C аудита волны 1: рядовой менеджер собирал оттуда телефоны/
+   * email/UUID чужих студентов, просто читая свой колокольчик).
+   */
+  async notifyForStudent(
+    student: { managerId: string | null; chinaManagerId?: string | null },
+    data: NotifyPayload,
+  ) {
+    const adminFounders = await this.prisma.user.findMany({
+      where: { role: { in: ['FOUNDER', 'ADMIN'] }, ...notDeleted },
+      select: { id: true },
+    });
+
+    // dedup через Set: managerId/chinaManagerId могут совпадать с FOUNDER/ADMIN
+    const recipientIds = new Set<string>(adminFounders.map((u) => u.id));
+    if (student.managerId) recipientIds.add(student.managerId);
+    if (student.chinaManagerId) recipientIds.add(student.chinaManagerId);
+    if (recipientIds.size === 0) return;
+
+    // Уволенные (soft-delete) сотрудники не должны получать уведомления —
+    // в связке с БАГОМ 4 (роль/сессия отзывается не сразу) это давало
+    // окно, где уволенный ещё читал свежие уведомления по студентам.
+    const activeRecipients = await this.prisma.user.findMany({
+      where: { id: { in: Array.from(recipientIds) }, ...notDeleted },
+      select: { id: true },
+    });
+    if (!activeRecipients.length) return;
+
     await this.prisma.notification.createMany({
-      data: users.map((u) => ({
+      data: activeRecipients.map((u) => ({
         userId: u.id,
         type: data.type,
         title: data.title,
@@ -25,13 +56,13 @@ export class NotificationsService {
         payload: data.payload ?? undefined,
       })),
     });
-    // Realtime — всем сотрудникам
-    this.realtime.emitStaff('notification:new', {
-      type: data.type,
-      title: data.title,
-      message: data.message,
-      payload: data.payload,
-    });
+    // Проблема B аудита: сокет шлёт только сигнал — NotificationBell.tsx
+    // на любое notification:new просто перезапрашивает список по HTTP
+    // (listForUser уже per-user), title/message с ФИО и диффом полей
+    // студента в payload сокета не нужны никому из подписчиков.
+    for (const u of activeRecipients) {
+      this.realtime.emitUser(u.id, 'notification:new', { type: data.type });
+    }
   }
 
   /**
@@ -72,14 +103,10 @@ export class NotificationsService {
       })),
     });
 
-    // Точечная realtime-доставка каждому получателю по его user-room
+    // Точечная realtime-доставка каждому получателю по его user-room —
+    // только сигнал, NotificationBell.tsx перезапрашивает список по HTTP.
     for (const userId of recipientIds) {
-      this.realtime.emitUser(userId, 'notification:new', {
-        type: data.type,
-        title: data.title,
-        message: data.message,
-        payload: data.payload,
-      });
+      this.realtime.emitUser(userId, 'notification:new', { type: data.type });
     }
   }
 
@@ -103,12 +130,7 @@ export class NotificationsService {
       })),
     });
     for (const u of users) {
-      this.realtime.emitUser(u.id, 'notification:new', {
-        type: data.type,
-        title: data.title,
-        message: data.message,
-        payload: data.payload,
-      });
+      this.realtime.emitUser(u.id, 'notification:new', { type: data.type });
     }
   }
 
@@ -122,13 +144,7 @@ export class NotificationsService {
         payload: data.payload ?? undefined,
       },
     });
-    this.realtime.emitUser(userId, 'notification:new', {
-      id: notif.id,
-      type: data.type,
-      title: data.title,
-      message: data.message,
-      payload: data.payload,
-    });
+    this.realtime.emitUser(userId, 'notification:new', { id: notif.id, type: data.type });
     return notif;
   }
 

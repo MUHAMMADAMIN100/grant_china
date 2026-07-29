@@ -113,8 +113,8 @@ export class StudentsController {
   }
 
   @Get(':id')
-  one(@Param('id') id: string) {
-    return this.students.findOne(id);
+  one(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.students.findOne(id, user);
   }
 
   @Post()

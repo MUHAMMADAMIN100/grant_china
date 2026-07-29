@@ -41,3 +41,11 @@ frontend-crm/dist/
 
 # TS build info
 *.tsbuildinfo
+
+# Screenshots генерируются по запросу — не нужны в git
+scripts/screenshots-landing/
+scripts/screenshots-crm/
+
+# Бэкапы БД — содержат ПД студентов и bcrypt-хэши паролей.
+# В git не попадают НИКОГДА.
+scripts/backups/

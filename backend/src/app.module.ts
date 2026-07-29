@@ -21,13 +21,34 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { ProgramsModule } from './programs/programs.module';
 import { ActivityModule } from './activity/activity.module';
 
+// Проблема E аудита: ServeStaticModule отдавал ВЕСЬ каталог /uploads (сканы
+// паспортов, BANK/MEDICAL справки, фото студентов) анониму без всякой
+// авторизации. Раздачу файлов с проверкой прав теперь делает FilesModule →
+// UploadsController (@Controller('uploads'), см. files/uploads.controller.ts);
+// main.ts:setGlobalPrefix() исключает 'uploads/*' из префикса /api, чтобы
+// URL-контракт /uploads/<name> остался прежним для уже сохранённых в БД ссылок.
+//
+// UPLOADS_PROTECTED — аварийный откат на случай, если защита в проде ведёт
+// себя не так, как ожидалось (например каталог на Railway volume смонтирован
+// иначе, чем локально). По умолчанию (ЛЮБОЕ значение, кроме '0') — защита
+// ВКЛЮЧЕНА. Явно выставить UPLOADS_PROTECTED=0 в Railway env — вернёт старое
+// поведение (ServeStaticModule, весь каталог отдаётся анониму без проверок)
+// БЕЗ передеплоя кода. Держать этот флаг выключенным дольше нескольких минут
+// небезопасно — используется только чтобы откатиться, если что-то пошло не
+// так, пока чинится настоящая причина.
+const UPLOADS_PROTECTED = process.env.UPLOADS_PROTECTED !== '0';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), process.env.UPLOADS_DIR || './uploads'),
-      serveRoot: '/uploads',
-    }),
+    ...(UPLOADS_PROTECTED
+      ? []
+      : [
+          ServeStaticModule.forRoot({
+            rootPath: join(process.cwd(), process.env.UPLOADS_DIR || './uploads'),
+            serveRoot: '/uploads',
+          }),
+        ]),
     // Глобальные rate-limits. Точечные более жёсткие лимиты — через @Throttle()
     // на конкретных публичных эндпоинтах (POST /applications/public,
     // POST /student-auth/login).

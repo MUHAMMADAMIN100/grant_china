@@ -57,26 +57,43 @@ export default function ApplicationDetail() {
 
   const reload = async () => {
     if (!id) return;
+    // ПРОБЛЕМА F аудита: раньше error не сбрасывался на успешном пути. Роут
+    // /applications/:id не размонтируется при смене :id, поэтому одна ошибка
+    // (например realtime дёрнул reload() для заявки, доступ к которой уже
+    // закрыт) навсегда вешала баннер поверх ВСЕХ последующих заявок.
+    // Сбрасываем в начале каждого вызова — успешная загрузка следующей
+    // заявки уберёт баннер предыдущей ошибки.
+    setError(null);
     try {
       const a = await getApplication(id);
       setApp(a);
       if (a.studentId) {
-        const s = await getStudent(a.studentId);
-        setStudent(s);
-        setForm({
-          fullName: s.fullName,
-          phones: s.phones.join(', '),
-          email: s.email || '',
-          direction: s.direction,
-          cabinet: s.cabinet,
-          status: s.status,
-          comment: s.comment || '',
-        });
+        try {
+          // Заявка и студент — разные записи с разными managerId/chinaManagerId
+          // (БАГ 2 аудита). Отдельный try/catch: если доступ к самому студенту
+          // почему-то закрыт (редкий рассинхрон менеджеров), не роняем всю
+          // страницу заявки — просто не показываем блок студента.
+          const s = await getStudent(a.studentId);
+          setStudent(s);
+          setForm({
+            fullName: s.fullName,
+            phones: s.phones.join(', '),
+            email: s.email || '',
+            direction: s.direction,
+            cabinet: s.cabinet,
+            status: s.status,
+            comment: s.comment || '',
+          });
+        } catch {
+          setStudent(null);
+        }
       } else {
         setStudent(null);
       }
     } catch (e: any) {
-      setError(e.message);
+      setApp(null);
+      setStudent(null);
+      setError(e?.response?.data?.message || 'Нет доступа к этой заявке');
     }
   };
 
@@ -84,7 +101,15 @@ export default function ApplicationDetail() {
 
   useRealtime({
     'application:updated': (data: any) => {
-      if (data?.application?.id === id || data?.studentId === app?.studentId) reload();
+      // Бэкенд переходит на «тонкие» realtime-события: вместо всего объекта
+      // { application: {...} } может прийти { id } / { applicationId } без
+      // вложенной заявки. Поддерживаем оба варианта; если событие не
+      // сообщает ни applicationId, ни studentId — перезагружаем в любом
+      // случае (reload() дешёвый, доступ всё равно перепроверит backend).
+      const applicationId = data?.id ?? data?.applicationId ?? data?.application?.id;
+      const studentId = data?.studentId ?? data?.application?.studentId;
+      if (applicationId === undefined && studentId === undefined) { reload(); return; }
+      if (applicationId === id || studentId === app?.studentId) reload();
     },
     'student:updated': (data: any) => {
       if (data?.studentId && data.studentId === app?.studentId) reload();

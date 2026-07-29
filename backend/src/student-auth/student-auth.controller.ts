@@ -26,10 +26,9 @@ import { StudentAuthService } from './student-auth.service';
 import { StudentJwtGuard } from './student-jwt.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
-
-// Совпадает со списком в student-auth.service. Держим локальную копию,
-// чтобы не тянуть импорт из сервиса ради одного Set.
-const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL']);
+// Проблема G аудита: раньше этот Set дублировался дословно здесь и в
+// student-auth.service.ts — единственный источник теперь common/access.ts.
+import { STUDENT_RESTRICTED_DOC_TYPES } from '../common/access';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { StudentForgotPasswordDto, StudentLoginDto } from './dto/student-login.dto';
 import { clearStudentCookie, setStudentCookie } from '../auth/cookie-helpers';
@@ -141,10 +140,10 @@ export class StudentAuthController {
     const updated = await this.prisma.student.update({
       where: { id: user.id },
       data: { applicationForm: form },
-      select: { applicationForm: true },
+      select: { applicationForm: true, managerId: true, chinaManagerId: true },
     });
-    this.realtime.emitStudentAndStaff(user.id, 'form:updated', { studentId: user.id });
-    this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
+    this.realtime.emitForStudent(updated, 'form:updated', { studentId: user.id }, { studentId: user.id });
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId: user.id }, { studentId: user.id });
     return { form: updated.applicationForm };
   }
 
@@ -185,8 +184,21 @@ export class StudentAuthController {
         type: docType,
       },
     });
-    this.realtime.emitStudentAndStaff(user.id, 'document:uploaded', { studentId: user.id, doc });
-    this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
+    const managers = await this.prisma.student.findUnique({
+      where: { id: user.id },
+      select: { managerId: true, chinaManagerId: true },
+    });
+    // Проблема B аудита: раньше в payload летел весь `doc`, включая `url` —
+    // прямую ссылку на файл. Теперь только id, фронт (StudentDetail.tsx,
+    // StudentCabinet.tsx) перезапрашивает документ по HTTP с уже
+    // проверенными правами (и /uploads теперь тоже защищён — Проблема E).
+    this.realtime.emitForStudent(
+      managers ?? {},
+      'document:uploaded',
+      { studentId: user.id, docId: doc.id },
+      { studentId: user.id },
+    );
+    this.realtime.emitForStudent(managers ?? {}, 'student:updated', { studentId: user.id }, { studentId: user.id });
     // Если это ограниченный тип — не отдаём URL самому студенту.
     // Файл в БД и в /uploads остаётся, менеджер увидит его в CRM как обычно.
     if (STUDENT_RESTRICTED_DOC_TYPES.has(docType)) {
@@ -266,8 +278,17 @@ export class StudentAuthController {
       where: { id: docId },
       data: { deletedAt: new Date() },
     });
-    this.realtime.emitStudentAndStaff(user.id, 'document:deleted', { studentId: user.id, docId });
-    this.realtime.emitStudentAndStaff(user.id, 'student:updated', { studentId: user.id });
+    const managers = await this.prisma.student.findUnique({
+      where: { id: user.id },
+      select: { managerId: true, chinaManagerId: true },
+    });
+    this.realtime.emitForStudent(
+      managers ?? {},
+      'document:deleted',
+      { studentId: user.id, docId },
+      { studentId: user.id },
+    );
+    this.realtime.emitForStudent(managers ?? {}, 'student:updated', { studentId: user.id }, { studentId: user.id });
     return { ok: true };
   }
 }

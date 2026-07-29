@@ -23,6 +23,7 @@ import { CreateProgramDto } from './dto/create-program.dto';
 import { UpdateProgramDto } from './dto/update-program.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { isPrivileged } from '../common/roles';
 
 const programImageStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -63,7 +64,9 @@ export class ProgramsController {
 
   @Get('public/:id')
   publicOne(@Param('id') id: string) {
-    return this.programs.findOne(id);
+    // publishedOnly=true — неопубликованные черновики программ (внутренние
+    // цены и т.п.) не должны быть доступны анониму по прямой ссылке.
+    return this.programs.findOne(id, true);
   }
 
   // Приватный (CRM)
@@ -164,8 +167,8 @@ export class ProgramsController {
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: any,
   ) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор');
+    if (!isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор');
     }
     if (!file) throw new BadRequestException('Файл не передан');
     const imageUrl = `/uploads/${file.filename}`;

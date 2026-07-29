@@ -40,8 +40,8 @@ export class TasksController {
   }
 
   @Get(':id')
-  one(@Param('id') id: string) {
-    return this.tasks.findOne(id);
+  one(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.tasks.findOne(id, user);
   }
 
   @Post()

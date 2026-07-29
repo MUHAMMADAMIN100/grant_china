@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { notDeleted, tombstoneEmail } from '../common/soft-delete';
+import { invalidateUserCache } from '../auth/jwt.strategy';
 
 @Injectable()
 export class UsersService {
@@ -124,6 +125,11 @@ export class UsersService {
       this.logger.log(`Password updated and verified for user ${id} (${user.email})`);
     }
 
+    // БАГ 4 аудита: если роль сменилась — сбрасываем кэш JwtStrategy, иначе
+    // до 30 секунд у пользователя ещё будет действовать старая роль во всех
+    // проверках прав (см. auth/jwt.strategy.ts).
+    if (dto.role) invalidateUserCache(id);
+
     // Скрываем password из ответа клиенту
     const { password: _omit, ...safe } = user as any;
     return safe;
@@ -145,6 +151,9 @@ export class UsersService {
       },
     });
     this.logger.log(`User ${id} (${existing.email}) soft-deleted`);
+    // БАГ 4 аудита: сбрасываем кэш роли сразу, иначе уволенный сотрудник
+    // ещё до 30 секунд может ходить с валидным токеном (см. jwt.strategy.ts).
+    invalidateUserCache(id);
     return { ok: true };
   }
 }

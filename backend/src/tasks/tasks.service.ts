@@ -6,6 +6,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { isPrivileged } from '../common/roles';
 
 type CurrentUser = { id: string; role: Role };
 
@@ -24,8 +25,8 @@ export class TasksService {
   ) {}
 
   async create(dto: CreateTaskDto, user: CurrentUser) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор может создавать задачи');
+    if (!isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор может создавать задачи');
     }
     const assignee = await this.prisma.user.findUnique({ where: { id: dto.assignedToId } });
     if (!assignee) throw new NotFoundException('Сотрудник не найден');
@@ -60,12 +61,12 @@ export class TasksService {
       )
       .catch(() => undefined);
 
-    this.realtime.emitStaff('task:new', { task });
-    this.realtime.emitUser(assignee.id, 'notification:new', {
-      type: 'TASK_ASSIGNED',
-      title: 'Новая задача',
-      message: task.title,
-    });
+    // Проблема B аудита: раньше сюда летела вся `task` (в т.ч. email
+    // assignedTo/createdBy) — Tasks.tsx на любое task:* просто
+    // перезапрашивает список по HTTP (findAll уже фильтрует по правам).
+    this.realtime.emitAllStaff('task:new', { id: task.id });
+    // notifyUser() выше уже отправил 'notification:new' в user-room
+    // назначенного сотрудника — второй, дублирующий emit убран.
     return task;
   }
 
@@ -76,7 +77,7 @@ export class TasksService {
     search?: string;
   }) {
     const baseWhere: any =
-      filters.role === 'ADMIN' && !filters.mine
+      isPrivileged(filters.role) && !filters.mine
         ? {}
         : { assignedToId: filters.currentUserId };
     const search = (filters.search || '').trim();
@@ -96,21 +97,33 @@ export class TasksService {
     });
   }
 
-  async findOne(id: string) {
+  /**
+   * `user` передаётся только из контроллера. Без него findOne используют
+   * внутренние вызовы (update/remove), которые сами проверяют права ПОСЛЕ
+   * чтения — сохраняем их прежние коды/тексты ошибок (403).
+   */
+  async findOne(id: string, user?: CurrentUser) {
     const task = await this.prisma.task.findUnique({ where: { id }, include: TASK_INCLUDE });
     if (!task) throw new NotFoundException('Задача не найдена');
+    // IDOR: любой EMPLOYEE мог прочитать чужую задачу по UUID, зная только
+    // GET /tasks/:id. Видеть задачу может привилегированный пользователь,
+    // назначенный исполнитель или её автор. 404 (не 403) — чтобы ответ не
+    // работал как оракул существования id.
+    if (user && !isPrivileged(user.role) && task.assignedToId !== user.id && task.createdById !== user.id) {
+      throw new NotFoundException('Задача не найдена');
+    }
     return task;
   }
 
   async update(id: string, dto: UpdateTaskDto, user: CurrentUser) {
     const task = await this.findOne(id);
     const isOwner = task.assignedToId === user.id;
-    if (user.role !== 'ADMIN' && !isOwner) {
+    if (!isPrivileged(user.role) && !isOwner) {
       throw new ForbiddenException('Вы не можете редактировать эту задачу');
     }
-    // Сотрудник не может переназначать задачу — только админ
-    if (user.role !== 'ADMIN' && dto.assignedToId !== undefined) {
-      throw new ForbiddenException('Только администратор может переназначать задачу');
+    // Сотрудник не может переназначать задачу — только Основатель/администратор
+    if (!isPrivileged(user.role) && dto.assignedToId !== undefined) {
+      throw new ForbiddenException('Только Основатель или администратор может переназначать задачу');
     }
     const updated = await this.prisma.task.update({
       where: { id },
@@ -122,22 +135,22 @@ export class TasksService {
       },
       include: TASK_INCLUDE,
     });
-    this.realtime.emitStaff('task:updated', { task: updated });
+    this.realtime.emitAllStaff('task:updated', { id: updated.id });
     return updated;
   }
 
   async remove(id: string, user: CurrentUser) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Только администратор может удалять задачи');
+    if (!isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор может удалять задачи');
     }
     await this.findOne(id);
     await this.prisma.task.delete({ where: { id } });
-    this.realtime.emitStaff('task:deleted', { id });
+    this.realtime.emitAllStaff('task:deleted', { id });
     return { ok: true };
   }
 
   async stats(user: CurrentUser) {
-    const where = user.role === 'ADMIN' ? {} : { assignedToId: user.id };
+    const where = isPrivileged(user.role) ? {} : { assignedToId: user.id };
     const [total, todo, inProgress, done] = await Promise.all([
       this.prisma.task.count({ where }),
       this.prisma.task.count({ where: { ...where, status: TaskStatus.TODO } }),

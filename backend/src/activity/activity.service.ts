@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { isPrivileged } from '../common/roles';
 
 export type ActivityAction =
   | 'STATUS_CHANGE'
@@ -44,7 +46,12 @@ export class ActivityService {
         payload: data.payload ?? undefined,
       },
     });
-    this.realtime.emitStaff('activity:new', { entry });
+    // Проблема B аудита: раньше сюда летела вся `entry` (actorName,
+    // studentId, studentName, details — включая дифф изменённых полей
+    // студента) ВСЕМ сотрудникам. Activity.tsx на это событие просто
+    // перезапрашивает журнал по HTTP, а list() там уже фильтрует по
+    // роли (Проблема 3 Волны 0) — так что достаточно сигнала + id.
+    this.realtime.emitAllStaff('activity:new', { id: entry.id });
     return entry;
   }
 
@@ -55,6 +62,9 @@ export class ActivityService {
     from?: Date;
     to?: Date;
     take?: number;
+    /** Текущий пользователь — для ограничения видимости у EMPLOYEE (БАГ 3 аудита). */
+    currentUserId?: string;
+    currentUserRole?: Role;
   } = {}) {
     const where: any = {};
     if (filters.actorId) where.actorId = filters.actorId;
@@ -65,10 +75,38 @@ export class ActivityService {
       if (filters.from) where.createdAt.gte = filters.from;
       if (filters.to) where.createdAt.lte = filters.to;
     }
+
+    // БАГ 3 аудита: раньше EMPLOYEE видел журнал активности ВСЕХ сотрудников
+    // компании и мог собрать оттуда studentId любого студента (а дальше
+    // прочитать чужую карточку через БАГ 2). FOUNDER/ADMIN видят всё, как
+    // и раньше. EMPLOYEE видит только свои действия и активность по
+    // студентам, назначенным лично ему — страница «Активность» у него
+    // продолжает работать, просто в рамках его студентов.
+    if (!isPrivileged(filters.currentUserRole) && filters.currentUserId) {
+      const myStudents = await this.prisma.student.findMany({
+        where: {
+          OR: [
+            { managerId: filters.currentUserId },
+            { chinaManagerId: filters.currentUserId },
+          ],
+        },
+        select: { id: true },
+      });
+      const myStudentIds = myStudents.map((s) => s.id);
+      where.OR = [
+        { actorId: filters.currentUserId },
+        ...(myStudentIds.length ? [{ studentId: { in: myStudentIds } }] : []),
+      ];
+    }
+
+    // Верхний предел take — иначе ?take=1000000 выгружает журнал целиком
+    // одним запросом (усилитель утечки + риск DoS по памяти).
+    const take = Math.min(filters.take ?? 200, 200);
+
     return this.prisma.activityLog.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: filters.take ?? 200,
+      take,
     });
   }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "grantchina-screenshots",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Автоматические скриншоты страниц лендинга и CRM проекта GrantChina",
+  "scripts": {
+    "landing": "node screenshots-landing.js",
+    "landing:local": "LANDING_URL=http://localhost:5173 node screenshots-landing.js",
+    "crm": "node screenshots-crm.js",
+    "postinstall": "playwright install chromium"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "pg": "^8.21.0",
+    "playwright": "^1.49.0"
+  }
+}

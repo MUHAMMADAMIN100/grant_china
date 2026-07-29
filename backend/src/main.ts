@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import cookieParser = require('cookie-parser');
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -102,7 +102,14 @@ async function bootstrap() {
     }),
   );
 
-  app.setGlobalPrefix('api');
+  // 'uploads/*' исключён из /api — FilesModule (files/uploads.controller.ts)
+  // обслуживает @Controller('uploads') на корне, а не /api/uploads: этот
+  // путь уже "зашит" в БД (Document.url, Program.imageUrl, Student.photoUrl
+  // хранят '/uploads/<name>') и в rewrite-правилах фронтов (frontend-crm/
+  // vercel.json, frontend-landing/vercel.json, Telegram PUBLIC_API_BASE).
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: 'uploads/(.*)', method: RequestMethod.ALL }],
+  });
 
   const port = parseInt(config.get<string>('PORT') || '3001', 10);
   await app.listen(port);

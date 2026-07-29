@@ -44,7 +44,9 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // Soft-delete: как и login() — уволенный сотрудник не должен получить
+    // валидный профиль, даже если JwtStrategy почему-то его пропустила.
+    const user = await this.prisma.user.findFirst({ where: { id: userId, deletedAt: null } });
     if (!user) throw new UnauthorizedException();
     return {
       id: user.id,

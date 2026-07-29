@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { STUDENT_RESTRICTED_DOC_TYPES } from '../common/access';
 
 function generatePassword(length = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -22,16 +23,10 @@ const STUDENT_INCLUDE = {
   },
 } as const;
 
-/**
- * Типы документов, которые СТУДЕНТ загружает, но НЕ должен скачивать
- * обратно из личного кабинета. Мед.справка и справка из банка содержат
- * персональные / финансовые данные — доступны только сотрудникам CRM.
- * Мы зануляем поле `url` в ответе /me и добавляем флаг `restricted`,
- * чтобы фронт мог скрыть ссылку (при этом счётчик «загружено» и метка
- * «прикреплено» остаются — студент видит что файл получен).
- */
-const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL']);
-
+// STUDENT_RESTRICTED_DOC_TYPES (BANK/MEDICAL) вынесен в common/access.ts —
+// Мы зануляем поле `url` в ответе /me и добавляем флаг `restricted`,
+// чтобы фронт мог скрыть ссылку (при этом счётчик «загружено» и метка
+// «прикреплено» остаются — студент видит что файл получен).
 function sanitizeStudentDocuments<T extends { type: string; url: string }>(
   docs: T[],
 ): (T & { restricted?: boolean })[] {
