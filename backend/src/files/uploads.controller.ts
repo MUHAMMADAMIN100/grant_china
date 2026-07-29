@@ -1,5 +1,5 @@
 import { Controller, Get, NotFoundException, Param, Req, Res } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -44,8 +44,17 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
  * БЕЗ глобального guard намеренно: анониму должны быть доступны картинки
  * программ (публичный каталог на лендинге). Идентичность резолвится
  * «мягко» через SessionResolverService (не бросает 401).
+ *
+ * Проблема 4 аудита волны 1: контроллер раньше был помечен @SkipThrottle()
+ * (унаследовано от старого express-static поведения, где rate-limit не имел
+ * смысла). Но каждый промах приватного кэша (FileResolverService) — это до
+ * двух `findFirst` по НЕИНДЕКСИРОВАННЫМ полям (Document.filename,
+ * Student.photoUrl), то есть seq scan; анониму достаточно перебирать
+ * случайные /uploads/<uuid>.jpg в цикле, чтобы положить БД. Лимит 120/мин с
+ * IP — с запасом на то, что одна открытая карточка студента в CRM грузит
+ * разом до десятка превью/документов.
  */
-@SkipThrottle()
+@Throttle({ default: { limit: 120, ttl: 60_000 } })
 @Controller('uploads')
 export class UploadsController {
   constructor(

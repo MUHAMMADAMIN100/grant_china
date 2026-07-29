@@ -164,6 +164,16 @@ export class StudentJwtGuard implements CanActivate {
     if (state.deletedAt) {
       throw new UnauthorizedException('Аккаунт отключён');
     }
+    // Проблема 8 аудита волны 1: student-auth.service.ts.login() уже
+    // запрещает АРХИВНОМУ студенту входить (новый токен не выдаётся), но
+    // сюда это правило раньше не доходило — студент с УЖЕ выданным токеном
+    // (до 7 дней) мог продолжать ходить в GET /student-auth/me, PATCH /form,
+    // POST /documents и после того, как его перевели в архив. SessionResolverService
+    // (files/uploads, WebSocket) уже считает ARCHIVED анонимом — приводим
+    // HTTP-гард личного кабинета к тому же правилу.
+    if (state.status === 'ARCHIVED') {
+      throw new UnauthorizedException('Ваш аккаунт в архиве. Обратитесь к менеджеру.');
+    }
 
     req.user = {
       id: payload.sub,

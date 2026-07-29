@@ -97,6 +97,10 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
         import('file-saver'),
       ]);
       const zip = new JSZip();
+      // Файлы, которые не удалось скачать (сеть/401/404) — покажем пользователю,
+      // а не пропустим молча. Иначе он получит неполный архив и не узнает об этом.
+      const failedFiles: string[] = [];
+      let downloadedCount = 0;
 
       // Сначала — анкета в формате Word (если хоть что-то заполнено или даже пустая)
       if (applicationForm) {
@@ -116,13 +120,23 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
         if (docs.length === 0) continue;
         for (let j = 0; j < docs.length; j++) {
           const doc = docs[j];
-          const res = await fetch(buildFileUrl(doc.url));
-          if (!res.ok) continue;
-          const blob = await res.blob();
-          const ext = doc.originalName.includes('.') ? doc.originalName.split('.').pop() : '';
-          const baseName = `${String(i + 1).padStart(2, '0')}_${sanitizeFileName(req.label)}${docs.length > 1 ? `_${j + 1}` : ''}`;
-          const fileName = ext ? `${baseName}.${ext}` : baseName;
-          zip.file(fileName, blob);
+          try {
+            // /uploads теперь требует авторизацию — без credentials backend
+            // ответит 401, и файл был бы молча пропущен.
+            const res = await fetch(buildFileUrl(doc.url), { credentials: 'include' });
+            if (!res.ok) {
+              failedFiles.push(doc.originalName);
+              continue;
+            }
+            const blob = await res.blob();
+            const ext = doc.originalName.includes('.') ? doc.originalName.split('.').pop() : '';
+            const baseName = `${String(i + 1).padStart(2, '0')}_${sanitizeFileName(req.label)}${docs.length > 1 ? `_${j + 1}` : ''}`;
+            const fileName = ext ? `${baseName}.${ext}` : baseName;
+            zip.file(fileName, blob);
+            downloadedCount++;
+          } catch {
+            failedFiles.push(doc.originalName);
+          }
         }
       }
 
@@ -130,18 +144,41 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
       if (otherDocs.length > 0) {
         const otherFolder = zip.folder('Прочее');
         for (const doc of otherDocs) {
-          const res = await fetch(buildFileUrl(doc.url));
-          if (!res.ok) continue;
-          const blob = await res.blob();
-          otherFolder?.file(sanitizeFileName(doc.originalName), blob);
+          try {
+            const res = await fetch(buildFileUrl(doc.url), { credentials: 'include' });
+            if (!res.ok) {
+              failedFiles.push(doc.originalName);
+              continue;
+            }
+            const blob = await res.blob();
+            otherFolder?.file(sanitizeFileName(doc.originalName), blob);
+            downloadedCount++;
+          } catch {
+            failedFiles.push(doc.originalName);
+          }
         }
+      }
+
+      // Если ни один файл не скачался — архив бессмысленен (в лучшем случае
+      // там будет только анкета), сообщаем об ошибке и не сохраняем ZIP.
+      if (downloadedCount === 0 && (typedDocs.length > 0 || otherDocs.length > 0)) {
+        toast('Не удалось скачать ни одного файла. Попробуйте ещё раз.', 'error');
+        return;
       }
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const date = new Date().toISOString().slice(0, 10);
       const safeName = sanitizeFileName(studentName || 'student');
       saveAs(blob, `${safeName}_документы_${date}.zip`);
-      toast('Архив скачан', 'success');
+
+      if (failedFiles.length > 0) {
+        toast(
+          `Архив скачан, но ${failedFiles.length} файл(ов) не удалось загрузить: ${failedFiles.join(', ')}`,
+          'error',
+        );
+      } else {
+        toast('Архив скачан', 'success');
+      }
     } catch (e: any) {
       toast(e?.message || 'Ошибка создания архива', 'error');
     } finally {

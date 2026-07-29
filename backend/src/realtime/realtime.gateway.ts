@@ -12,6 +12,7 @@ import { AUTH_COOKIE_NAME, STUDENT_COOKIE_NAME } from '../auth/cookie-helpers';
 import { onUserCacheInvalidated } from '../auth/jwt.strategy';
 import { onStudentCacheInvalidated } from '../student-auth/student-jwt.guard';
 import { isPrivileged } from '../common/roles';
+import { checkOrigin } from '../common/cors';
 
 /** Парсит cookie-заголовок в объект { name: value }. */
 function parseCookieHeader(header: string | undefined): Record<string, string> {
@@ -32,8 +33,15 @@ export type ManagerScope = { managerId?: string | null; chinaManagerId?: string 
 
 @Injectable()
 @WebSocketGateway({
+  // Проблема 2 аудита волны 1: `origin: true` отражал ЛЮБОЙ Origin —
+  // страница атакующего могла открыть socket.io-соединение с cookie
+  // жертвы (polling-транспорт — обычный XHR с credentials) и слушать
+  // весь поток staff-событий. checkOrigin — та же функция, что и у
+  // HTTP CORS в main.ts (common/cors.ts): для запроса без Origin (в
+  // проде сокет тоже идёт через Vercel rewrite сервер-к-серверу) — пропускаем,
+  // для чужого браузерного Origin — блокируем.
   cors: {
-    origin: true,
+    origin: checkOrigin,
     credentials: true,
   },
 })

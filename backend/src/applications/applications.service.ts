@@ -14,6 +14,7 @@ import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
+import { FileResolverService } from '../files/file-resolver.service';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
@@ -74,6 +75,7 @@ export class ApplicationsService {
     private sms: SmsService,
     private activity: ActivityService,
     private realtime: RealtimeGateway,
+    private fileResolver: FileResolverService,
   ) {}
 
   // Порядок этапов воронки — для определения, "понизили" или "продвинули" заявку
@@ -324,6 +326,13 @@ export class ApplicationsService {
         // Проблема D аудита: копируем managerId/chinaManagerId с заявки —
         // иначе авто-созданный студент рождается «бесхозным», даже если
         // заявку уже назначили конкретному менеджеру.
+        //
+        // Фолбэк на user.id: публичная заявка с лендинга создаётся вообще без
+        // менеджеров (её может взять любой), поэтому копировать было бы нечего
+        // и студент снова родился бы бесхозным — а «свободная» карточка
+        // доступна на чтение, правку и удаление любому сотруднику.
+        // Владелец по умолчанию — тот, кто двигает заявку на DOCS_REVIEW.
+        // Переназначить его потом может FOUNDER или ADMIN.
         const studentData: any = {
           fullName: existing.fullName,
           phones: [existing.phone],
@@ -331,7 +340,7 @@ export class ApplicationsService {
           direction: existing.direction,
           cabinet: CABINET_BY_DIRECTION[existing.direction],
           comment: existing.comment,
-          managerId: existing.managerId,
+          managerId: existing.managerId ?? user.id,
           chinaManagerId: existing.chinaManagerId,
         };
         const student = await this.prisma.student.create({ data: studentData });
@@ -457,6 +466,10 @@ export class ApplicationsService {
         where: { id: existing.studentId },
         data,
       });
+      // Проблема 7 аудита волны 1: переназначение менеджера через заявку
+      // тоже меняет managerId/chinaManagerId связанного студента — сбрасываем
+      // тот же приватный кэш FileResolverService, что и students.assignManager().
+      this.fileResolver.invalidateForStudent(existing.studentId);
     }
 
     const updated = await this.prisma.application.update({
@@ -546,6 +559,9 @@ export class ApplicationsService {
         // БАГ 4 аудита: сбрасываем кэш StudentJwtGuard сразу, иначе
         // удалённый студент ещё до 30 секунд может ходить в ЛК по старому токену.
         invalidateStudentCache(app.studentId);
+        // Проблема 7 аудита волны 1: тот же soft-delete студента, что и в
+        // students.service.ts remove() — сбрасываем приватный кэш файлов.
+        this.fileResolver.invalidateForStudent(app.studentId);
       }
     }
     await this.prisma.application

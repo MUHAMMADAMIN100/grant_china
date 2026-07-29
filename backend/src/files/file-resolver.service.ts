@@ -46,6 +46,15 @@ const PUBLIC_NAMES_TTL_MS = 60_000;
 const PRIVATE_CACHE_TTL_MS = 5 * 60_000;
 const PRIVATE_CACHE_MAX_ENTRIES = 1000;
 
+// Проблема 4 аудита волны 1: «файла нет» (ref === null) раньше кэшировался
+// с тем же TTL, что и найденный файл (5 минут) — это не отдельная проблема
+// само по себе, но при переборе СЛУЧАЙНЫХ несуществующих имён (DoS) кэш
+// растёт неограниченно быстро записями-«промахами» и вытесняет полезные
+// (позитивные) записи из ограниченной по размеру Map. Отрицательный TTL
+// короче — если файл появится (загрузили только что), это тоже не будет
+// висеть в кэше долго.
+const NEGATIVE_CACHE_TTL_MS = 30_000;
+
 @Injectable()
 export class FileResolverService {
   constructor(private prisma: PrismaService) {}
@@ -87,10 +96,40 @@ export class FileResolverService {
     this.privateCache.set(key, { ref, ts: Date.now() });
   }
 
+  /** ref === null → «такого файла нет», у него отдельный (короче) TTL. */
+  private readPrivateCache(key: string): { hit: boolean; ref: FileRef } {
+    const cached = this.privateCache.get(key);
+    if (!cached) return { hit: false, ref: null };
+    const ttl = cached.ref === null ? NEGATIVE_CACHE_TTL_MS : PRIVATE_CACHE_TTL_MS;
+    if (Date.now() - cached.ts >= ttl) return { hit: false, ref: null };
+    return { hit: true, ref: cached.ref };
+  }
+
+  /**
+   * Инвалидация приватного кэша по конкретному студенту. Зовётся из
+   * students.service.ts (assignManager/remove/removeDocument) и
+   * applications.service.ts (assignManager) — Проблема 7 аудита волны 1:
+   * без этого снятый с карточки менеджер до PRIVATE_CACHE_TTL_MS (5 минут)
+   * продолжал бы скачивать документы бывшего студента через устаревшую
+   * запись кэша (managerId/chinaManagerId в ref больше не совпадают с БД,
+   * но кэш их ещё не перечитал).
+   *
+   * Кэш маленький (максимум PRIVATE_CACHE_MAX_ENTRIES записей) — полный
+   * проход по нему на событие переназначения/удаления не проблема.
+   */
+  invalidateForStudent(studentId: string): void {
+    for (const [key, entry] of this.privateCache) {
+      const ref = entry.ref;
+      if (ref && (ref.kind === 'DOCUMENT' || ref.kind === 'STUDENT_PHOTO') && ref.studentId === studentId) {
+        this.privateCache.delete(key);
+      }
+    }
+  }
+
   private async resolveDocument(basename: string): Promise<FileRef> {
     const cacheKey = `doc:${basename}`;
-    const cached = this.privateCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < PRIVATE_CACHE_TTL_MS) return cached.ref;
+    const cached = this.readPrivateCache(cacheKey);
+    if (cached.hit) return cached.ref;
 
     const doc = await this.prisma.document.findFirst({
       where: { filename: basename },
@@ -143,8 +182,8 @@ export class FileResolverService {
 
   private async resolvePhoto(basename: string): Promise<FileRef> {
     const cacheKey = `photo:${basename}`;
-    const cached = this.privateCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < PRIVATE_CACHE_TTL_MS) return cached.ref;
+    const cached = this.readPrivateCache(cacheKey);
+    if (cached.hit) return cached.ref;
 
     // deletedAt: null — в отличие от Document, здесь не даём privileged-доступ
     // к фото soft-deleted студента: у API GET /students/:id/findOne() тоже

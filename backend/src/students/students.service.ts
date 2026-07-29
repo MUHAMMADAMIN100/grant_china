@@ -11,6 +11,7 @@ import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
+import { FileResolverService } from '../files/file-resolver.service';
 
 function generatePassword(length = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -68,6 +69,7 @@ export class StudentsService {
     private realtime: RealtimeGateway,
     private activity: ActivityService,
     private notifications: NotificationsService,
+    private fileResolver: FileResolverService,
   ) {}
 
   /**
@@ -113,14 +115,19 @@ export class StudentsService {
     const plainPassword = generatePassword(8);
     const passwordHash = await bcrypt.hash(plainPassword, 10);
 
-    // Проблема D аудита: раньше студент, заведённый в CRM, не получал
-    // менеджера вообще — карточка становилась «бесхозной» и по формуле
-    // hasAccess() (managerId/chinaManagerId оба null → «свободная» запись)
-    // была доступна ЛЮБОМУ сотруднику на чтение/редактирование/удаление.
-    // Если студента создаёт EMPLOYEE — он и есть менеджер по умолчанию
-    // (сам завёл, сам ведёт). FOUNDER/ADMIN создают без назначения — они
-    // сами решают, кому распределить.
-    const creatorManagerId = user && !isPrivileged(user.role) ? user.id : null;
+    // Проблема D аудита (волна 0.1) и Проблема 6 аудита (волна 1): студент,
+    // заведённый в CRM без назначенного менеджера, становится «бесхозным» —
+    // по формуле hasAccess() (managerId/chinaManagerId оба null → «свободная»
+    // запись) карточка доступна ЛЮБОМУ сотруднику на чтение/редактирование/
+    // удаление до тех пор, пока кто-то её не возьмёт. Раньше от этого спасали
+    // только EMPLOYEE-создателей (сам завёл — сам ведёт), а студент, заведённый
+    // FOUNDER/ADMIN (штатный сценарий — они чаще всех заводят студентов
+    // вручную), оставался бесхозным. CreateStudentDto пока не поддерживает
+    // явного managerId при создании — единственный источник владельца это
+    // сам создатель, поэтому назначаем ЛЮБОГО (включая FOUNDER/ADMIN)
+    // автора карточки её менеджером. Переназначить можно в любой момент
+    // через PATCH /students/:id/manager.
+    const creatorManagerId = user ? user.id : null;
 
     const student = await this.prisma.student.create({
       data: {
@@ -476,6 +483,11 @@ export class StudentsService {
       data,
       select: STUDENT_SELECT,
     });
+    // Проблема 7 аудита волны 1: приватный кэш FileResolverService хранит
+    // managerId/chinaManagerId на момент последнего резолва файла и живёт
+    // до 5 минут (PRIVATE_CACHE_TTL_MS) — без сброса снятый с карточки
+    // менеджер мог бы ещё эти 5 минут скачивать документы/фото студента.
+    this.fileResolver.invalidateForStudent(id);
     // Роутим по НОВЫМ менеджерам (updated) — переназначение считается «в
     // момент emit», перетасовывать room-membership не нужно (см. realtime.gateway).
     this.realtime.emitForStudent(updated, 'student:updated', { studentId: id }, { studentId: id });
@@ -497,6 +509,10 @@ export class StudentsService {
     // БАГ 4 аудита: сбрасываем кэш StudentJwtGuard, иначе удалённый студент
     // ещё до 30 секунд может ходить в личный кабинет по старому токену.
     invalidateStudentCache(id);
+    // Проблема 7 аудита волны 1: resolvePhoto()/resolveDocument() проверяют
+    // deletedAt студента только на момент промаха кэша — до 5 минут после
+    // soft-delete приватный кэш ещё мог бы отдавать «allow» по устаревшим данным.
+    this.fileResolver.invalidateForStudent(id);
     return { ok: true };
   }
 
@@ -550,6 +566,10 @@ export class StudentsService {
       data: { deletedAt: new Date() },
     });
     const studentId = (doc as any).studentId;
+    // Проблема 7 аудита волны 1: приватный кэш FileResolverService хранит
+    // ref.deletedAt на момент последнего резолва — без сброса /uploads ещё
+    // до 5 минут продолжал бы отдавать только что удалённый документ.
+    if (studentId) this.fileResolver.invalidateForStudent(studentId);
     if (studentId && doc.student) {
       this.realtime.emitForStudent(doc.student, 'document:deleted', { studentId, docId: documentId }, { studentId });
       this.realtime.emitForStudent(doc.student, 'student:updated', { studentId }, { studentId });

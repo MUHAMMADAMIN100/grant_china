@@ -1,9 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { join } from 'path';
+
+import { CsrfGuard } from './common/csrf.guard';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -37,6 +39,19 @@ import { ActivityModule } from './activity/activity.module';
 // небезопасно — используется только чтобы откатиться, если что-то пошло не
 // так, пока чинится настоящая причина.
 const UPLOADS_PROTECTED = process.env.UPLOADS_PROTECTED !== '0';
+
+// Проблема 5 аудита волны 1: раньше значение читалось молча — забытая после
+// инцидента переменная в Railway env тихо убивала защиту НАВСЕГДА, без
+// единого следа в логах. Теперь при каждом старте явно кричим в лог уровнем
+// error, если kill-switch активирован — чтобы это было видно в Railway logs
+// сразу, а не найдено случайно через полгода при пентесте.
+if (!UPLOADS_PROTECTED) {
+  new Logger('AppModule').error(
+    'ВНИМАНИЕ: UPLOADS_PROTECTED=0 — каталог /uploads отдаётся БЕЗ АВТОРИЗАЦИИ. ' +
+      'Документы студентов (паспорта, банковские и медицинские справки) доступны любому. ' +
+      'Это аварийный откат — держать его дольше нескольких минут небезопасно.',
+  );
+}
 
 @Module({
   imports: [
@@ -73,6 +88,11 @@ const UPLOADS_PROTECTED = process.env.UPLOADS_PROTECTED !== '0';
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // CsrfGuard идёт ПОСЛЕ ThrottlerGuard: сначала режем флуд, потом
+    // разбираемся с межсайтовыми запросами. Проверяет только мутирующие
+    // методы и намеренно пропускает запросы без Origin/Sec-Fetch-Site —
+    // иначе лёг бы прод, где Vercel проксирует сервер-к-серверу.
+    { provide: APP_GUARD, useClass: CsrfGuard },
   ],
 })
 export class AppModule {}

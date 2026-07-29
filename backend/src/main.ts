@@ -4,6 +4,7 @@ import cookieParser = require('cookie-parser');
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import { checkOrigin } from './common/cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -52,43 +53,15 @@ async function bootstrap() {
   // Строже чем раньше:
   //  - Если CORS_ORIGINS не задан — НЕ разрешаем всё (раньше было `return true`).
   //    Теперь оставляем только хардкод-список основных доменов проекта.
-  //  - Для запросов БЕЗ Origin (curl, server-to-server) — пропускаем (это не
-  //    браузер, CSRF/cookie-attack не применим).
-  //  - Wildcard `*.vercel.app` оставлен (нужен для preview-деплоев Vercel).
-  const corsOrigins = (config.get<string>('CORS_ORIGINS') || '')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
-
-  const ALWAYS_ALLOWED_HOSTS = [
-    'grantchina.tj',
-    'www.grantchina.tj',
-    'grant-china-crm.vercel.app',
-    'grant-china-landing.vercel.app',
-    'localhost:5173',
-    'localhost:5174',
-  ];
-
-  const checkOrigin = (origin: string | undefined, cb: (err: any, ok?: boolean) => void) => {
-    if (!origin) return cb(null, true); // server-to-server / curl
-    try {
-      const url = new URL(origin);
-      const host = url.host;
-      if (corsOrigins.some((o) => o === origin || o === `${url.protocol}//${host}` || o === host)) {
-        return cb(null, true);
-      }
-      if (ALWAYS_ALLOWED_HOSTS.includes(host)) return cb(null, true);
-      if (host.endsWith('.grantchina.tj') || host.endsWith('.vercel.app')) {
-        return cb(null, true);
-      }
-      // Чужой Origin — блокируем безусловно. Никакого «если env пуст —
-      // разрешаем всё», это была дыра.
-      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
-    } catch {
-      return cb(new Error('Bad Origin'), false);
-    }
-  };
-
+  //  - Для запросов БЕЗ Origin (curl, server-to-server, Vercel rewrite) —
+  //    пропускаем (это не браузер, CSRF/cookie-attack не применим).
+  //  - Wildcard `*.vercel.app` УБРАН (Проблема 1 аудита волны 1) — в проде
+  //    трафик идёт через Vercel rewrites сервер-к-серверу (Origin вообще не
+  //    доходит до Railway), поэтому wildcard был нужен только теоретически,
+  //    а на практике давал любому чужому *.vercel.app читать ответы API с
+  //    cookie сотрудника (credentials: true + SameSite=None в проде).
+  //  - checkOrigin вынесен в common/cors.ts — та же функция используется
+  //    WebSocket-гейтвеем (realtime.gateway.ts), чтобы логика не расходилась.
   app.enableCors({
     origin: checkOrigin,
     credentials: true,
