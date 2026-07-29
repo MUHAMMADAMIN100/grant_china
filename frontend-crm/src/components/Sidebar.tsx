@@ -39,9 +39,11 @@ export default function Sidebar() {
     { to: '/finance', icon: 'payments', label: 'Финансы', badge: isPriv ? pendingCount : 0 },
     { to: '/programs', icon: 'menu_book', label: 'Программы' },
     { to: '/tasks', icon: 'task_alt', label: 'Задачи' },
-    // FOUNDER + ADMIN видят активность и список пользователей.
-    // На странице /users редактирование доступно только FOUNDER (бэк проверяет).
+    // FOUNDER + ADMIN видят финансовую аналитику, активность и список
+    // пользователей. На странице /users редактирование доступно только
+    // FOUNDER (бэк проверяет). ТЗ 2.6: аналитика — тоже только руководству.
     ...(isPrivileged(user?.role) ? [
+      { to: '/analytics', icon: 'insights', label: 'Аналитика' },
       { to: '/activity', icon: 'history', label: 'Активность' },
       { to: '/users', icon: 'group', label: 'Пользователи' },
     ] : []),

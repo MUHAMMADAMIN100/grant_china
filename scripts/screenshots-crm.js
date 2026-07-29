@@ -2,32 +2,45 @@
  * Автоматические скриншоты всех страниц CRM проекта GrantChina.
  *
  * Цикл выполнения:
- *  1. Подключается к Postgres через DATABASE_URL.
- *  2. Создаёт временного юзера с ролью FOUNDER (рандомный email + пароль)
- *     — нужен FOUNDER, иначе на /users не будет кнопок (ADMIN read-only).
- *  3. Через Playwright логинится этим юзером в CRM.
- *  4. Делает скриншоты ~16 страниц: viewport (1920×1080) + fullpage PNG.
- *  5. В блоке finally УДАЛЯЕТ временного юзера из БД — даже если
- *     скриншоты упали с ошибкой, мусор не остаётся.
+ *  1. Через Playwright логинится в CRM существующей учётной записью,
+ *     переданной в env.
+ *  2. Делает скриншоты ~16 страниц: viewport (1920×1080) + fullpage PNG.
  *
- * Запуск (env-переменные обязательны):
- *   set DATABASE_URL=postgresql://... (PUBLIC URL Railway)
+ * Скрипт НЕ ПОДКЛЮЧАЕТСЯ К БАЗЕ и ничего в ней не меняет.
+ *
+ * Раньше он создавал временного пользователя с ролью FOUNDER сырым
+ * INSERT-ом и удалял его в finally. Это было плохо по трём причинам:
+ *  - сырой SQL в обход всех проверок приложения;
+ *  - `DELETE FROM "User"` в репозитории при жёстком правиле проекта
+ *    «никогда не удалять данные из БД»;
+ *  - если процесс убьют между INSERT и DELETE (Ctrl+C, падение, обрыв
+ *    сети до Railway), в БОЕВОЙ базе навсегда остаётся живой аккаунт
+ *    Основателя с паролем, который нигде не сохранён.
+ * Теперь нужен просто существующий логин — скрипт читает только UI.
+ *
+ * Запуск:
  *   set CRM_URL=https://grantchina.tj/admin
+ *   set CRM_EMAIL=ваш@email
+ *   set CRM_PASSWORD=ваш_пароль
  *   npm run crm
+ *
+ * Учётка должна иметь роль Основателя — у Администратора часть кнопок
+ * на /users скрыта, и скриншоты выйдут неполными.
  */
 const { chromium } = require('playwright');
-const { Client } = require('pg');
-const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 
-const DATABASE_URL = process.env.DATABASE_URL;
 const CRM_URL = (process.env.CRM_URL || 'https://grantchina.tj/admin').replace(/\/$/, '');
+const CRM_EMAIL = process.env.CRM_EMAIL;
+const CRM_PASSWORD = process.env.CRM_PASSWORD;
 
-if (!DATABASE_URL) {
-  console.error('❌ DATABASE_URL не задан. Передай PUBLIC URL Railway:');
-  console.error('   set DATABASE_URL=postgresql://...');
+if (!CRM_EMAIL || !CRM_PASSWORD) {
+  console.error('❌ Нужны CRM_EMAIL и CRM_PASSWORD существующей учётной записи:');
+  console.error('   set CRM_EMAIL=ваш@email');
+  console.error('   set CRM_PASSWORD=ваш_пароль');
+  console.error('');
+  console.error('Скрипт намеренно не создаёт пользователей и не ходит в базу.');
   process.exit(1);
 }
 
@@ -35,46 +48,8 @@ const OUT_DIR = path.join(__dirname, 'screenshots-crm');
 const VIEWPORT = { width: 1920, height: 1080 };
 const SETTLE_MS = 2500;
 
-// Генерируем временные credentials. Email с UUID — гарантированно не пересечётся
-// с реальными юзерами. Пароль рандомный, нигде не сохраняется кроме памяти.
-// ВАЖНО: домен должен быть валидным (с .tld), иначе frontend-валидация
-// заблокирует submit на /login.
-const TMP_EMAIL = `screenshots-bot-${crypto.randomBytes(4).toString('hex')}@grantchina.tj`;
-const TMP_PASSWORD = crypto.randomBytes(16).toString('base64').replace(/[+/=]/g, '').slice(0, 20);
-const TMP_NAME = 'Screenshots Bot';
-
-const pg = new Client({
-  connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Railway proxy
-});
-
 async function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-async function createTempFounder() {
-  await pg.connect();
-  const hash = await bcrypt.hash(TMP_PASSWORD, 10);
-  const id = crypto.randomUUID();
-  await pg.query(
-    `INSERT INTO "User" (id, email, password, "fullName", role, "createdAt", "updatedAt")
-     VALUES ($1, $2, $3, $4, 'FOUNDER', NOW(), NOW())`,
-    [id, TMP_EMAIL, hash, TMP_NAME],
-  );
-  console.log(`✅ Временный FOUNDER создан: ${TMP_EMAIL}`);
-  return id;
-}
-
-async function deleteTempFounder(id) {
-  try {
-    await pg.query(`DELETE FROM "User" WHERE id = $1`, [id]);
-    console.log(`🧹 Временный FOUNDER удалён: ${TMP_EMAIL}`);
-  } catch (e) {
-    console.error(`⚠️  Не удалось удалить ${TMP_EMAIL}: ${e.message}`);
-    console.error(`   Удали вручную: DELETE FROM "User" WHERE email = '${TMP_EMAIL}';`);
-  } finally {
-    await pg.end().catch(() => {});
-  }
 }
 
 async function settle(page, extraMs = 0) {
@@ -101,8 +76,8 @@ async function login(page) {
   // Снимок страницы логина ДО ввода
   await shoot(page, '01-login');
 
-  await page.fill('input[type="email"]', TMP_EMAIL);
-  await page.fill('input[type="password"]', TMP_PASSWORD);
+  await page.fill('input[type="email"]', CRM_EMAIL);
+  await page.fill('input[type="password"]', CRM_PASSWORD);
   await Promise.all([
     // Жёстко ждём именно /dashboard (не любой URL с /admin)
     page.waitForURL((url) => /\/dashboard($|\?|#)/.test(url.toString()), { timeout: 30000 })
@@ -184,14 +159,7 @@ async function shootFirstStudent(page) {
   await ensureDir(OUT_DIR);
   console.log(`📁 Куда:      ${OUT_DIR}`);
 
-  let userId;
-  try {
-    userId = await createTempFounder();
-  } catch (e) {
-    console.error('❌ Не удалось создать временного юзера в БД:', e.message);
-    await pg.end().catch(() => {});
-    process.exit(1);
-  }
+  console.log(`👤 Логин:     ${CRM_EMAIL}`);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -223,10 +191,6 @@ async function shootFirstStudent(page) {
     console.error('❌ Ошибка во время съёмки:', e.message);
   } finally {
     await browser.close().catch(() => {});
-    // КРИТИЧНО — всегда удаляем временного юзера
-    if (userId) {
-      await deleteTempFounder(userId);
-    }
     console.log(`\n📁 Результаты:\n   ${OUT_DIR}`);
   }
 })();

@@ -2,9 +2,14 @@ import { Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common'
 import { Role } from '@prisma/client';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
-@UseGuards(JwtAuthGuard)
+// 2.2 аудита волны 2: раньше был только JwtAuthGuard. @Roles-декораторы не
+// нужны — все методы строго user-scoped (свои уведомления сотрудника,
+// user.sub из токена), это доступно любой роли. RolesGuard добавлен для
+// единообразия механизма по всем контроллерам, не меняет поведение эндпоинтов.
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('notifications')
 export class NotificationsController {
   constructor(private notifications: NotificationsService) {}

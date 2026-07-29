@@ -22,6 +22,7 @@ import { StudentsService } from './students.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { fixFilenameEncoding } from '../common/upload-utils';
 import { assertUploadableDocumentType } from '../common/documents';
@@ -58,7 +59,15 @@ const docFileFilter = (
   );
 };
 
-@UseGuards(JwtAuthGuard)
+// 2.2 аудита волны 2: раньше здесь стоял только JwtAuthGuard — @Roles на
+// методах этого контроллера молча не работал бы (RolesGuard не глобальный,
+// см. auth/roles.guard.ts). @Roles сюда сознательно НЕ добавляем: доступ к
+// студентам у EMPLOYEE и так сужен внутри StudentsService (ensureCanEdit/
+// canAccessStudentRecord — видит только своих + «свободных»), а привилегированные
+// операции (assignManager, regeneratePassword) уже проверяют isPrivileged()
+// внутри сервиса. RolesGuard добавлен только чтобы сам механизм @Roles был
+// готов к использованию — дублировать уже работающую проверку не нужно.
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('students')
 export class StudentsController {
   constructor(private students: StudentsService) {}

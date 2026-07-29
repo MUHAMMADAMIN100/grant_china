@@ -100,8 +100,14 @@ export class StudentAuthController {
     if (result?.token) {
       setStudentCookie(res, result.token, req);
     }
-    // Возвращаем `token` для legacy-клиентов; новые читают только cookie.
-    return result;
+    // Токен НЕ возвращаем в теле — только в httpOnly cookie, как это уже
+    // сделано для сотрудников (auth.controller.ts). Иначе JWT доступен
+    // любому JS на странице лендинга (включая сторонние скрипты аналитики)
+    // и оседает в логах прокси, что обесценивает сам переход на httpOnly.
+    // Проверено: frontend-landing/src/studentApi.ts токен из ответа не читает,
+    // авторизация идёт исключительно через cookie.
+    const { token: _token, ...safe } = result;
+    return safe;
   }
 
   /** Логаут студента — очищает httpOnly cookie. */

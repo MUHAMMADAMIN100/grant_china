@@ -22,7 +22,14 @@ export type ActivityAction =
   | 'PAYMENT_REJECT'
   | 'PAYMENT_VOID'
   | 'PAYMENT_DELETE'
-  | 'PAYMENT_SCHEDULE_UPDATE';
+  | 'PAYMENT_SCHEDULE_UPDATE'
+  // Раздел 2.12 ТЗ (управление правами) — кадровые события, должны попадать
+  // в журнал Основателя: кто и когда завёл/удалил сотрудника или сменил ему
+  // роль. Пишутся из users.service.ts (единственная точка, где это возможно —
+  // @Roles(FOUNDER) в users.controller.ts).
+  | 'USER_CREATE'
+  | 'USER_ROLE_CHANGE'
+  | 'USER_DELETE';
 
 @Injectable()
 export class ActivityService {

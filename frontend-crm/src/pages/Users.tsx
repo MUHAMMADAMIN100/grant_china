@@ -1,18 +1,23 @@
 import { useEffect, useState } from 'react';
 import { createUser, deleteUser, listUsers, updateUser } from '../api/users';
 import type { Role, User } from '../api/types';
-import { ROLE_LABEL } from '../api/types';
+import { ROLE_BADGE, ROLE_DESCRIPTION, ROLE_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, required, validateAll } from '../utils/validators';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 
+// Порядок ролей для выпадающих списков и легенды — от младшей к старшей,
+// одно место, откуда берутся и value, и подпись (ROLE_LABEL), чтобы нигде
+// в разметке не оставалось хардкода вроде "Сотрудник"/"EMPLOYEE".
+const ROLE_OPTIONS: Role[] = ['EMPLOYEE', 'ADMIN', 'FOUNDER'];
+
 /**
  * Управление сотрудниками.
  *  - FOUNDER (Основатель) — может всё: создавать/удалять/редактировать
  *    сотрудников, менять им пароли, назначать роли (включая FOUNDER).
- *  - ADMIN — видит список read-only, без кнопок.
- *  - EMPLOYEE — на эту страницу не попадёт (роутинг блокирует).
+ *  - ADMIN (Администратор) — видит список read-only, без кнопок.
+ *  - EMPLOYEE (Менеджер) — на эту страницу не попадёт (роутинг блокирует).
  */
 export default function Users() {
   const me = useAuth((s) => s.user);
@@ -99,6 +104,15 @@ export default function Users() {
         {canEdit && !creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Добавить</button>}
       </div>
       <div className="card-body">
+        <div className="role-legend">
+          {ROLE_OPTIONS.map((r) => (
+            <div className="role-legend-item" key={r}>
+              <span className={`badge ${ROLE_BADGE[r]}`}>{ROLE_LABEL[r]}</span>
+              <span className="role-legend-desc">{ROLE_DESCRIPTION[r]}</span>
+            </div>
+          ))}
+        </div>
+
         <div className="filters">
           <input
             placeholder="Поиск по email или ФИО..."
@@ -150,9 +164,9 @@ export default function Users() {
               <div className="form-group">
                 <label>Роль</label>
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
-                  <option value="EMPLOYEE">Сотрудник</option>
-                  <option value="ADMIN">Администратор</option>
-                  <option value="FOUNDER">Основатель</option>
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -190,13 +204,14 @@ export default function Users() {
                         value={u.role}
                         onChange={(e) => onChangeRole(u, e.target.value as Role)}
                         disabled={u.id === me?.id}
+                        title={u.id === me?.id ? 'Нельзя изменить собственную роль' : undefined}
                       >
-                        <option value="EMPLOYEE">Сотрудник</option>
-                        <option value="ADMIN">Администратор</option>
-                        <option value="FOUNDER">Основатель</option>
+                        {ROLE_OPTIONS.map((r) => (
+                          <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                        ))}
                       </select>
                     ) : (
-                      <span>{ROLE_LABEL[u.role] || u.role}</span>
+                      <span className={`badge ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role] || u.role}</span>
                     )}
                   </td>
                   <td data-label="Создан">{u.createdAt ? new Date(u.createdAt).toLocaleDateString('ru-RU') : '—'}</td>
@@ -210,7 +225,12 @@ export default function Users() {
                         >
                           Пароль
                         </button>
-                        <button className="btn btn-sm btn-danger" onClick={() => onDelete(u)} disabled={u.id === me?.id}>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          onClick={() => onDelete(u)}
+                          disabled={u.id === me?.id}
+                          title={u.id === me?.id ? 'Нельзя удалить самого себя' : undefined}
+                        >
                           Удалить
                         </button>
                       </div>

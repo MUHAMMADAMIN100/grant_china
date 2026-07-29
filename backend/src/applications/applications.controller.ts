@@ -15,8 +15,15 @@ import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
+// 2.2 аудита волны 2: RolesGuard навешен ПОМЕТОДНО (не на класс), как и был
+// JwtAuthGuard раньше — POST /applications/public должен остаться доступен
+// анониму с лендинга без авторизации вообще. @Roles-декораторы намеренно не
+// добавлены: ApplicationsService уже проверяет права внутри (isPrivileged/
+// canAccessStudentRecord — EMPLOYEE видит и редактирует только назначенные
+// ему заявки), RolesGuard здесь просто активирует механизм @Roles на будущее.
 @Controller('applications')
 export class ApplicationsController {
   constructor(private apps: ApplicationsService) {}
@@ -28,7 +35,7 @@ export class ApplicationsController {
     return this.apps.create(dto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get()
   list(
     @CurrentUser() user: any,
@@ -53,19 +60,19 @@ export class ApplicationsController {
     });
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('stats')
   stats(@CurrentUser() user: any) {
     return this.apps.stats(user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id')
   one(@Param('id') id: string, @CurrentUser() user: any) {
     return this.apps.findOne(id, user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -75,7 +82,7 @@ export class ApplicationsController {
     return this.apps.update(id, dto, user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Patch(':id/manager')
   assignManager(
     @Param('id') id: string,
@@ -85,7 +92,7 @@ export class ApplicationsController {
     return this.apps.assignManager(id, body, user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: any) {
     return this.apps.remove(id, user);

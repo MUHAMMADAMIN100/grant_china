@@ -13,9 +13,14 @@ import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
-@UseGuards(JwtAuthGuard)
+// 2.2 аудита волны 2: раньше был только JwtAuthGuard — @Roles молча не
+// сработал бы. @Roles-декораторы не добавлены: TasksService уже проверяет
+// isPrivileged() для create/update(reassign)/remove, EMPLOYEE видит и
+// закрывает только назначенные ему задачи. RolesGuard активирует механизм.
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('tasks')
 export class TasksController {
   constructor(private tasks: TasksService) {}

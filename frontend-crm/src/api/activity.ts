@@ -18,7 +18,12 @@ export type ActivityAction =
   | 'PAYMENT_REJECT'
   | 'PAYMENT_VOID'
   | 'PAYMENT_DELETE'
-  | 'PAYMENT_SCHEDULE_UPDATE';
+  | 'PAYMENT_SCHEDULE_UPDATE'
+  // Кадровые события (ТЗ 2.12 — управление правами) — пишутся из
+  // backend/src/users/users.service.ts, видны только в журнале FOUNDER/ADMIN.
+  | 'USER_CREATE'
+  | 'USER_ROLE_CHANGE'
+  | 'USER_DELETE';
 
 export interface ActivityEntry {
   id: string;
@@ -61,4 +66,7 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   PAYMENT_VOID: 'Платёж аннулирован',
   PAYMENT_DELETE: 'Удалён черновик платежа',
   PAYMENT_SCHEDULE_UPDATE: 'Изменён план оплаты',
+  USER_CREATE: 'Создан сотрудник',
+  USER_ROLE_CHANGE: 'Изменена роль сотрудника',
+  USER_DELETE: 'Удалён сотрудник',
 };

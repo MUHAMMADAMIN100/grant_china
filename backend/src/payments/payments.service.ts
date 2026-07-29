@@ -219,9 +219,22 @@ export class PaymentsService {
     return student;
   }
 
-  /** GET-доступ: если недоступен — 404 (не быть оракулом существования, как students.service.findOne). */
+  /**
+   * GET-доступ к финансовым данным студента: если недоступен — 404
+   * (не быть оракулом существования, как students.service.findOne).
+   *
+   * Правило СТРОЖЕ, чем canAccessStudentRecord(): та формула считает студента
+   * без назначенных менеджеров доступным всем, потому что нераспределённого
+   * лида любой сотрудник может взять в работу. Для карточки это разумно, для
+   * денег — нет: график платежей, суммы и чеки чужого студента не должны
+   * открываться просто потому, что ему пока не назначили менеджера.
+   * Такие студенты остались только легаси — с волны 0.2 менеджер назначается
+   * при создании, но бэкфилла не делали (данные не трогаем).
+   */
   private ensureReadAccess(student: { managerId: string | null; chinaManagerId?: string | null }, user: CurrentUser, notFoundMessage: string) {
-    if (!canAccessStudentRecord(student, user)) throw new NotFoundException(notFoundMessage);
+    if (isPrivileged(user.role)) return;
+    const assigned = student.managerId === user.id || student.chinaManagerId === user.id;
+    if (!assigned) throw new NotFoundException(notFoundMessage);
   }
 
   /**

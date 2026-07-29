@@ -1,9 +1,29 @@
 export type Role = 'FOUNDER' | 'ADMIN' | 'EMPLOYEE';
 
+/**
+ * ТЗ раздел 2 требует именно «Менеджер» для роли EMPLOYEE — в БД значение
+ * enum НЕ переименовываем (это только подпись для интерфейса). Все места,
+ * где роль показывается пользователю, обязаны брать подпись отсюда, а не
+ * хардкодить строку — иначе часть экрана будет говорить «Сотрудник».
+ */
 export const ROLE_LABEL: Record<Role, string> = {
   FOUNDER: 'Основатель',
   ADMIN: 'Администратор',
-  EMPLOYEE: 'Сотрудник',
+  EMPLOYEE: 'Менеджер',
+};
+
+/** Короткое пояснение роли — используется на странице /users, чтобы отличие
+ *  Основателя от Администратора было понятно без чтения ТЗ. */
+export const ROLE_DESCRIPTION: Record<Role, string> = {
+  FOUNDER: 'Полный доступ ко всем разделам, финансовой аналитике и системным логам. Единолично подтверждает платежи и управляет правами Администраторов и Менеджеров.',
+  ADMIN: 'Операционный контроль: заявки, студенты, задачи, программы. Не может менять права Основателя, удалять системные логи и в одиночку закрывать финансовые транзакции.',
+  EMPLOYEE: 'Работает со своими лидами, заявками и карточками студентов. Видит только свой KPI и расчётный лист по зарплате.',
+};
+
+export const ROLE_BADGE: Record<Role, string> = {
+  FOUNDER: 'badge-danger',
+  ADMIN: 'badge-warning',
+  EMPLOYEE: 'badge-info',
 };
 
 /**
@@ -478,4 +498,72 @@ export interface PaymentSummary {
     remaining: string;
     overdueAmount: string;
   };
+}
+
+// ============================================================================
+// Финансовая аналитика для руководства (ТЗ 2.6, FOUNDER + ADMIN).
+// Контракт зеркалит backend/src/payments/finance-analytics.service.ts
+// (FinanceAnalyticsSummary) — GET /payments/analytics/summary?from=&to=.
+// ============================================================================
+
+export type AnalyticsPeriodPreset = 'month' | 'quarter' | 'year' | 'custom';
+
+/** Пара "сумма + количество" — базовая единица большинства срезов аналитики. */
+export interface AnalyticsAmountCount {
+  count: number;
+  amount: string;
+}
+
+export interface AnalyticsStageBreakdown {
+  stage: PaymentStage;
+  label: string;
+  count: number;
+  amount: string;
+}
+
+export interface AnalyticsPurposeBreakdown {
+  purpose: PaymentPurpose;
+  label: string;
+  count: number;
+  amount: string;
+}
+
+export interface AnalyticsMethodBreakdown {
+  method: PaymentMethod;
+  label: string;
+  count: number;
+  amount: string;
+}
+
+/** «Кто сколько собрал» — по автору платежа (createdById), не по назначенному менеджеру студента. */
+export interface AnalyticsManagerRow {
+  managerId: string | null;
+  managerName: string;
+  count: number;
+  amount: string;
+}
+
+/** Точка динамики по месяцам, month в формате "YYYY-MM", по возрастанию. */
+export interface AnalyticsMonthPoint {
+  month: string;
+  count: number;
+  amount: string;
+}
+
+export interface PaymentsAnalytics {
+  currency: string;
+  period: { from: string | null; to: string | null };
+  /** Итого поступлений за период — учитываются ТОЛЬКО APPROVED (Double Check, ТЗ 1.1). */
+  totalApproved: AnalyticsAmountCount;
+  byStage: AnalyticsStageBreakdown[];
+  byPurpose: AnalyticsPurposeBreakdown[];
+  byMethod: AnalyticsMethodBreakdown[];
+  byManager: AnalyticsManagerRow[];
+  monthly: AnalyticsMonthPoint[];
+  /** Не зависит от периода — снимок текущей очереди на одобрение (как /payments/pending/count). */
+  pendingApproval: AnalyticsAmountCount;
+  /** Не зависит от периода — текущий срез: dueDate графика прошёл, а сумма не покрыта APPROVED-оплатами. */
+  overdue: AnalyticsAmountCount;
+  /** Не зависит от периода — сколько ещё должно прийти по всему графику (план минус уже одобренное). */
+  plannedRemaining: { amount: string };
 }

@@ -15,6 +15,7 @@ import Tasks from './pages/Tasks';
 import Programs from './pages/Programs';
 import Activity from './pages/Activity';
 import Payments from './pages/Payments';
+import Analytics from './pages/Analytics';
 
 export default function App() {
   const init = useAuth((s) => s.init);
@@ -47,9 +48,10 @@ export default function App() {
             одобрения) режется внутри самой страницы по роли, как /dashboard
             и /students. Отдельный ProtectedRoute roles не нужен. */}
         <Route path="/finance" element={<Payments />} />
-        {/* /users и /activity — только FOUNDER и ADMIN (БАГ 3 аудита: раньше
-            роутинг это не проверял, доступ ограничивался лишь скрытием
-            пункта меню, что не мешало прямому переходу по URL). */}
+        {/* /users, /activity и /analytics — только FOUNDER и ADMIN (БАГ 3
+            аудита: раньше роутинг это не проверял, доступ ограничивался лишь
+            скрытием пункта меню, что не мешало прямому переходу по URL).
+            /analytics — ТЗ 2.6, финансовая аналитика видна только руководству. */}
         <Route
           path="/users"
           element={
@@ -63,6 +65,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={['FOUNDER', 'ADMIN']}>
               <Activity />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            <ProtectedRoute roles={['FOUNDER', 'ADMIN']}>
+              <Analytics />
             </ProtectedRoute>
           }
         />

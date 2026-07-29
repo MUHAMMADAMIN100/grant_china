@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { PaymentKind, PaymentPurpose, PaymentStage, PaymentStatus } from '@prisma/client';
+import { PaymentKind, PaymentMethod, PaymentPurpose, PaymentStage, PaymentStatus } from '@prisma/client';
 
 /**
  * Порядок этапов в UI и отчётах. НЕ порядок объявления enum PaymentStage —
@@ -61,6 +61,15 @@ export const PURPOSE_LABEL: Record<PaymentPurpose, string> = {
   FOOD: 'Питание',
   CONSULTATION: 'Консультация',
   OTHER: 'Другое',
+};
+
+// Раздел 2.6 ТЗ (финансовая аналитика Основателя): подписи способа оплаты
+// для разбивки «наличные / безнал» — нужна Основателю для сверки с кассой
+// и банковской выпиской. Совпадает с frontend-crm/src/api/types.ts
+// PAYMENT_METHOD_LABEL — единый справочник для бэкенда (аналитика/логи).
+export const METHOD_LABEL: Record<PaymentMethod, string> = {
+  CASH: 'Наличные',
+  CASHLESS: 'Безналичный расчёт',
 };
 
 /**

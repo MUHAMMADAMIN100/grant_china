@@ -42,8 +42,8 @@ export class UsersController {
 
   @Post()
   @Roles(Role.FOUNDER)
-  create(@Body() dto: CreateUserDto) {
-    return this.users.create(dto);
+  create(@Body() dto: CreateUserDto, @CurrentUser() current: { sub: string; role: Role }) {
+    return this.users.create(dto, { id: current.sub, role: current.role });
   }
 
   @Patch(':id')
@@ -67,12 +67,12 @@ export class UsersController {
         }
       }
     }
-    return this.users.update(id, dto);
+    return this.users.update(id, dto, { id: current.sub, role: current.role });
   }
 
   @Delete(':id')
   @Roles(Role.FOUNDER)
-  async remove(@Param('id') id: string, @CurrentUser() current: { sub: string }) {
+  async remove(@Param('id') id: string, @CurrentUser() current: { sub: string; role: Role }) {
     if (id === current.sub) {
       throw new ForbiddenException('Нельзя удалить самого себя.');
     }
@@ -85,6 +85,6 @@ export class UsersController {
         );
       }
     }
-    return this.users.remove(id);
+    return this.users.remove(id, { id: current.sub, role: current.role });
   }
 }

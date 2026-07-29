@@ -21,6 +21,9 @@ const ACTION_BADGE: Record<ActivityAction, string> = {
   PAYMENT_VOID: 'badge-danger',
   PAYMENT_DELETE: 'badge-gray',
   PAYMENT_SCHEDULE_UPDATE: 'badge-info',
+  USER_CREATE: 'badge-success',
+  USER_ROLE_CHANGE: 'badge-warning',
+  USER_DELETE: 'badge-danger',
 };
 
 export default function Activity() {
