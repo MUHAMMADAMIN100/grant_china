@@ -152,6 +152,36 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Уведомление ТОЛЬКО Основателям (FOUNDER), без ADMIN. Нужен отдельно от
+   * notifyAdminsAndFounders() из-за Double Check (ТЗ 1.1): «запрещено
+   * одиночное подтверждение платежей сотрудниками офиса или
+   * администраторами» — если ADMIN получает уведомление об очереди на
+   * одобрение наравне с FOUNDER, это визуально подразумевает, что он тоже
+   * участвует в подтверждении, хотя одобрять он не может (RolesGuard режет
+   * approve/reject на бэкенде только для FOUNDER). Используется при подаче
+   * платежа на одобрение (payments.service.ts submit/create+submit).
+   */
+  async notifyFounders(data: NotifyPayload) {
+    const founders = await this.prisma.user.findMany({
+      where: { role: 'FOUNDER', ...notDeleted },
+      select: { id: true },
+    });
+    if (!founders.length) return;
+    await this.prisma.notification.createMany({
+      data: founders.map((u) => ({
+        userId: u.id,
+        type: data.type,
+        title: data.title,
+        message: data.message,
+        payload: data.payload ?? undefined,
+      })),
+    });
+    for (const u of founders) {
+      this.realtime.emitUser(u.id, 'notification:new', { type: data.type });
+    }
+  }
+
   async notifyUser(userId: string, data: NotifyPayload) {
     const notif = await this.prisma.notification.create({
       data: {

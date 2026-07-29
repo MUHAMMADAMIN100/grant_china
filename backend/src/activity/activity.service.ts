@@ -10,7 +10,19 @@ export type ActivityAction =
   | 'STUDENT_CREATE'
   | 'STUDENT_DELETE'
   | 'MANAGER_CHANGE'
-  | 'PROGRAM_CHANGE';
+  | 'PROGRAM_CHANGE'
+  // Финансовый модуль (payments/) — Double Check (ТЗ 1.1). Поле action это
+  // String в БД, миграция не нужна — новые значения добавляются только сюда
+  // и в подписи фронта (frontend-crm/src/api/activity.ts, pages/Activity.tsx).
+  | 'PAYMENT_CREATE'
+  | 'PAYMENT_UPDATE'
+  | 'PAYMENT_SUBMIT'
+  | 'PAYMENT_RECALL'
+  | 'PAYMENT_APPROVE'
+  | 'PAYMENT_REJECT'
+  | 'PAYMENT_VOID'
+  | 'PAYMENT_DELETE'
+  | 'PAYMENT_SCHEDULE_UPDATE';
 
 @Injectable()
 export class ActivityService {

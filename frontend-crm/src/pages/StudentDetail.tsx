@@ -9,6 +9,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import DocumentsChecklist from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
+import PaymentsSection from '../components/PaymentsSection';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
 import DirectionOptions from '../components/DirectionOptions';
@@ -230,7 +231,10 @@ export default function StudentDetail() {
   const isMine = !assigned || student.managerId === me?.id || student.chinaManagerId === me?.id;
   const canEdit = isAdmin || isMine;
 
-  const isEnrolled = student.applications?.[0]?.status === 'ENROLLED';
+  // COMPLETED — legacy-значение статуса заявки (мигрировано в ENROLLED), но
+  // у части старых заявок в БД оно ещё может встречаться "как есть" —
+  // без него такие студенты никогда не увидели бы разблокированным этап 2.1.
+  const isEnrolled = student.applications?.[0]?.status === 'ENROLLED' || student.applications?.[0]?.status === 'COMPLETED';
 
   return (
     <div>
@@ -453,6 +457,10 @@ export default function StudentDetail() {
           onChange={reload}
           editable={canEdit}
         />
+
+        <div style={{ marginTop: 28 }}>
+          <PaymentsSection studentId={student.id} canEdit={canEdit} />
+        </div>
 
         <div style={{ marginTop: 28 }}>
           <ApplicationFormSection

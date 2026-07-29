@@ -14,7 +14,10 @@ function generatePassword(length = 8): string {
 
 // Soft-delete: при include'ах не подтягиваем удалённые документы/заявки.
 const STUDENT_INCLUDE = {
-  documents: { where: { deletedAt: null } },
+  // type: { not: 'RECEIPT' } — чеки платежей (payments/) не должны попадать
+  // в личный кабинет студента вообще (финансовый документ сотрудника, а не
+  // документ студента) — см. STUDENT_RESTRICTED_DOC_TYPES в common/access.ts.
+  documents: { where: { deletedAt: null, type: { not: 'RECEIPT' } } },
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
   applications: {

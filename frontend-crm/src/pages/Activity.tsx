@@ -12,6 +12,15 @@ const ACTION_BADGE: Record<ActivityAction, string> = {
   STUDENT_DELETE: 'badge-danger',
   MANAGER_CHANGE: 'badge-warning',
   PROGRAM_CHANGE: 'badge-info',
+  PAYMENT_CREATE: 'badge-info',
+  PAYMENT_UPDATE: 'badge-warning',
+  PAYMENT_SUBMIT: 'badge-warning',
+  PAYMENT_RECALL: 'badge-gray',
+  PAYMENT_APPROVE: 'badge-success',
+  PAYMENT_REJECT: 'badge-danger',
+  PAYMENT_VOID: 'badge-danger',
+  PAYMENT_DELETE: 'badge-gray',
+  PAYMENT_SCHEDULE_UPDATE: 'badge-info',
 };
 
 export default function Activity() {

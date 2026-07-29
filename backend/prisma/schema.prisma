@@ -24,8 +24,8 @@ enum Direction {
 
 enum ApplicationStatus {
   NEW
-  IN_PROGRESS      // legacy → DOCS_REVIEW
-  COMPLETED        // legacy → ENROLLED
+  IN_PROGRESS // legacy → DOCS_REVIEW
+  COMPLETED // legacy → ENROLLED
   DOCS_REVIEW
   DOCS_SUBMITTED
   PRE_ADMISSION
@@ -53,22 +53,29 @@ enum TaskStatus {
 // через установку deletedAt обратно в null. Бэкапы (Daily/Weekly/Monthly на
 // Railway) — вторая линия обороны.
 model User {
-  id         String    @id @default(uuid())
-  email      String    @unique
-  password   String
-  fullName   String
-  role       Role      @default(EMPLOYEE)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  deletedAt  DateTime?
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  fullName  String
+  role      Role      @default(EMPLOYEE)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
-  notifications      Notification[]
-  managedApplications      Application[] @relation("ApplicationManager")
-  managedChinaApplications Application[] @relation("ApplicationChinaManager")
-  managedStudents          Student[]     @relation("StudentManager")
-  managedChinaStudents     Student[]     @relation("StudentChinaManager")
-  assignedTasks            Task[]        @relation("TaskAssignee")
-  createdTasks             Task[]        @relation("TaskCreator")
+  notifications            Notification[]
+  managedApplications      Application[]  @relation("ApplicationManager")
+  managedChinaApplications Application[]  @relation("ApplicationChinaManager")
+  managedStudents          Student[]      @relation("StudentManager")
+  managedChinaStudents     Student[]      @relation("StudentChinaManager")
+  assignedTasks            Task[]         @relation("TaskAssignee")
+  createdTasks             Task[]         @relation("TaskCreator")
+
+  createdPayments         Payment[]         @relation("PaymentCreatedBy")
+  submittedPayments       Payment[]         @relation("PaymentSubmittedBy")
+  approvedPayments        Payment[]         @relation("PaymentApprovedBy")
+  rejectedPayments        Payment[]         @relation("PaymentRejectedBy")
+  voidedPayments          Payment[]         @relation("PaymentVoidedBy")
+  updatedPaymentSchedules PaymentSchedule[] @relation("PaymentScheduleUpdatedBy")
 
   @@index([deletedAt])
 }
@@ -81,28 +88,28 @@ model User {
 // (нет onDelete: Cascade на student-связи), поэтому в applications.service.remove()
 // студент явно удаляется отдельно.
 model Application {
-  id         String            @id @default(uuid())
-  fullName   String
-  phone      String
-  email      String?
-  direction  Direction
-  comment    String?
-  status     ApplicationStatus @default(NEW)
-  studentId  String?
+  id             String            @id @default(uuid())
+  fullName       String
+  phone          String
+  email          String?
+  direction      Direction
+  comment        String?
+  status         ApplicationStatus @default(NEW)
+  studentId      String?
   // student → SetNull-семантика по сути не задана, потому что removed применяется в коде вручную.
-  student    Student?          @relation(fields: [studentId], references: [id])
-  managerId       String?
+  student        Student?          @relation(fields: [studentId], references: [id])
+  managerId      String?
   // Удалили сотрудника-менеджера TJ → менеджер у заявки обнуляется, заявка остаётся.
-  manager         User?             @relation("ApplicationManager", fields: [managerId], references: [id], onDelete: SetNull)
-  chinaManagerId  String?
+  manager        User?             @relation("ApplicationManager", fields: [managerId], references: [id], onDelete: SetNull)
+  chinaManagerId String?
   // Аналогично для китайского менеджера.
-  chinaManager    User?             @relation("ApplicationChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
-  programId       String?
+  chinaManager   User?             @relation("ApplicationChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
+  programId      String?
   // Удалили программу → у заявки programId становится null.
-  program         Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  deletedAt  DateTime?
+  program        Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  deletedAt      DateTime?
 
   @@index([status])
   @@index([direction])
@@ -115,29 +122,31 @@ model Application {
 }
 
 model Student {
-  id           String        @id @default(uuid())
-  fullName     String
-  phones       String[]      @default([])
+  id              String        @id @default(uuid())
+  fullName        String
+  phones          String[]      @default([])
   email           String?
   password        String?
   applicationForm Json?
   photoUrl        String?
-  direction    Direction
-  cabinet      Int
-  status       StudentStatus @default(ACTIVE)
-  comment      String?
-  managerId         String?
-  manager           User?         @relation("StudentManager", fields: [managerId], references: [id], onDelete: SetNull)
-  chinaManagerId    String?
-  chinaManager      User?         @relation("StudentChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
-  programId         String?
-  program           Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  deletedAt    DateTime?
+  direction       Direction
+  cabinet         Int
+  status          StudentStatus @default(ACTIVE)
+  comment         String?
+  managerId       String?
+  manager         User?         @relation("StudentManager", fields: [managerId], references: [id], onDelete: SetNull)
+  chinaManagerId  String?
+  chinaManager    User?         @relation("StudentChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
+  programId       String?
+  program         Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
 
-  documents    Document[]
-  applications Application[]
+  documents       Document[]
+  applications    Application[]
+  payments        Payment[]
+  paymentSchedule PaymentSchedule[]
 
   @@index([direction])
   @@index([cabinet])
@@ -152,24 +161,37 @@ model Student {
   @@index([deletedAt, createdAt(sort: Desc)])
 }
 
-// Документ студента (10 типов + OTHER).
-// При удалении студента документы каскадно удаляются (Cascade) — это сейчас
-// единственная Cascade-связь в схеме. Заявки и менеджеры используют SetNull.
+// Документ студента (10 типов + OTHER, + RECEIPT для чеков платежей — см. Payment).
+// onDelete: Restrict (Проблема 7 аудита волны 1, п.11 — раньше был Cascade,
+// единственная Cascade-связь в схеме). В коде НЕТ ни одного физического
+// prisma.student.delete() (только soft-delete через deletedAt, см. правило
+// проекта №1), поэтому Cascade здесь никогда не срабатывал на практике —
+// но именно поэтому и опасен: любое будущее физическое удаление студента
+// (скрипт миграции, консоль Railway, ошибка) беззвучно снесло бы документы,
+// включая чеки (Document.paymentId) — часть финансового аудит-следа.
+// Restrict превращает такое удаление в ошибку БД вместо тихой потери данных.
 model Document {
-  id         String    @id @default(uuid())
-  studentId  String
-  student    Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  filename   String
+  id           String    @id @default(uuid())
+  studentId    String
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  filename     String
   originalName String
-  mimeType   String
-  size       Int
-  url        String
-  type       String    @default("OTHER")
-  createdAt  DateTime  @default(now())
-  deletedAt  DateTime?
+  mimeType     String
+  size         Int
+  url          String
+  type         String    @default("OTHER")
+  // Чек привязан и к студенту (studentId, как все документы — отсюда бесплатная
+  // защита /uploads), и к платежу. SetNull, а не Cascade: платёж физически
+  // никогда не удаляется, но если это когда-нибудь произойдёт, файл обязан
+  // остаться под правами студента, а не исчезнуть.
+  paymentId    String?
+  payment      Payment?  @relation("PaymentReceipts", fields: [paymentId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
 
   @@index([studentId, type])
   @@index([deletedAt])
+  @@index([paymentId])
 }
 
 model Task {
@@ -183,30 +205,36 @@ model Task {
   createdBy    User?      @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+  // Проблема 11 аудита волны 1: раньше tasks.service.remove() делал
+  // prisma.task.delete() — единственное физическое удаление в проекте,
+  // прямое нарушение правила №1. Поле опциональное — безопасно для
+  // `prisma db push --accept-data-loss` на боевой БД с существующими задачами.
+  deletedAt DateTime?
 
   @@index([assignedToId])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model Program {
-  id                 String    @id @default(uuid())
-  name               String
-  university         String
-  city               String
-  major              String
-  direction          Direction
-  cost               Float
-  currency           String    @default("CNY")
-  duration           String?
-  language           String?
-  description        String?
-  imageUrl           String?
-  published          Boolean   @default(true)
-  telegramMessageId  Int?
-  telegramHasPhoto   Boolean   @default(false)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  deletedAt          DateTime?
+  id                String    @id @default(uuid())
+  name              String
+  university        String
+  city              String
+  major             String
+  direction         Direction
+  cost              Float
+  currency          String    @default("CNY")
+  duration          String?
+  language          String?
+  description       String?
+  imageUrl          String?
+  published         Boolean   @default(true)
+  telegramMessageId Int?
+  telegramHasPhoto  Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   applications Application[]
   students     Student[]
@@ -219,15 +247,15 @@ model Program {
 }
 
 model Notification {
-  id         String   @id @default(uuid())
-  userId     String?
-  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type       String   // "APPLICATION_NEW", "APPLICATION_DELAY", etc.
-  title      String
-  message    String
-  payload    Json?
-  read       Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // "APPLICATION_NEW", "APPLICATION_DELAY", etc.
+  title     String
+  message   String
+  payload   Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   @@index([userId, read])
   @@index([createdAt])
@@ -237,15 +265,234 @@ model ActivityLog {
   id          String   @id @default(uuid())
   actorId     String?
   actorName   String
-  actorRole   String   // ADMIN | EMPLOYEE
-  action      String   // "STATUS_CHANGE" | "STUDENT_UPDATE" | "MANAGER_CHANGE" | "STUDENT_CREATE" | "STUDENT_DELETE"
+  actorRole   String // ADMIN | EMPLOYEE
+  action      String // "STATUS_CHANGE" | "STUDENT_UPDATE" | "MANAGER_CHANGE" | "STUDENT_CREATE" | "STUDENT_DELETE"
   studentId   String?
   studentName String?
-  details     String   // human-readable: "Статус: NEW → DOCS_REVIEW", "Менеджер TJ: A → B"
+  details     String // human-readable: "Статус: NEW → DOCS_REVIEW", "Менеджер TJ: A → B"
   payload     Json?
   createdAt   DateTime @default(now())
 
   @@index([createdAt])
   @@index([studentId])
   @@index([actorId])
+}
+
+// Сквозная финансовая шкала из ТЗ 1.2. Иерархии «1 / 1.1 / 2 / 2.1» в БД НЕТ:
+// по смыслу это 6 самостоятельных платежей в разное время, а не дерево.
+// Порядок объявления = порядок в UI, но сортируем по Payment.stageOrder,
+// а не по порядку значений enum (переставить значения enum потом = DROP TYPE).
+// Подписи для UI (не в БД): INITIAL — «Этап 1. Первичная оплата»,
+// REGISTRATION — «Этап 1.1. Регистрация студента», DOCUMENTATION — «Этап 2.
+// Документация (виза, приглашение)», ENROLLMENT — «Этап 2.1. После зачисления»,
+// RELOCATION — «Этап 3. После переезда в Китай»,
+// LIVING_EXPENSES — «Этап 4. Расходы на месте».
+enum PaymentStage {
+  INITIAL
+  REGISTRATION
+  DOCUMENTATION
+  ENROLLMENT
+  RELOCATION
+  LIVING_EXPENSES
+}
+
+// Этапы 1–3 (SCHEDULE) — разовые платежи агентству по договору: есть плановая
+// сумма и срок, попадают в блок «График платежей».
+// Этап 4 (ON_SITE) — регулярные расходы студента уже в Китае: плана нет, есть
+// только факт, отдельный блок «Расходы на месте».
+// Поле денормализовано (выводится из stage), потому что по нему UI и отчёты
+// делят выборку, и без него каждый запрос тащил бы NOT IN (...) по stage.
+enum PaymentKind {
+  SCHEDULE
+  ON_SITE
+}
+
+// payment_purpose из ТЗ 1.3, ровно 8 значений:
+// Регистрация студента / Документация / Зачисление в университет /
+// После переезда / Проживание / Питание / Консультация / Другое.
+enum PaymentPurpose {
+  REGISTRATION
+  DOCUMENTATION
+  ENROLLMENT
+  RELOCATION
+  ACCOMMODATION
+  FOOD
+  CONSULTATION
+  OTHER
+}
+
+// payment_method из ТЗ 1.3: Наличные / Безналичный расчёт.
+// Имя CASHLESS (а не BANK) намеренно — 'BANK' уже занят как Document.type
+// (справка из банка), одинаковые строки в разных справочниках путают.
+enum PaymentMethod {
+  CASH
+  CASHLESS
+}
+
+// Double Check (ТЗ 1.1): деньги считаются полученными ТОЛЬКО в APPROVED.
+// DRAFT — черновик, PENDING_APPROVAL — «Ожидает одобрения Основателем»,
+// REJECTED — отклонён (правится и подаётся заново той же записью),
+// VOID — аннулирован после одобрения (правило проекта: не удаляем, а сторнируем).
+enum PaymentStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  VOID
+}
+
+// ФАКТ оплаты. Одна строка = одно фактическое поступление денег.
+// Частичные оплаты одного этапа — это несколько строк с одним stage, поэтому
+// плановая сумма живёт НЕ здесь, а в PaymentSchedule (иначе план дублировался
+// бы в каждой частичной оплате и разъезжался).
+model Payment {
+  id String @id @default(uuid())
+
+  studentId String
+  // onDelete: Restrict, а не Cascade (Проблема 7 аудита волны 1): studentId
+  // обязателен (не nullable), поэтому SetNull невозможен. Финансовая история
+  // (факты оплат, чеки через Document.paymentId) не должна беззвучно
+  // исчезать, если студент когда-нибудь будет физически удалён — Restrict
+  // заставит такую операцию упасть с ошибкой БД, а не молча снести бухгалтерию.
+  // Сейчас студент удаляется только soft (deletedAt), поэтому ограничение
+  // ничего не ломает при обычной работе.
+  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  // Волна 6 (Contract) добавит сюда relation. Сейчас — «голый» nullable-скаляр:
+  // так волна 6 навесит связь одним ALTER TABLE ADD CONSTRAINT, без миграции данных.
+  contractId String?
+
+  stage      PaymentStage
+  // Денормализация ради сортировки/группировки в отчётах: ORDER BY stageOrder
+  // не зависит от порядка объявления значений enum в Postgres (менять его
+  // потом = пересоздание типа). Заполняется сервисом из константы STAGE_ORDER.
+  stageOrder Int            @default(0)
+  kind       PaymentKind    @default(SCHEDULE)
+  purpose    PaymentPurpose
+  method     PaymentMethod
+
+  // Деньги — только Decimal. Float даёт 0.1+0.2=0.30000000000000004 и
+  // расхождение в сводке «оплачено/осталось». 12,2 = до 9 999 999 999.99 TJS.
+  amount   Decimal @db.Decimal(12, 2)
+  // Валюта проекта одна (сомони). Поле оставлено, чтобы не переделывать схему,
+  // если когда-нибудь появится вторая; UI селектор валюты НЕ показывает.
+  currency String  @default("TJS")
+
+  // Фактическая дата поступления денег (её вводит менеджер, может отличаться
+  // от createdAt). Все отчёты «за период» строятся по paidAt, а не по createdAt.
+  paidAt  DateTime  @default(now())
+  // Снимок планового срока этапа на момент внесения платежа (копируется из
+  // PaymentSchedule.dueDate). Нужен для KPI «своевременность сбора оплат» из раздела 5:
+  // если потом отредактировать план, историческая метрика не должна «переехать».
+  dueDate DateTime?
+
+  // Номер квитанции/банковской транзакции — Основателю нужно чем-то сверять
+  // безнал с выпиской, глазами по фото чека это не делается.
+  reference String?
+  comment   String?
+
+  status PaymentStatus @default(DRAFT)
+
+  // Кто внёс данные. SetNull — уволенного сотрудника soft-удаляют, платёж
+  // должен остаться (та же семантика, что у Application.manager).
+  createdById String?
+  createdBy   User?   @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Кто нажал «Подтвердить». Ключевое поле Double Check: одобрить платёж
+  // может только пользователь, чей id НЕ равен submittedById.
+  submittedById String?
+  submittedBy   User?     @relation("PaymentSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  submittedAt   DateTime?
+
+  // Финальное акцептование Основателя. approvedAt НИКОГДА не обнуляется,
+  // даже при последующем VOID — иначе теряется дата проведения для аудита.
+  approvedById String?
+  approvedBy   User?     @relation("PaymentApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  // Последнее отклонение. Полная история отклонений — в ActivityLog
+  // (action = 'PAYMENT_REJECT'), здесь только «что показать менеджеру сейчас».
+  rejectedById    String?
+  rejectedBy      User?     @relation("PaymentRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  // Аннулирование уже проведённого платежа (ошибка ввода). Правило проекта —
+  // никогда не удалять: APPROVED нельзя ни удалить, ни отредактировать, только
+  // перевести в VOID с причиной, и он перестаёт учитываться в суммах.
+  voidedById String?
+  voidedBy   User?     @relation("PaymentVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidedAt   DateTime?
+  voidReason String?
+
+  // Чеки — обычные Document (type='RECEIPT'), поэтому автоматически получают
+  // защиту /uploads через files/file-resolver.service.ts (ветка DOCUMENT).
+  receipts Document[] @relation("PaymentReceipts")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  // Отдельный @@index([deletedAt]) не нужен: он префикс двух composite-индексов
+  // выше, Postgres использует их — лишний индекс только замедлял бы запись.
+
+  // Карточка студента: WHERE studentId=? AND deletedAt IS NULL ORDER BY stageOrder.
+  @@index([studentId, deletedAt, stageOrder])
+  // Очередь Основателя: WHERE status='PENDING_APPROVAL' AND deletedAt IS NULL
+  // ORDER BY submittedAt (сначала те, кто ждёт дольше всех).
+  @@index([status, deletedAt, submittedAt])
+  // Отчёт «проведено за период»: status='APPROVED' + paidAt BETWEEN, сортировка по дате.
+  @@index([status, deletedAt, paidAt(sort: Desc)])
+  // Общий список страницы «Финансы» без фильтра по статусу.
+  @@index([deletedAt, paidAt(sort: Desc)])
+  // Просрочки/ближайшие сроки (KPI раздела 5).
+  @@index([deletedAt, dueDate])
+  // «Кто сколько внёс» — срез по сотруднику.
+  @@index([createdById])
+  // Волна 6: платежи по договору.
+  @@index([contractId])
+}
+
+// ПЛАН по этапу: индивидуальные суммы и сроки договора. Отдельная сущность,
+// потому что план существует ДО первого факта (график виден сразу после
+// подписания договора) и потому что один этап может быть оплачен частями —
+// хранить план на строке факта означало бы дублировать и рассинхронизировать его.
+// Волна 6 перевесит владение планом на Contract через тот же contractId.
+// Этап 4 (LIVING_EXPENSES) строки здесь НЕ имеет: у расходов на месте плана нет.
+model PaymentSchedule {
+  id String @id @default(uuid())
+
+  studentId String
+  // onDelete: Restrict — та же причина, что у Payment.student выше: план
+  // оплат не должен беззвучно исчезнуть при гипотетическом физическом
+  // удалении студента.
+  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  contractId String?
+
+  stage      PaymentStage
+  stageOrder Int          @default(0)
+
+  // 0 = «сумма ещё не согласована»; строка создаётся сразу для всех этапов
+  // графика, чтобы UI показывал полную шкалу с самого начала.
+  plannedAmount Decimal   @default(0) @db.Decimal(12, 2)
+  currency      String    @default("TJS")
+  dueDate       DateTime?
+
+  comment String?
+
+  // Кто последний менял плановую сумму/срок — финансовый контроль.
+  updatedById String?
+  updatedBy   User?   @relation("PaymentScheduleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Один этап у студента = одна плановая строка. Конфликта с soft-delete нет:
+  // строки графика не удаляются (обнуляется plannedAmount), а сервис работает
+  // через upsert по [studentId, stage] — он же «воскрешает» deletedAt в null.
+  @@unique([studentId, stage])
+  @@index([studentId, deletedAt, stageOrder])
+  @@index([deletedAt, dueDate])
+  @@index([contractId])
 }

@@ -10,6 +10,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
+import { assertNotReceiptDocument } from '../payments/payment-rules';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
 
@@ -33,7 +34,11 @@ const CABINET_BY_DIRECTION: Record<Direction, number> = {
 // Полный select — для карточки студента (detail). Возвращает всё, кроме password.
 const STUDENT_SELECT = {
   ...STUDENT_SAFE_FIELDS,
-  documents: { where: { deletedAt: null } },
+  // type: { not: 'RECEIPT' } — чеки платежей (payments/) это Document, но
+  // финансовый документ, а не документ студента. Они показываются только
+  // внутри карточки платежа (GET /payments/*), не в чек-листе документов и
+  // не в счётчике/ZIP-архиве DocumentsChecklist.tsx (см. риск волны 2).
+  documents: { where: { deletedAt: null, type: { not: 'RECEIPT' } } },
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
   program: true,
@@ -558,7 +563,18 @@ export class StudentsService {
       include: { student: { select: { managerId: true, chinaManagerId: true } } },
     });
     if (!doc) throw new NotFoundException('Документ не найден');
+    // ПОРЯДОК ПРОВЕРОК ВАЖЕН: сначала права на студента, потом бизнес-инвариант.
+    // Если сделать наоборот, сообщение «Чек платежа удаляется только через
+    // раздел Финансы» прилетит раньше проверки доступа — и посторонний
+    // сотрудник, перебирая UUID, по тексту ответа узнаёт, что документ
+    // является чеком, ещё не имея права его видеть.
     if (doc.student) this.ensureCanEdit(doc.student, user);
+    // Проблема 1 аудита волны 1: этот эндпоинт (DELETE /students/documents/:docId)
+    // не различал обычный документ и чек платежа — менеджер мог soft-удалить
+    // чек уже ОДОБРЕННОГО платежа в обход payments.service.removeReceipt()
+    // (тот пускает удаление только для DRAFT/REJECTED). Чек — не документ
+    // студента, а часть финансового аудит-следа, управляется только payments/.
+    assertNotReceiptDocument(doc);
     // Soft delete: помечаем deletedAt. Файл на диске остаётся, но в UI и
     // в архивах студентов больше не отображается. Восстановление = снять метку.
     await this.prisma.document.update({

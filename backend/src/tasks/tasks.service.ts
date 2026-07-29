@@ -7,6 +7,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
+import { notDeleted } from '../common/soft-delete';
 
 type CurrentUser = { id: string; role: Role };
 
@@ -78,8 +79,8 @@ export class TasksService {
   }) {
     const baseWhere: any =
       isPrivileged(filters.role) && !filters.mine
-        ? {}
-        : { assignedToId: filters.currentUserId };
+        ? { ...notDeleted }
+        : { assignedToId: filters.currentUserId, ...notDeleted };
     const search = (filters.search || '').trim();
     const where = search
       ? {
@@ -103,7 +104,9 @@ export class TasksService {
    * чтения — сохраняем их прежние коды/тексты ошибок (403).
    */
   async findOne(id: string, user?: CurrentUser) {
-    const task = await this.prisma.task.findUnique({ where: { id }, include: TASK_INCLUDE });
+    // findFirst, а не findUnique: soft-delete фильтр (deletedAt: null) —
+    // не уникальное поле, findUnique его не принимает в `where`.
+    const task = await this.prisma.task.findFirst({ where: { id, ...notDeleted }, include: TASK_INCLUDE });
     if (!task) throw new NotFoundException('Задача не найдена');
     // IDOR: любой EMPLOYEE мог прочитать чужую задачу по UUID, зная только
     // GET /tasks/:id. Видеть задачу может привилегированный пользователь,
@@ -144,13 +147,17 @@ export class TasksService {
       throw new ForbiddenException('Только Основатель или администратор может удалять задачи');
     }
     await this.findOne(id);
-    await this.prisma.task.delete({ where: { id } });
+    // Проблема 11 аудита волны 1: раньше здесь было prisma.task.delete() —
+    // единственное физическое удаление во всём проекте, нарушение правила
+    // №1 (никогда не удалять данные). Soft-delete: помечаем deletedAt,
+    // findAll/findOne/stats фильтруют deletedAt: null.
+    await this.prisma.task.update({ where: { id }, data: { deletedAt: new Date() } });
     this.realtime.emitAllStaff('task:deleted', { id });
     return { ok: true };
   }
 
   async stats(user: CurrentUser) {
-    const where = isPrivileged(user.role) ? {} : { assignedToId: user.id };
+    const where = isPrivileged(user.role) ? { ...notDeleted } : { assignedToId: user.id, ...notDeleted };
     const [total, todo, inProgress, done] = await Promise.all([
       this.prisma.task.count({ where }),
       this.prisma.task.count({ where: { ...where, status: TaskStatus.TODO } }),

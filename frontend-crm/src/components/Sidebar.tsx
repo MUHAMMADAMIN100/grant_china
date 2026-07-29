@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../store/auth';
 import { isPrivileged, ROLE_LABEL } from '../api/types';
+import { pendingPaymentsCount } from '../api/payments';
+import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import ChangePasswordModal from './ChangePasswordModal';
 
@@ -10,12 +12,31 @@ export default function Sidebar() {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const [pwdOpen, setPwdOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const initials = user?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
+  const isPriv = isPrivileged(user?.role);
+
+  // Бейдж очереди на одобрение (ТЗ 1.1) — только FOUNDER/ADMIN видят чужие
+  // неодобренные платежи (GET /payments/pending/count требует @Roles(FOUNDER, ADMIN)).
+  const refreshPendingCount = () => {
+    if (!isPriv) return;
+    pendingPaymentsCount().then((r) => setPendingCount(r.count)).catch(() => {});
+  };
+  useEffect(refreshPendingCount, [isPriv]);
+  useRealtime({
+    'payment:submitted': refreshPendingCount,
+    'payment:approved': refreshPendingCount,
+    'payment:rejected': refreshPendingCount,
+    'payment:recalled': refreshPendingCount,
+    'payment:voided': refreshPendingCount,
+    'payment:deleted': refreshPendingCount,
+  });
 
   const links = [
     { to: '/dashboard', icon: 'dashboard', label: 'Дашборд' },
     { to: '/applications', icon: 'assignment', label: 'Заявки' },
     { to: '/students', icon: 'school', label: 'Студенты' },
+    { to: '/finance', icon: 'payments', label: 'Финансы', badge: isPriv ? pendingCount : 0 },
     { to: '/programs', icon: 'menu_book', label: 'Программы' },
     { to: '/tasks', icon: 'task_alt', label: 'Задачи' },
     // FOUNDER + ADMIN видят активность и список пользователей.
@@ -69,6 +90,7 @@ export default function Sidebar() {
                 <Icon name={l.icon} size={22} />
               </motion.span>
               <span>{l.label}</span>
+              {!!l.badge && <span className="sidebar-nav-badge">{l.badge > 99 ? '99+' : l.badge}</span>}
             </NavLink>
           </motion.div>
         ))}

@@ -6,7 +6,19 @@ export type ActivityAction =
   | 'STUDENT_CREATE'
   | 'STUDENT_DELETE'
   | 'MANAGER_CHANGE'
-  | 'PROGRAM_CHANGE';
+  | 'PROGRAM_CHANGE'
+  // Финансы (ТЗ 1.1) — значения строго совпадают с TS-union в
+  // backend/src/activity/activity.service.ts (поле action в БД — String,
+  // миграция не нужна).
+  | 'PAYMENT_CREATE'
+  | 'PAYMENT_UPDATE'
+  | 'PAYMENT_SUBMIT'
+  | 'PAYMENT_RECALL'
+  | 'PAYMENT_APPROVE'
+  | 'PAYMENT_REJECT'
+  | 'PAYMENT_VOID'
+  | 'PAYMENT_DELETE'
+  | 'PAYMENT_SCHEDULE_UPDATE';
 
 export interface ActivityEntry {
   id: string;
@@ -40,4 +52,13 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   STUDENT_DELETE: 'Удаление студента',
   MANAGER_CHANGE: 'Смена менеджера',
   PROGRAM_CHANGE: 'Изменение программы',
+  PAYMENT_CREATE: 'Внесён платёж',
+  PAYMENT_UPDATE: 'Изменён платёж',
+  PAYMENT_SUBMIT: 'Платёж отправлен на одобрение',
+  PAYMENT_RECALL: 'Платёж отозван с одобрения',
+  PAYMENT_APPROVE: 'Платёж одобрен',
+  PAYMENT_REJECT: 'Платёж отклонён',
+  PAYMENT_VOID: 'Платёж аннулирован',
+  PAYMENT_DELETE: 'Удалён черновик платежа',
+  PAYMENT_SCHEDULE_UPDATE: 'Изменён план оплаты',
 };

@@ -14,6 +14,7 @@ import Users from './pages/Users';
 import Tasks from './pages/Tasks';
 import Programs from './pages/Programs';
 import Activity from './pages/Activity';
+import Payments from './pages/Payments';
 
 export default function App() {
   const init = useAuth((s) => s.init);
@@ -42,6 +43,10 @@ export default function App() {
         <Route path="/students/:id" element={<StudentDetail />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/programs" element={<Programs />} />
+        {/* Доступна всем ролям — содержимое (очередь на одобрение, кнопки
+            одобрения) режется внутри самой страницы по роли, как /dashboard
+            и /students. Отдельный ProtectedRoute roles не нужен. */}
+        <Route path="/finance" element={<Payments />} />
         {/* /users и /activity — только FOUNDER и ADMIN (БАГ 3 аудита: раньше
             роутинг это не проверял, доступ ограничивался лишь скрытием
             пункта меню, что не мешало прямому переходу по URL). */}

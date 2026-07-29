@@ -38,5 +38,10 @@ export function canAccessStudentRecord(record: AssignableRecord, user: AccessUse
  * обратно (мед.справка и справка из банка — персональные/финансовые
  * данные, доступны только сотрудникам CRM). Раньше дублировалось дословно
  * в student-auth.service.ts и student-auth.controller.ts.
+ *
+ * RECEIPT (чек к платежу, см. payments/) добавлен по той же логике: это
+ * финансовый документ, который загружает сотрудник (не студент), и он не
+ * должен быть доступен студенту через /uploads даже при прямой ссылке —
+ * защита в глубину поверх фильтрации в students.service.ts/student-auth.service.ts.
  */
-export const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL']);
+export const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL', 'RECEIPT']);

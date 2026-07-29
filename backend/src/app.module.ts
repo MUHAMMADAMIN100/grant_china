@@ -22,6 +22,7 @@ import { StudentAuthModule } from './student-auth/student-auth.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ProgramsModule } from './programs/programs.module';
 import { ActivityModule } from './activity/activity.module';
+import { PaymentsModule } from './payments/payments.module';
 
 // Проблема E аудита: ServeStaticModule отдавал ВЕСЬ каталог /uploads (сканы
 // паспортов, BANK/MEDICAL справки, фото студентов) анониму без всякой
@@ -85,6 +86,7 @@ if (!UPLOADS_PROTECTED) {
     RealtimeModule,
     ProgramsModule,
     ActivityModule,
+    PaymentsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

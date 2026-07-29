@@ -29,6 +29,8 @@ import { PrismaService } from '../prisma/prisma.service';
 // Проблема G аудита: раньше этот Set дублировался дословно здесь и в
 // student-auth.service.ts — единственный источник теперь common/access.ts.
 import { STUDENT_RESTRICTED_DOC_TYPES } from '../common/access';
+import { assertUploadableDocumentType } from '../common/documents';
+import { assertNotReceiptDocument } from '../payments/payment-rules';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { StudentForgotPasswordDto, StudentLoginDto } from './dto/student-login.dto';
 import { clearStudentCookie, setStudentCookie } from '../auth/cookie-helpers';
@@ -165,6 +167,9 @@ export class StudentAuthController {
     if (!file) throw new BadRequestException('Файл не передан');
     const url = `/uploads/${file.filename}`;
     const docType = type || 'OTHER';
+    // Проблема 10/17 аудита волны 1: та же дыра, что в students.controller.ts —
+    // студент мог передать произвольный type, включая 'RECEIPT'.
+    assertUploadableDocumentType(docType);
     if (docType !== 'OTHER') {
       // Soft-delete старые документы того же типа — заменяются на новый.
       // updateMany вместо deleteMany: данные физически остаются в БД.
@@ -274,6 +279,12 @@ export class StudentAuthController {
     if (!doc || doc.studentId !== user.id) {
       throw new BadRequestException('Документ не найден');
     }
+    // Проблема 2 аудита волны 1: студент — наименее доверенная сторона,
+    // id чека приезжает ему по WebSocket-событию (payment:receipt-added),
+    // и без этой проверки он мог сам уничтожить доказательство собственного
+    // платежа. Чек управляется только payments/, студенту нельзя трогать
+    // ни свой, ни (тем более) чужой.
+    assertNotReceiptDocument(doc);
     await this.prisma.document.update({
       where: { id: docId },
       data: { deletedAt: new Date() },

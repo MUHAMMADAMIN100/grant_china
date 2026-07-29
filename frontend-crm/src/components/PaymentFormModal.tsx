@@ -1,0 +1,321 @@
+import { useRef, useState } from 'react';
+import { motion } from 'framer-motion';
+import type { Payment, PaymentMethod, PaymentPurpose, PaymentReceipt, PaymentStage } from '../api/types';
+import {
+  DEFAULT_PAYMENT_PURPOSE,
+  PAYMENT_AMOUNT_RE,
+  PAYMENT_METHOD_LABEL,
+  PAYMENT_PURPOSE_LABEL,
+  PAYMENT_STAGE_KIND,
+  PAYMENT_STAGE_LABEL,
+  RECEIPT_REQUIRED_PURPOSES,
+  SCHEDULE_PAYMENT_PURPOSES,
+  ON_SITE_PAYMENT_PURPOSES,
+} from '../api/types';
+import { addPaymentReceipt, createPayment, removePaymentReceipt, submitPayment, updatePayment } from '../api/payments';
+import { useUI } from '../ui/Dialogs';
+import { buildFileUrl } from '../utils/fileUrl';
+import ReceiptDropzone from './ReceiptDropzone';
+import Icon from '../Icon';
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+type Props = {
+  studentId: string;
+  stage: PaymentStage;
+  /** Если передан — форма в режиме редактирования уже существующего DRAFT/REJECTED платежа. */
+  payment?: Payment | null;
+  onClose: () => void;
+  onSaved: () => void;
+};
+
+export default function PaymentFormModal({ studentId, stage, payment, onClose, onSaved }: Props) {
+  const { toast } = useUI();
+  const isEdit = !!payment;
+  const kind = PAYMENT_STAGE_KIND[stage];
+  const purposeOptions = kind === 'ON_SITE' ? ON_SITE_PAYMENT_PURPOSES : SCHEDULE_PAYMENT_PURPOSES;
+
+  const [purpose, setPurpose] = useState<PaymentPurpose>(payment?.purpose ?? DEFAULT_PAYMENT_PURPOSE[stage]);
+  const [method, setMethod] = useState<PaymentMethod>(payment?.method ?? 'CASH');
+  const [amount, setAmount] = useState(payment?.amount ?? '');
+  const [paidAt, setPaidAt] = useState(payment ? payment.paidAt.slice(0, 10) : todayStr());
+  const [reference, setReference] = useState(payment?.reference ?? '');
+  const [comment, setComment] = useState(payment?.comment ?? '');
+  const [file, setFile] = useState<File | null>(null);
+  const [receipts, setReceipts] = useState<PaymentReceipt[]>(payment?.receipts ?? []);
+  const [saving, setSaving] = useState<'draft' | 'submit' | null>(null);
+  const [addingReceipt, setAddingReceipt] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
+
+  const amountValid = PAYMENT_AMOUNT_RE.test(amount) && parseFloat(amount) > 0;
+  const requiresReceiptAlways = RECEIPT_REQUIRED_PURPOSES.includes(purpose);
+  const hasReceipt = isEdit ? receipts.length > 0 : !!file;
+
+  // ТЗ 1.3: для Проживания/Питания сохранение (даже черновика/правки) заблокировано
+  // без чека. Для остальных назначений черновик без чека разрешён, но
+  // подтверждение (отправка на одобрение) требует чек всегда — так же, как
+  // проверяет бэкенд (RECEIPT_REQUIRED_ON_CREATE_PURPOSES / hasLiveReceipt).
+  // Правило одинаково важно в обоих режимах: при редактировании менеджер
+  // может сменить назначение на «Проживание»/«Питание» уже после того, как
+  // черновик был сохранён без чека — hasReceipt в этот момент честно смотрит
+  // на актуальный receipts (уже загруженные ранее чеки не теряются).
+  const draftDisabled = requiresReceiptAlways && !hasReceipt;
+  const submitDisabled = !hasReceipt;
+  const receiptRequiredCaption = 'Для назначения «Проживание» и «Питание» чек обязателен';
+
+  const buildErrorMessage = (e: any, fallback: string) => e?.response?.data?.message || fallback;
+
+  const doCreate = async (submit: boolean) => {
+    if (!amountValid) { setTouched(true); toast('Введите корректную сумму', 'error'); return; }
+    if (submit && submitDisabled) { toast('Прикрепите чек перед отправкой на одобрение', 'error'); return; }
+    if (!submit && draftDisabled) { toast(receiptRequiredCaption, 'error'); return; }
+    setSaving(submit ? 'submit' : 'draft');
+    try {
+      await createPayment({
+        studentId,
+        stage,
+        purpose,
+        method,
+        amount,
+        paidAt,
+        reference: reference.trim() || undefined,
+        comment: comment.trim() || undefined,
+        submit,
+        file,
+      });
+      toast(submit ? 'Платёж отправлен на одобрение Основателю' : 'Черновик платежа сохранён', 'success');
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast(buildErrorMessage(e, 'Ошибка сохранения платежа'), 'error');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const doSaveEdit = async (thenSubmit: boolean) => {
+    if (!payment) return;
+    if (!amountValid) { setTouched(true); toast('Введите корректную сумму', 'error'); return; }
+    // Защита в глубину: та же проверка, что и на создании (doCreate) — без
+    // неё смена назначения на «Проживание»/«Питание» в уже существующем
+    // черновике проходила бы мимо блокировки кнопки (проблема 5 ревью).
+    if (!thenSubmit && draftDisabled) { toast(receiptRequiredCaption, 'error'); return; }
+    if (thenSubmit && submitDisabled) { toast('Прикрепите чек перед отправкой на одобрение', 'error'); return; }
+    setSaving(thenSubmit ? 'submit' : 'draft');
+    try {
+      await updatePayment(payment.id, {
+        purpose,
+        method,
+        amount,
+        paidAt,
+        reference: reference.trim(),
+        comment: comment.trim(),
+      });
+      if (thenSubmit) {
+        await submitPayment(payment.id);
+        toast('Платёж отправлен на одобрение Основателю', 'success');
+      } else {
+        toast('Изменения сохранены', 'success');
+      }
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast(buildErrorMessage(e, 'Ошибка сохранения платежа'), 'error');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const onAddReceiptFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f || !payment) return;
+    setAddingReceipt(true);
+    try {
+      const doc = await addPaymentReceipt(payment.id, f);
+      setReceipts((prev) => [doc, ...prev]);
+      toast('Чек добавлен', 'success');
+    } catch (err: any) {
+      toast(buildErrorMessage(err, 'Ошибка загрузки чека'), 'error');
+    } finally {
+      setAddingReceipt(false);
+    }
+  };
+
+  const onRemoveReceipt = async (docId: string) => {
+    try {
+      await removePaymentReceipt(docId);
+      setReceipts((prev) => prev.filter((r) => r.id !== docId));
+      toast('Чек удалён', 'success');
+    } catch (err: any) {
+      toast(buildErrorMessage(err, 'Ошибка удаления чека'), 'error');
+    }
+  };
+
+  const busy = saving !== null;
+
+  return (
+    <motion.div className="dialog-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+      <motion.div
+        className="dialog-card payment-form-card"
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="payment-form-header">
+          <div className="dialog-title" style={{ marginBottom: 2 }}>
+            {isEdit ? 'Редактирование платежа' : 'Внесение платежа'}
+          </div>
+          <div className="dialog-message" style={{ margin: 0 }}>{PAYMENT_STAGE_LABEL[stage]}</div>
+        </div>
+
+        {payment?.status === 'REJECTED' && payment.rejectionReason && (
+          <div className="payment-rejected-banner">
+            <Icon name="report" size={18} />
+            <div>
+              <b>Отклонён Основателем.</b> Причина: {payment.rejectionReason}
+              <div style={{ marginTop: 2, fontWeight: 500 }}>Исправьте данные и отправьте на одобрение заново.</div>
+            </div>
+          </div>
+        )}
+
+        <div className="form-grid-2">
+          <div className="form-group">
+            <label>Назначение платежа *</label>
+            <select value={purpose} onChange={(e) => setPurpose(e.target.value as PaymentPurpose)} disabled={busy}>
+              {purposeOptions.map((p) => (
+                <option key={p} value={p}>{PAYMENT_PURPOSE_LABEL[p]}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Способ оплаты *</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy}>
+              {(['CASH', 'CASHLESS'] as PaymentMethod[]).map((m) => (
+                <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m]}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="form-grid-2">
+          <div className="form-group">
+            <label>Сумма (сомони) *</label>
+            <input
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))}
+              onBlur={() => setTouched(true)}
+              placeholder="0.00"
+              inputMode="decimal"
+              className={touched && !amountValid ? 'input-error' : ''}
+              disabled={busy}
+            />
+            {touched && !amountValid && <div className="form-error-text">Введите сумму больше нуля (до 2 знаков после точки)</div>}
+          </div>
+          <div className="form-group">
+            <label>Дата поступления *</label>
+            <input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} disabled={busy} />
+          </div>
+        </div>
+
+        {method === 'CASHLESS' && (
+          <div className="form-group">
+            <label>Номер квитанции / транзакции</label>
+            <input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              maxLength={120}
+              placeholder="Для сверки с банковской выпиской"
+              disabled={busy}
+            />
+          </div>
+        )}
+
+        <div className="form-group">
+          <label>Комментарий</label>
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} disabled={busy} />
+        </div>
+
+        {isEdit ? (
+          <div className="payment-receipts">
+            <div className="payment-receipts-title">Чеки и квитанции</div>
+            {receipts.length === 0 && (
+              <div className="payment-receipts-empty">
+                Нет прикреплённых файлов
+                {requiresReceiptAlways && (
+                  <div className="form-error-text" style={{ marginTop: 4 }}>{receiptRequiredCaption}</div>
+                )}
+              </div>
+            )}
+            {receipts.length > 0 && (
+              <div className="payment-receipts-list">
+                {receipts.map((r) => (
+                  <div key={r.id} className="payment-receipt-item">
+                    <a href={buildFileUrl(r.url)} target="_blank" rel="noreferrer">
+                      <Icon name="description" size={16} />
+                      <span>{r.originalName}</span>
+                    </a>
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => onRemoveReceipt(r.id)} disabled={busy}>
+                      <Icon name="delete" size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={() => receiptInputRef.current?.click()}
+              disabled={addingReceipt || busy}
+            >
+              <Icon name={addingReceipt ? 'progress_activity' : 'add'} size={14} style={{ marginRight: 4 }} />
+              {addingReceipt ? 'Загрузка…' : 'Добавить чек'}
+            </button>
+            <input ref={receiptInputRef} type="file" hidden accept="image/*,.pdf" onChange={onAddReceiptFile} />
+          </div>
+        ) : (
+          <ReceiptDropzone
+            file={file}
+            onChange={setFile}
+            hint={
+              requiresReceiptAlways
+                ? undefined // причина уже объяснена подписью под кнопками (receiptRequiredCaption) — не дублируем текст
+                : 'Обязателен для отправки на одобрение; черновик можно сохранить и без него.'
+            }
+            error={requiresReceiptAlways && !file ? receiptRequiredCaption : undefined}
+          />
+        )}
+
+        {draftDisabled && (
+          // ТЗ 1.3: подпись видна в обоих режимах — и при создании, и при
+          // редактировании (кнопка «Сохранить» ниже блокируется без !isEdit,
+          // иначе смену назначения на Проживание/Питание можно было бы
+          // сохранить в уже существующем черновике без чека).
+          <div className="form-error-text" style={{ marginBottom: 4 }}>{receiptRequiredCaption}</div>
+        )}
+
+        <div className="dialog-actions">
+          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Отмена</button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => (isEdit ? doSaveEdit(false) : doCreate(false))}
+            disabled={busy || draftDisabled}
+            title={draftDisabled ? receiptRequiredCaption : undefined}
+          >
+            {saving === 'draft' ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Сохранить черновик'}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => (isEdit ? doSaveEdit(true) : doCreate(true))}
+            disabled={busy || submitDisabled}
+            title={submitDisabled ? 'Прикрепите чек, чтобы отправить на одобрение' : undefined}
+          >
+            {saving === 'submit' ? 'Отправка…' : 'Подтвердить'}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}

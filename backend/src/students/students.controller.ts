@@ -23,6 +23,8 @@ import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { fixFilenameEncoding } from '../common/upload-utils';
+import { assertUploadableDocumentType } from '../common/documents';
 
 const uploadStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -55,24 +57,6 @@ const docFileFilter = (
     false,
   );
 };
-
-/**
- * Multer кладёт original filename в latin1 (HTTP RFC). Кириллица превращается
- * в "Đ¤Đ¾Ñ‚Đ¾_34.jpg" вместо "Фото_34.jpg". Конвертируем обратно в UTF-8,
- * только если результат явно не-ASCII (иначе оставляем как есть, чтобы не
- * сломать легитимные имена с латиницей).
- */
-function fixFilenameEncoding(name: string): string {
-  if (!name) return name;
-  try {
-    const utf8 = Buffer.from(name, 'latin1').toString('utf8');
-    // Если в utf8 нет битых символов U+FFFD — это нормальная кодировка
-    if (!utf8.includes('�')) return utf8;
-  } catch {
-    // ignore
-  }
-  return name;
-}
 
 @UseGuards(JwtAuthGuard)
 @Controller('students')
@@ -184,6 +168,10 @@ export class StudentsController {
     @CurrentUser() user: any,
   ) {
     if (!file) throw new BadRequestException('Файл не передан');
+    const docType = type || 'OTHER';
+    // Проблема 10 аудита волны 1: type раньше принимался произвольной строкой
+    // без белого списка — RECEIPT через этот эндпоинт запрещён явно.
+    assertUploadableDocumentType(docType);
     const url = `/uploads/${file.filename}`;
     return this.students.addDocument(
       id,
@@ -194,7 +182,7 @@ export class StudentsController {
         size: file.size,
         url,
       },
-      type || 'OTHER',
+      docType,
       user,
     );
   }
