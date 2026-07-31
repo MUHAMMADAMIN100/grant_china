@@ -326,6 +326,17 @@ export class ContractsService {
       });
     if (result.count === 0) throw new ConflictException('Статус договора изменился, обновите страницу');
 
+    // Раздел 5 ТЗ: подхватываем платежи и строки графика, заведённые ДО
+    // подписания. Payment.contractId проставляется только в момент СОЗДАНИЯ
+    // платежа (payments.service.create читает активный договор студента), а
+    // штатный порядок работы обратный: сначала внесли первичную оплату,
+    // потом оформили договор. Без этой привязки такие платежи молча выпадали
+    // из PERCENT_OF_PAYMENTS и из метрики «своевременность сбора оплат» —
+    // зарплата считалась по неполной базе, и заметить это можно было только
+    // вручную сверив суммы. Кнопка «Привязать платежи» (linkPayments) для
+    // этого остаётся, но теперь она нужна лишь как ручное лечение истории.
+    const linked = await this.linkOrphanPayments(existing.studentId, id);
+
     this.activity
       .log({
         actorId: user.id,
@@ -333,7 +344,11 @@ export class ContractsService {
         action: 'CONTRACT_SIGN',
         studentId: existing.studentId,
         studentName: existing.student.fullName,
-        details: `Договор ${existing.number} подписан ${formatDateRuShort(signedAt)}`,
+        details:
+          `Договор ${existing.number} подписан ${formatDateRuShort(signedAt)}` +
+          (linked.paymentsLinked || linked.scheduleLinked
+            ? ` (привязано платежей: ${linked.paymentsLinked}, строк графика: ${linked.scheduleLinked})`
+            : ''),
       })
       .catch(() => undefined);
     this.realtime.emitForStudent(existing.student, 'contract:updated', { id, studentId: existing.studentId }, { studentId: existing.studentId });
@@ -417,22 +432,37 @@ export class ContractsService {
    * договор для создания платежа ЗАПРЕЩЕНО» (197 легаси-студентов), поэтому
    * приведение истории в порядок — явная кнопка, а не авто-бэкфилл.
    */
+  /**
+   * Привязывает «осиротевшие» платежи и строки графика студента (contractId
+   * IS NULL) к указанному договору. Условие `contractId: null` делает
+   * операцию идемпотентной и безопасной: график уже расторгнутого договора
+   * остаётся при нём, а не переезжает на новый (безусловная перезапись
+   * сломала бы историю). Вызывается автоматически из sign() и вручную из
+   * linkPayments() — одна формула, два места вызова.
+   */
+  private async linkOrphanPayments(studentId: string, contractId: string) {
+    const [paymentsResult, scheduleResult] = await this.prisma.$transaction([
+      this.prisma.payment.updateMany({
+        where: { studentId, contractId: null, deletedAt: null },
+        data: { contractId },
+      }),
+      this.prisma.paymentSchedule.updateMany({
+        where: { studentId, contractId: null, deletedAt: null },
+        data: { contractId },
+      }),
+    ]);
+    return { paymentsLinked: paymentsResult.count, scheduleLinked: scheduleResult.count };
+  }
+
   async linkPayments(id: string, user: CurrentUser) {
     const existing = await this.loadForMutation(id, user);
     if (existing.status !== 'SIGNED' && existing.status !== 'COMPLETED') {
       throw new ConflictException('Привязать платежи можно только к подписанному договору');
     }
 
-    const [paymentsResult, scheduleResult] = await this.prisma.$transaction([
-      this.prisma.payment.updateMany({
-        where: { studentId: existing.studentId, contractId: null, deletedAt: null },
-        data: { contractId: existing.id },
-      }),
-      this.prisma.paymentSchedule.updateMany({
-        where: { studentId: existing.studentId, contractId: null, deletedAt: null },
-        data: { contractId: existing.id },
-      }),
-    ]);
+    const linked = await this.linkOrphanPayments(existing.studentId, existing.id);
+    const paymentsResult = { count: linked.paymentsLinked };
+    const scheduleResult = { count: linked.scheduleLinked };
 
     this.activity
       .log({

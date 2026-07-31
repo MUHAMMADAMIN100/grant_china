@@ -1,5 +1,6 @@
-import { IsArray, IsEmail, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsArray, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Direction, StudentStatus } from '@prisma/client';
+import { LEAD_SOURCE_VALUES } from '../../common/lead-source';
 
 const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
 
@@ -41,4 +42,20 @@ export class CreateStudentDto {
   @IsString()
   @MaxLength(2000)
   comment?: string;
+
+  // Раздел 3.1 ТЗ — источник привлечения. Заводится ЗДЕСЬ, а не только на
+  // публичной форме лендинга: студент, заведённый вручную, тоже создаёт
+  // заявку (см. students.service.create), и без этого поля она навсегда
+  // оставалась бы «Источник не указан» — то есть выпадала из ровно того
+  // отчёта по каналам, ради которого раздел 3.1 и делался.
+  // Значение по умолчанию сервер НЕ подставляет: выдуманный факт («Сайт»
+  // для человека, пришедшего в офис) хуже честного «не указан».
+  @IsOptional()
+  @IsIn(LEAD_SOURCE_VALUES)
+  source?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceDetail?: string;
 }

@@ -14,6 +14,7 @@ import ManagerBar from '../components/ManagerBar';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import BackButton from '../components/BackButton';
 import CommentsFeed from '../components/CommentsFeed';
+import CallsCard from '../components/CallsCard';
 import ContractStatusBadge from '../components/ContractStatusBadge';
 import ContractFormModal from '../components/ContractFormModal';
 import Icon from '../Icon';
@@ -154,8 +155,17 @@ export default function ApplicationDetail() {
     if (!id) return;
     try {
       await updateApplication(id, { status });
-      if (status === 'IN_PROGRESS') toast('Заявка взята в работу. Создана карточка студента.', 'success');
-      if (status === 'COMPLETED') toast('Заявка завершена. Студент доступен в разделе «Студенты».', 'success');
+      // Подсказки для двух переходов, у которых есть побочный эффект, о
+      // котором менеджеру важно знать. Раньше здесь проверялись легаси-статусы
+      // IN_PROGRESS/COMPLETED, которые CRM больше не отправляет вовсе — обе
+      // ветки были недостижимы, и менеджер не узнавал, что при переводе на
+      // «Документы на проверке» ему автоматически создали карточку студента.
+      if (status === 'DOCS_REVIEW') {
+        toast('Заявка взята в работу. Карточка студента создана.', 'success');
+      }
+      if (status === 'ENROLLED') {
+        toast('Студент зачислен. Этап 2.1 в разделе «Финансы» разблокирован.', 'success');
+      }
       await reload();
     } catch (e: any) {
       toast(e?.response?.data?.message || 'Ошибка изменения статуса', 'error');
@@ -525,6 +535,11 @@ export default function ApplicationDetail() {
             </div>
           </>
         )}
+
+        {/* ТЗ 6.2 — история звонков по лиду и click-to-call. Стоит ДО
+            комментариев и вне блока `student &&`: звонить начинают ещё до
+            того, как заявка превратилась в карточку студента. */}
+        <CallsCard applicationId={app.id} phone={app.phone} canEdit={canAct} />
 
         <CommentsFeed applicationId={app.id} canAdd={canAct} />
       </div>

@@ -30,3 +30,26 @@ export function localDayStart(utc: Date): Date {
   local.setUTCHours(0, 0, 0, 0);
   return new Date(local.getTime() - APP_TZ_OFFSET_MINUTES * 60_000);
 }
+
+/**
+ * Дата и время по Душанбе в человекочитаемом виде — для текстов, которые
+ * читает ЧЕЛОВЕК: описание автозадачи, SMS студенту.
+ *
+ * Нужен отдельный хелпер, потому что у Node на сервере часовой пояс UTC, и
+ * голое `date.toLocaleString('ru-RU')` напечатало бы время на 5 часов раньше
+ * реального. Для вылета это не косметика: SMS «рейс в 04:30» вместо 09:30
+ * отправляет человека в аэропорт среди ночи.
+ *
+ * Форматируем сдвинутый момент принудительно в UTC — сдвиг уже внесён в
+ * значение функцией toLocal(), и повторно его применять нельзя.
+ */
+export function formatLocalDateTime(utc: Date, withYear = false): string {
+  return toLocal(utc).toLocaleString('ru-RU', {
+    timeZone: 'UTC',
+    day: '2-digit',
+    month: '2-digit',
+    ...(withYear ? { year: 'numeric' as const } : {}),
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}

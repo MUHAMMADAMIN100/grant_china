@@ -107,6 +107,17 @@ model User {
   paidPayslips         Payslip[]              @relation("PayslipPaidBy")
   voidedPayslips       Payslip[]              @relation("PayslipVoidedBy")
 
+  // ── Волна 8: билеты, база знаний, AI-помощник, диалоги мессенджеров. ──
+  // По-прежнему НИ ОДНОГО нового СКАЛЯРНОГО поля у User (см. комментарий к
+  // разделу 5 выше): в проекте есть prisma.user.findFirst({ where }) без
+  // select, и любой новый скаляр разъехался бы по коду сам собой.
+  createdTickets        Ticket[]             @relation("TicketCreatedBy")
+  createdArticles       KnowledgeArticle[]   @relation("KnowledgeArticleCreatedBy")
+  updatedArticles       KnowledgeArticle[]   @relation("KnowledgeArticleUpdatedBy")
+  aiMessages            AiChatMessage[]      @relation("AiChatMessageUser")
+  assignedConversations Conversation[]       @relation("ConversationAssignee")
+  sentMessages          ChannelMessage[]     @relation("ChannelMessageAuthor")
+
   @@index([deletedAt])
 }
 
@@ -201,6 +212,9 @@ model Application {
   // Раздел 5 ТЗ (волна 6) — договоры, заключённые по этой заявке.
   contracts Contract[]
 
+  // ТЗ 6.4 (волна 8) — диалоги мессенджеров, привязанные к этой заявке.
+  conversations Conversation[]
+
   // ВЕХА «ЛИД ОБРАБОТАН» (метрика ТЗ 5.1). Денормализованные поля, а не
   // вычисление из ActivityLog: журнал НЕ содержит applicationId (STATUS_CHANGE
   // пишет только studentId, а у заявки без студента он null), парсинг
@@ -293,6 +307,13 @@ model Student {
   // Раздел 3.2 ТЗ — таймлайн консультаций/собеседований в карточке студента.
   consultations   Consultation[]
 
+  // Раздел «Билеты» (волна 8) — перелёты студента. Связь, а не скаляр: в
+  // /student-auth/me не утечёт (там include с явным перечислением полей).
+  tickets Ticket[]
+
+  // ТЗ 6.4 (волна 8) — диалоги мессенджеров, привязанные к этому студенту.
+  conversations Conversation[]
+
   // ТЗ 4 (волна 4) — реестр «двойных грантов». Скалярных полей у Student НЕ
   // появляется намеренно: они автоматически уехали бы студенту в
   // /student-auth/me (student-auth.service.ts:129 читает через include).
@@ -349,6 +370,13 @@ model Document {
   // обязан пережить любые операции над договором.
   contractId   String?
   contract     Contract? @relation("ContractDocuments", fields: [contractId], references: [id], onDelete: SetNull)
+  // Маршрутная квитанция / скан билета (раздел «Билеты», волна 8). Тот же
+  // приём, что paymentId и contractId: документ привязан и к студенту
+  // (studentId — отсюда бесплатная защита /uploads через
+  // files/file-resolver.service.ts), и к билету. SetNull — файл обязан
+  // пережить любые операции над записью билета.
+  ticketId     String?
+  ticket       Ticket?   @relation("TicketDocuments", fields: [ticketId], references: [id], onDelete: SetNull)
   createdAt    DateTime  @default(now())
   deletedAt    DateTime?
 
@@ -356,6 +384,7 @@ model Document {
   @@index([deletedAt])
   @@index([paymentId])
   @@index([contractId])
+  @@index([ticketId])
 }
 
 model Task {
@@ -1609,4 +1638,310 @@ model Payslip {
   @@index([userId, deletedAt, periodStart(sort: Desc)])
   // Ведомость за период: WHERE periodKey=? AND deletedAt IS NULL [AND status].
   @@index([deletedAt, periodKey, status])
+}
+
+// =====================================================================
+// РАЗДЕЛ «БИЛЕТЫ» (волна 8). Учёт, контроль и планирование перелётов
+// студентов. Всё ниже — НОВЫЕ таблицы: CREATE TABLE/CREATE TYPE не трогает
+// ни одной живой строки, риск `prisma db push --accept-data-loss` нулевой.
+// =====================================================================
+
+// Ровно четыре значения из ТЗ. enum, а НЕ String (в отличие от
+// Application.source): набор закрыт самим ТЗ и меняться не будет, а таблица
+// НОВАЯ — создание типа с нуля не трогает ни одной живой строки.
+enum TicketStatus {
+  BOOKED // Забронирован
+  PURCHASED // Выкуплен
+  CHANGED // Изменён
+  CANCELLED // Отменён
+}
+
+// ТЗ «Билеты», п.3. ОТДЕЛЬНАЯ модель, а не поля в Student:
+//  1) у студента бывает НЕСКОЛЬКО перелётов (вылет, стыковка, обратный,
+//     перелёт на второй год обучения) — плоские поля вместили бы один;
+//  2) УТЕЧКА В ЛИЧНЫЙ КАБИНЕТ: student-auth.service.ts читает студента через
+//     `include: STUDENT_INCLUDE`, а include тянет ВСЕ скаляры модели — любое
+//     новое скалярное поле Student автоматически уехало бы студенту в
+//     /student-auth/me. Поля отдельной таблицы через include не подтягиваются
+//     никогда, пока их явно не попросят (тот же довод, что у StudentGrant);
+//  3) раздел — отдельный экран со своими фильтрами и сортировкой, вешать
+//     индексы под него на Student (главный список CRM) — лишняя плата записью.
+model Ticket {
+  id String @id @default(uuid())
+
+  // ТЗ: «Студент — обязательное поле». onDelete: Restrict — та же семантика,
+  // что у Document/Payment/StudentGrant: физического удаления студента в
+  // проекте нет, но если оно когда-нибудь появится, билет должен уронить
+  // операцию ошибкой БД, а не беззвучно исчезнуть.
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  // ТЗ: «Город назначения (Китай) — выпадающий список ИЛИ строка».
+  // РЕШЕНИЕ ЗАКАЗЧИКА: справочник + свободный ввод. Поэтому в БД это String,
+  // а не enum: справочник живёт в common/china-cities.ts и подсказывает
+  // менеджеру, но редкий маршрут не блокируется. Тот же приём, что у
+  // Application.source — новый город это одна строка в TS-файле, а не
+  // ALTER TYPE на живой колонке.
+  destinationCity String
+
+  // ТЗ: «Дата и время вылета» — обязательное. Хранится в UTC, как все
+  // DateTime схемы. Фронт вводит через <input type="datetime-local"> и шлёт
+  // new Date(v).toISOString(): JS трактует datetime-local как ЛОКАЛЬНОЕ время
+  // браузера, а браузер менеджера стоит по Душанбе — TZ-математики на сервере
+  // для этого пути не нужно вообще (тот же приём, что Task.dueDate).
+  departureAt DateTime
+  // ТЗ: «Дата и время прилёта» — необязательное (контроль стыковок).
+  arrivalAt   DateTime?
+
+  // ТЗ: «Номер рейса» — обязательное, например SU-208.
+  flightNumber String
+  // ТЗ: «Авиакомпания» — строка/справочник. Строка по той же причине, что и
+  // город: список авиакомпаний открытый.
+  airline      String?
+
+  status TicketStatus @default(BOOKED)
+
+  // ТЗ: «Комментарий» — «Летит с багажом 23 кг», «Встречает курьер».
+  comment String?
+
+  // ТЗ: «Файл билета / Маршрутная квитанция (PDF, JPEG, PNG)». Файлы — обычные
+  // Document (type='TICKET', ticketId), поэтому автоматически получают защиту
+  // /uploads через files/file-resolver.service.ts (ветка DOCUMENT) — ровно тот
+  // же приём, что у чеков платежей и сканов договоров.
+  documents Document[] @relation("TicketDocuments")
+
+  // Кто завёл билет. SetNull — уволенного сотрудника soft-удаляют, запись
+  // остаётся (та же семантика, что у Payment.createdBy).
+  createdById String?
+  createdBy   User?   @relation("TicketCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // ── Автоматизация напоминаний (решение заказчика, сверх ТЗ). ──
+  // Флаги идемпотентности планировщика — тот же приём, что
+  // Consultation.reminderSentAt и StudentGrant.reminderSentAt: джоба сначала
+  // атомарно ЗАНИМАЕТ строку (updateMany where { id, taskCreatedAt: null }
+  // → count === 1 значит «моя»), и только потом создаёт задачу/шлёт SMS.
+  // Сбрасываются сервисом в null при КАЖДОМ изменении departureAt — новый
+  // срок вылета = новый цикл напоминаний (иначе перенос рейса молча убил бы
+  // напоминание, как это было с переносом звонка в волне 3).
+  // ВТОРОЙ, независимый слой защиты от дублей — Task.originKey @unique.
+  taskCreatedAt DateTime?
+  smsSentAt     DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // ГЛАВНЫЙ индекс списка раздела: WHERE deletedAt IS NULL [AND status]
+  // ORDER BY departureAt DESC. Обе ведущие колонки зафиксированы
+  // (deletedAt IS NULL, status равенством), поэтому сортировка и фильтр по
+  // диапазону дат («на этой неделе», «в этом месяце») берутся из индекса.
+  @@index([deletedAt, status, departureAt(sort: Desc)])
+  // Список без фильтра по статусу + джоба напоминаний (range по departureAt).
+  @@index([deletedAt, departureAt])
+  // Блок «Билеты» в карточке студента.
+  @@index([studentId, deletedAt, departureAt(sort: Desc)])
+  // Фильтр по городу назначения.
+  @@index([destinationCity])
+}
+
+// =====================================================================
+// ТЗ 6.1 (волна 8): БАЗА ЗНАНИЙ + AI-ПОМОЩНИК.
+// =====================================================================
+
+// «Внутренние инструкции, регламенты и правила работы CRM», на которых
+// «обучен» помощник. РЕШЕНИЕ ЗАКАЗЧИКА: статьи редактируются прямо в CRM,
+// а не лежат в репозитории — правка регламента не должна требовать деплоя.
+//
+// ВАЖНО: это НЕ дообучение модели (fine-tuning), а RAG — статьи подставляются
+// в системный промпт запроса. Отсюда два следствия для эксплуатации:
+//  1) правка статьи действует НЕМЕДЛЕННО на следующий вопрос, без обучения;
+//  2) объём базы ограничен окном контекста, поэтому в промпт уходят только
+//     опубликованные статьи (published) — черновики не влияют на ответы.
+model KnowledgeArticle {
+  id String @id @default(uuid())
+
+  title String
+  // Категория — String, а не enum: набор разделов регламента будет расти
+  // (тот же довод, что у Application.source). Справочник значений для UI —
+  // backend/src/knowledge/knowledge-categories.ts.
+  category String @default("GENERAL")
+  // Тело статьи в Markdown. Длина режется в DTO (@MaxLength(20000)).
+  body     String
+
+  // Ключевые слова для поиска и для подсказки модели, когда статья релевантна.
+  tags String[] @default([])
+
+  // Черновик не попадает ни в поиск сотрудников, ни в контекст AI-помощника.
+  published Boolean @default(true)
+  // Порядок в списке; статьи с меньшим значением идут первыми.
+  sortOrder Int     @default(0)
+
+  createdById String?
+  createdBy   User?   @relation("KnowledgeArticleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?   @relation("KnowledgeArticleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Список раздела и сборка контекста для AI: WHERE deletedAt IS NULL
+  // AND published = true ORDER BY sortOrder, createdAt.
+  @@index([deletedAt, published, sortOrder])
+  @@index([deletedAt, category])
+}
+
+// История чата с AI-помощником. Хранится, потому что ТЗ описывает именно ЧАТ
+// («задавать вопросы в текстовом чате»), а чат без истории не понимает
+// уточняющих вопросов вида «а если чек не пришёл?».
+//
+// ПРИВАТНОСТЬ: переписка сотрудника с помощником видна ТОЛЬКО ему самому —
+// эндпоинтов чтения чужой истории нет вовсе (userId всегда берётся из JWT,
+// как в payroll/me). Это осознанно: сотрудник должен иметь возможность
+// спросить «как оформить возврат» без того, чтобы это увидел руководитель.
+model AiChatMessage {
+  id String @id @default(uuid())
+
+  userId String
+  // Restrict, а не Cascade: физического удаления User в проекте нет, а
+  // беззвучная потеря истории при гипотетическом удалении — тихая порча данных.
+  user   User   @relation("AiChatMessageUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  // 'user' | 'assistant' — String, а не enum: набор ролей задаёт внешний API,
+  // и появление третьей роли не должно требовать миграции живой таблицы.
+  role    String
+  content String
+
+  // Диагностика и учёт расхода: какая модель ответила и сколько токенов
+  // потрачено. Нужны, чтобы Основатель видел реальную стоимость помощника.
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  // Лента чата: WHERE userId=? AND deletedAt IS NULL ORDER BY createdAt.
+  // Сортировка по возрастанию (в отличие от остальных лент проекта) —
+  // диалог читается сверху вниз.
+  @@index([userId, deletedAt, createdAt])
+}
+
+// =====================================================================
+// ТЗ 6.4 (волна 8): ЕДИНОЕ ОКНО ДИАЛОГОВ ИЗ МЕССЕНДЖЕРОВ.
+// =====================================================================
+
+// Провайдер канала. String, а НЕ enum: заказчик подключает каналы поэтапно
+// (сейчас Telegram, дальше Chat Place / WhatsApp), и добавление значения не
+// должно требовать ALTER TYPE на живой колонке. Единственный источник истины
+// по значениям — backend/src/messaging/channels.ts.
+model Conversation {
+  id String @id @default(uuid())
+
+  // 'TELEGRAM' | 'WHATSAPP' | 'CHATPLACE' | 'INSTAGRAM' | 'OTHER'.
+  channel String
+  // Идентификатор чата НА СТОРОНЕ ПРОВАЙДЕРА (chat_id у Telegram). Ключ
+  // идемпотентности вебхука: повторная доставка не создаёт второй диалог.
+  externalId String
+
+  // Как зовут собеседника и его @ник — то, что отдаёт провайдер.
+  title    String?
+  username String?
+  // Телефон, если провайдер его отдал (Telegram отдаёт только при contact-share).
+  phone           String?
+  // Тот же нормализованный ключ, что у Application/Consultation/Call —
+  // по нему единое окно САМО находит карточку клиента.
+  phoneNormalized String?
+
+  // Привязка к карточкам. ОБЕ ОПЦИОНАЛЬНЫ и обе могут быть заполнены —
+  // тот же паттерн, что Consultation.applicationId? + studentId?.
+  // Автопривязка ТОЛЬКО по нормализованному телефону и только когда он
+  // однозначен: в Таджикистане один номер регулярно принадлежит семье,
+  // поэтому при НЕСКОЛЬКИХ совпадениях связь не ставится вовсе и менеджер
+  // выбирает карточку руками (тот же довод, что у Consultation).
+  studentId     String?
+  student       Student?     @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  // Ответственный за диалог. SetNull — как везде в схеме.
+  assignedToId String?
+  assignedTo   User?   @relation("ConversationAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  // Денормализация ради списка диалогов: сортировка по времени последнего
+  // сообщения и превью текста без JOIN на таблицу сообщений. Тот же приём,
+  // что Payment.stageOrder — иначе список тянул бы последнее сообщение
+  // подзапросом на каждую строку.
+  lastMessageAt   DateTime  @default(now())
+  lastMessageText String?
+  // Сколько входящих не прочитано. Считается сервисом: +1 на входящее,
+  // 0 при явном «прочитано».
+  unreadCount     Int       @default(0)
+
+  messages ChannelMessage[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Один диалог = одна строка, повторная доставка вебхука отбивается БД.
+  @@unique([channel, externalId])
+  // Главный список единого окна: WHERE deletedAt IS NULL ORDER BY lastMessageAt DESC.
+  @@index([deletedAt, lastMessageAt(sort: Desc)])
+  // Вкладка «Мои диалоги».
+  @@index([deletedAt, assignedToId, lastMessageAt(sort: Desc)])
+  // Блок «Переписка» в карточке студента/заявки.
+  @@index([studentId])
+  @@index([applicationId])
+  // Автопривязка по номеру.
+  @@index([phoneNormalized])
+}
+
+// Направление сообщения. enum: набор закрыт физикой (входящее/исходящее),
+// таблица новая — CREATE TYPE с нуля безопасен.
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+// Одно сообщение диалога. Название ChannelMessage, а не Message: `Message`
+// слишком общее слово для схемы, где уже есть Comment, Notification и
+// ActivityLog — при чтении кода `prisma.message` было бы неочевидно.
+model ChannelMessage {
+  id String @id @default(uuid())
+
+  conversationId String
+  // Restrict, а не Cascade: переписка — часть истории клиента, она не должна
+  // беззвучно исчезать вместе с диалогом (та же семантика, что у Comment).
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+
+  direction MessageDirection
+  text      String?
+
+  // Вложения как есть от провайдера (файлы, фото, голосовые): массив
+  // { type, url, name }. Json, потому что набор полей у разных провайдеров
+  // разный — это АРХИВ, а не конфигурация (тот же принцип, что Payslip.breakdown).
+  attachments Json?
+
+  // Идентификатор сообщения у провайдера — ключ идемпотентности вебхука.
+  // NULL'ы в Postgres в уникальном индексе между собой не конфликтуют,
+  // поэтому исходящие без externalId проходят как есть.
+  externalId String?
+
+  // Кто отправил исходящее (у входящих null — писал клиент).
+  authorId String?
+  author   User?   @relation("ChannelMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  // Момент отправки У ПРОВАЙДЕРА — отдельно от createdAt: вебхук может
+  // прийти с задержкой, а лента обязана читаться в порядке реального
+  // разговора (та же причина, что у Payment.paidAt и Consultation.heldAt).
+  sentAt DateTime @default(now())
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  // Повторная доставка вебхука отбивается БД.
+  @@unique([conversationId, externalId])
+  // Лента диалога: WHERE conversationId=? AND deletedAt IS NULL ORDER BY sentAt.
+  @@index([conversationId, deletedAt, sentAt])
 }

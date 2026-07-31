@@ -7,9 +7,10 @@
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "start:prod": "prisma db push --accept-data-loss && (SEED_IF_EMPTY=1 ts-node prisma/seed-programs.ts || echo 'seed:programs failed, continuing') && node dist/main",
+    "start:prod": "prisma db push --accept-data-loss && (SEED_IF_EMPTY=1 ts-node prisma/seed-programs.ts || echo 'seed:programs failed, continuing') && (ts-node prisma/seed-knowledge.ts || echo 'seed:knowledge failed, continuing') && node dist/main",
     "seed": "ts-node prisma/seed.ts",
     "seed:programs": "ts-node prisma/seed-programs.ts",
+    "seed:knowledge": "ts-node prisma/seed-knowledge.ts",
     "reset:admin": "ts-node prisma/reset-admin-password.ts",
     "upgrade:founder": "ts-node prisma/upgrade-founder.ts",
     "create:founder": "ts-node prisma/create-founder.ts",
@@ -18,6 +19,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.3.0",

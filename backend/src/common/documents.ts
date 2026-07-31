@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 /**
  * Единый справочник обязательных типов документов студента.
@@ -43,6 +43,35 @@ export function assertUploadableDocumentType(type: string): void {
   throw new BadRequestException(
     type === 'RECEIPT'
       ? 'Чек платежа загружается через раздел Финансы, а не как обычный документ студента'
-      : 'Недопустимый тип документа',
+      : type === 'TICKET'
+        ? 'Файл билета загружается через раздел Билеты, а не как обычный документ студента'
+        : 'Недопустимый тип документа',
   );
+}
+
+/**
+ * Типы Document, которыми управляют СВОИ разделы, а не общий чек-лист
+ * документов студента: чек платежа (payments/) и файл билета (tickets/).
+ * Используется в select'ах, чтобы такие файлы не попадали ни в чек-лист CRM,
+ * ни в счётчик/ZIP-архив, ни в личный кабинет студента.
+ *
+ * Они остаются обычными Document с полем studentId — и именно поэтому
+ * бесплатно получают защиту /uploads (files/file-resolver.service.ts).
+ */
+export const MANAGED_DOCUMENT_TYPES: string[] = ['RECEIPT', 'TICKET'];
+
+/**
+ * Бросает 403, если документ управляется отдельным разделом. Общие эндпоинты
+ * удаления (students/, student-auth/) обязаны звать эту функцию: иначе через
+ * них можно снести доказательство оплаты или маршрутную квитанцию в обход
+ * гейтов профильного модуля (Проблемы 1/2 аудита волны 1 — ровно этот сюжет
+ * уже случался с чеками).
+ */
+export function assertNotManagedDocument(doc: { type: string; paymentId?: string | null; ticketId?: string | null }): void {
+  if (doc.type === 'RECEIPT' || doc.paymentId) {
+    throw new ForbiddenException('Чек платежа удаляется только через раздел Финансы');
+  }
+  if (doc.type === 'TICKET' || doc.ticketId) {
+    throw new ForbiddenException('Файл билета удаляется только через раздел Билеты');
+  }
 }

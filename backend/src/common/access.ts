@@ -43,5 +43,11 @@ export function canAccessStudentRecord(record: AssignableRecord, user: AccessUse
  * финансовый документ, который загружает сотрудник (не студент), и он не
  * должен быть доступен студенту через /uploads даже при прямой ссылке —
  * защита в глубину поверх фильтрации в students.service.ts/student-auth.service.ts.
+ *
+ * TICKET (файл билета, см. tickets/) добавлен волной 8 по той же логике, что
+ * RECEIPT: это документ РАЗДЕЛА CRM, а не документ студента. Он не попадает
+ * в список документов личного кабинета (см. STUDENT_INCLUDE в
+ * student-auth.service.ts), и запрет на скачивание закрывает второй путь —
+ * прямую ссылку. Маршрутную квитанцию студенту передаёт менеджер.
  */
-export const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL', 'RECEIPT']);
+export const STUDENT_RESTRICTED_DOC_TYPES = new Set(['BANK', 'MEDICAL', 'RECEIPT', 'TICKET']);

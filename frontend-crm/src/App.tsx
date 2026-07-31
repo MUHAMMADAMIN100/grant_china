@@ -22,6 +22,10 @@ import ContractDetail from './pages/ContractDetail';
 import MyPayroll from './pages/MyPayroll';
 import Payroll from './pages/Payroll';
 import PayrollRules from './pages/PayrollRules';
+import Grants from './pages/Grants';
+import Tickets from './pages/Tickets';
+import Knowledge from './pages/Knowledge';
+import Conversations from './pages/Conversations';
 
 export default function App() {
   const init = useAuth((s) => s.init);
@@ -62,6 +66,16 @@ export default function App() {
             как /finance и /consultations — отдельный ProtectedRoute не нужен. */}
         <Route path="/contracts" element={<Contracts />} />
         <Route path="/contracts/:id" element={<ContractDetail />} />
+        {/* ТЗ 4 — реестр грантов, ТЗ «Билеты» — учёт перелётов. Обе доступны
+            всем ролям: видимость режется по владению студентом внутри
+            GrantsService и TicketsService, как /finance и /contracts. */}
+        <Route path="/grants" element={<Grants />} />
+        <Route path="/tickets" element={<Tickets />} />
+        {/* ТЗ 6.1 — база знаний: читают все, правят только FOUNDER/ADMIN
+            (проверяет @Roles на бэкенде, кнопки скрыты внутри страницы).
+            ТЗ 6.4 — единое окно диалогов, доступно всем сотрудникам. */}
+        <Route path="/knowledge" element={<Knowledge />} />
+        <Route path="/conversations" element={<Conversations />} />
         {/* ТЗ 5.2 «интерфейс сотрудника» — доступна всем ролям, каждый видит
             СТРОГО свои KPI и свой расчётный лист (userId только из JWT). */}
         <Route path="/my-payroll" element={<MyPayroll />} />

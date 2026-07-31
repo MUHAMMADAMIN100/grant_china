@@ -29,8 +29,7 @@ import { PrismaService } from '../prisma/prisma.service';
 // Проблема G аудита: раньше этот Set дублировался дословно здесь и в
 // student-auth.service.ts — единственный источник теперь common/access.ts.
 import { STUDENT_RESTRICTED_DOC_TYPES } from '../common/access';
-import { assertUploadableDocumentType } from '../common/documents';
-import { assertNotReceiptDocument } from '../payments/payment-rules';
+import { assertNotManagedDocument, assertUploadableDocumentType } from '../common/documents';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { StudentForgotPasswordDto, StudentLoginDto } from './dto/student-login.dto';
 import { clearStudentCookie, setStudentCookie } from '../auth/cookie-helpers';
@@ -289,8 +288,8 @@ export class StudentAuthController {
     // id чека приезжает ему по WebSocket-событию (payment:receipt-added),
     // и без этой проверки он мог сам уничтожить доказательство собственного
     // платежа. Чек управляется только payments/, студенту нельзя трогать
-    // ни свой, ни (тем более) чужой.
-    assertNotReceiptDocument(doc);
+    // ни свой, ни (тем более) чужой. Волна 8 добавила сюда файлы билетов.
+    assertNotManagedDocument(doc);
     await this.prisma.document.update({
       where: { id: docId },
       data: { deletedAt: new Date() },

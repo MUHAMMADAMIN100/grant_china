@@ -10,10 +10,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
-import { REQUIRED_DOCUMENT_TYPES } from '../common/documents';
-import { assertNotReceiptDocument } from '../payments/payment-rules';
+import { MANAGED_DOCUMENT_TYPES, REQUIRED_DOCUMENT_TYPES, assertNotManagedDocument } from '../common/documents';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
+import { normalizePhone } from '../common/phone';
+import { normalizeSource } from '../common/lead-source';
+import { findRepeatOfId } from '../common/application-repeat';
 
 function generatePassword(length = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -35,11 +37,12 @@ const CABINET_BY_DIRECTION: Record<Direction, number> = {
 // Полный select — для карточки студента (detail). Возвращает всё, кроме password.
 const STUDENT_SELECT = {
   ...STUDENT_SAFE_FIELDS,
-  // type: { not: 'RECEIPT' } — чеки платежей (payments/) это Document, но
-  // финансовый документ, а не документ студента. Они показываются только
-  // внутри карточки платежа (GET /payments/*), не в чек-листе документов и
-  // не в счётчике/ZIP-архиве DocumentsChecklist.tsx (см. риск волны 2).
-  documents: { where: { deletedAt: null, type: { not: 'RECEIPT' } } },
+  // MANAGED_DOCUMENT_TYPES — чеки платежей (payments/) и файлы билетов
+  // (tickets/): это Document, но принадлежат своим разделам, а не чек-листу
+  // документов студента. Они показываются внутри карточки платежа и карточки
+  // билета, но не в чек-листе, не в счётчике и не в ZIP-архиве
+  // DocumentsChecklist.tsx (см. риск волны 2).
+  documents: { where: { deletedAt: null, type: { notIn: MANAGED_DOCUMENT_TYPES } } },
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
   program: true,
@@ -111,6 +114,49 @@ export class StudentsService {
     );
   }
 
+  /**
+   * Общий «посев» полей заявки, создаваемой ИЗ КАРТОЧКИ СТУДЕНТА (create() и
+   * ensureApplication()). Раньше обе точки собирали объект руками и обе
+   * забывали три поля раздела 3.1 — source, phoneNormalized, repeatOfId.
+   * Одно место вместо двух копий: тот же довод, что вынес canAccessStudentRecord
+   * в common/access.ts и findRepeatOfId в common/application-repeat.ts.
+   *
+   * ИСТОЧНИК НЕ ВЫДУМЫВАЕТСЯ: normalizeSource(undefined) === null, то есть
+   * «не указан». Подставлять сюда WEBSITE (как это делает публичная форма
+   * лендинга) нельзя — офисный визит не приходил с сайта, и такой дефолт
+   * испортил бы ровно тот отчёт по каналам, ради которого поле заведено.
+   */
+  private async buildApplicationSeed(
+    student: {
+      fullName: string;
+      phones: string[];
+      email: string | null;
+      direction: Direction;
+      comment: string | null;
+      managerId: string | null;
+      chinaManagerId: string | null;
+    },
+    lead: { source?: string; sourceDetail?: string } = {},
+  ) {
+    const phone = student.phones[0] || '';
+    const phoneNormalized = normalizePhone(phone);
+    // «Этот человек уже обращался?» — та же формула, что у заявки с лендинга.
+    const repeatOfId = await findRepeatOfId(this.prisma, phoneNormalized, student.email);
+    return {
+      fullName: student.fullName,
+      phone,
+      email: student.email,
+      direction: student.direction,
+      comment: student.comment,
+      managerId: student.managerId,
+      chinaManagerId: student.chinaManagerId,
+      source: normalizeSource(lead.source),
+      sourceDetail: lead.sourceDetail?.trim() || null,
+      phoneNormalized,
+      repeatOfId,
+    };
+  }
+
   async create(dto: CreateStudentDto, user?: CurrentUser) {
     const cabinet = dto.cabinet ?? CABINET_BY_DIRECTION[dto.direction];
     const emailNormalized = dto.email.trim().toLowerCase();
@@ -163,17 +209,24 @@ export class StudentsService {
     // доступен сразу. Это нужно для студентов, заведённых вручную через CRM.
     // managerId/chinaManagerId копируем со студента — иначе заявка рождается
     // «бесхозной» той же самой Проблемой D, только с другой стороны.
+    //
+    // Раздел 3.1 ТЗ: эта заявка ОБЯЗАНА получить те же три поля, что и заявка
+    // с лендинга (applications.service.create) — source, phoneNormalized,
+    // repeatOfId. Раньше они здесь не проставлялись вовсе, и заявки,
+    // заведённые вручную (то есть все офисные визиты), навсегда оставались
+    // «Источник не указан» и не участвовали в поиске повторных обращений.
+    // phoneNormalized тем более не мог дозаполниться фоновым бэкфиллом:
+    // у студента без телефона phones[0] пуст, normalizePhone() вернёт null,
+    // и строка перечитывалась бы на каждом старте приложения впустую.
+    const applicationData = await this.buildApplicationSeed(student, {
+      source: dto.source,
+      sourceDetail: dto.sourceDetail,
+    });
     const application = await this.prisma.application.create({
       data: {
-        fullName: student.fullName,
-        phone: student.phones[0] || '',
-        email: student.email,
-        direction: student.direction,
-        comment: student.comment,
+        ...applicationData,
         status: 'NEW',
         studentId: student.id,
-        managerId: student.managerId,
-        chinaManagerId: student.chinaManagerId,
       },
     });
 
@@ -211,17 +264,16 @@ export class StudentsService {
     // Проблема D аудита: заявка копирует managerId/chinaManagerId со
     // студента — иначе она рождается «бесхозной» и по формуле hasAccess()
     // доступна ЛЮБОМУ сотруднику, даже если у студента менеджеры уже есть.
+    // Раздел 3.1: source здесь остаётся null («не указан») — этот метод чинит
+    // ЛЕГАСИ-студентов, заведённых до появления авто-создания заявки, и
+    // откуда они пришли, система не знает. Менеджер проставит источник
+    // вручную в карточке заявки.
+    const applicationData = await this.buildApplicationSeed(student);
     const created = await this.prisma.application.create({
       data: {
-        fullName: student.fullName,
-        phone: student.phones[0] || '',
-        email: student.email,
-        direction: student.direction,
-        comment: student.comment,
+        ...applicationData,
         status: 'NEW',
         studentId: id,
-        managerId: student.managerId,
-        chinaManagerId: student.chinaManagerId,
       },
     });
     this.realtime.emitForStudent(student, 'application:new', { id: created.id, studentId: id });
@@ -608,6 +660,7 @@ export class StudentsService {
       // chinaManagerId обязателен в select — без него ensureCanEdit ниже
       // сравнивал бы с undefined, и китайский менеджер не мог бы удалить
       // документ своего же студента. fullName — только для ActivityLog (волна 4).
+      // ticketId нужен assertNotManagedDocument ниже (волна 8).
       include: { student: { select: { managerId: true, chinaManagerId: true, fullName: true } } },
     });
     if (!doc) throw new NotFoundException('Документ не найден');
@@ -622,7 +675,8 @@ export class StudentsService {
     // чек уже ОДОБРЕННОГО платежа в обход payments.service.removeReceipt()
     // (тот пускает удаление только для DRAFT/REJECTED). Чек — не документ
     // студента, а часть финансового аудит-следа, управляется только payments/.
-    assertNotReceiptDocument(doc);
+    // Волна 8 добавила в тот же список файлы билетов — по той же причине.
+    assertNotManagedDocument(doc);
     // Soft delete: помечаем deletedAt. Файл на диске остаётся, но в UI и
     // в архивах студентов больше не отображается. Восстановление = снять метку.
     await this.prisma.document.update({

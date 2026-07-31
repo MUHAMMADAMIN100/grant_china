@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../store/auth';
 import { isPrivileged, ROLE_LABEL } from '../api/types';
 import { pendingPaymentsCount } from '../api/payments';
+import { conversationsUnreadCount } from '../api/messaging';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import ChangePasswordModal from './ChangePasswordModal';
@@ -13,6 +14,7 @@ export default function Sidebar() {
   const logout = useAuth((s) => s.logout);
   const [pwdOpen, setPwdOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [unreadChats, setUnreadChats] = useState(0);
   const initials = user?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
   const isPriv = isPrivileged(user?.role);
 
@@ -23,6 +25,14 @@ export default function Sidebar() {
     pendingPaymentsCount().then((r) => setPendingCount(r.count)).catch(() => {});
   };
   useEffect(refreshPendingCount, [isPriv]);
+
+  // Бейдж непрочитанных сообщений (ТЗ 6.4). Счётчик считает бэкенд с учётом
+  // видимости диалогов, поэтому доступен всем ролям — каждый видит свой срез.
+  const refreshUnreadChats = () => {
+    conversationsUnreadCount().then((r) => setUnreadChats(r.count)).catch(() => {});
+  };
+  useEffect(refreshUnreadChats, []);
+
   useRealtime({
     'payment:submitted': refreshPendingCount,
     'payment:approved': refreshPendingCount,
@@ -30,6 +40,7 @@ export default function Sidebar() {
     'payment:recalled': refreshPendingCount,
     'payment:voided': refreshPendingCount,
     'payment:deleted': refreshPendingCount,
+    'conversation:updated': refreshUnreadChats,
   });
 
   const links = [
@@ -37,12 +48,21 @@ export default function Sidebar() {
     { to: '/applications', icon: 'assignment', label: 'Заявки' },
     { to: '/consultations', icon: 'record_voice_over', label: 'Консультации' },
     { to: '/students', icon: 'school', label: 'Студенты' },
+    // ТЗ 6.4 — единое окно переписки из мессенджеров, доступно всем ролям
+    // (непривязанные диалоги видны всем, как свободные заявки).
+    { to: '/conversations', icon: 'forum', label: 'Диалоги', badge: unreadChats },
     { to: '/finance', icon: 'payments', label: 'Финансы', badge: isPriv ? pendingCount : 0 },
     // Раздел 5 ТЗ (волна 6) — договоры, доступны всем ролям (видимость
     // своих/чужих режется внутри ContractsService, как /finance).
     { to: '/contracts', icon: 'description', label: 'Договоры' },
+    // ТЗ 4 — реестр грантов (кому продлевать в ближайший месяц) и
+    // ТЗ «Билеты» — перелёты. Видимость режется по владению студентом.
+    { to: '/grants', icon: 'workspace_premium', label: 'Гранты' },
+    { to: '/tickets', icon: 'flight', label: 'Билеты' },
     { to: '/programs', icon: 'menu_book', label: 'Программы' },
     { to: '/tasks', icon: 'task_alt', label: 'Задачи' },
+    // ТЗ 6.1 — регламенты компании. Читают все, правят FOUNDER/ADMIN.
+    { to: '/knowledge', icon: 'auto_stories', label: 'База знаний' },
     // ТЗ 5.2 «интерфейс сотрудника» — своя зарплата и KPI, доступна ВСЕМ
     // ролям. Пункта «Ведомость» здесь нет намеренно — менеджер не должен
     // видеть чужую зарплату даже в виде пункта меню.

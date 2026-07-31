@@ -16,6 +16,8 @@ import DirectionOptions from '../components/DirectionOptions';
 import BackButton from '../components/BackButton';
 import GrantCard from '../components/GrantCard';
 import ContractCard from '../components/ContractCard';
+import TicketsCard from '../components/TicketsCard';
+import CallsCard from '../components/CallsCard';
 import CommentsFeed from '../components/CommentsFeed';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
@@ -453,6 +455,13 @@ export default function StudentDetail() {
         </div>
 
         <GrantCard studentId={student.id} canEdit={canEdit} />
+
+        {/* ТЗ «Билеты» — перелёты студента рядом с грантом: обе сущности
+            отвечают на вопрос «где человек будет учиться и когда туда летит». */}
+        <TicketsCard studentId={student.id} studentName={student.fullName} canEdit={canEdit} />
+
+        {/* ТЗ 6.2 — история звонков и click-to-call по номеру из карточки. */}
+        <CallsCard studentId={student.id} phone={student.phones?.[0]} canEdit={canEdit} />
 
         <DocumentsChecklist
           studentId={student.id}

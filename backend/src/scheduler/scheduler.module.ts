@@ -8,6 +8,7 @@ import { FollowUpReminderJob } from './jobs/follow-up-reminder.job';
 import { ApplicationAutoArchiveJob } from './jobs/application-auto-archive.job';
 import { AcademicYearReminderJob } from './jobs/academic-year-reminder.job';
 import { PayrollPeriodCloseJob } from './jobs/payroll-period-close.job';
+import { FlightReminderJob } from './jobs/flight-reminder.job';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { PayrollModule } from '../payroll/payroll.module';
@@ -35,6 +36,7 @@ import { PayrollModule } from '../payroll/payroll.module';
     ApplicationAutoArchiveJob,
     AcademicYearReminderJob,
     PayrollPeriodCloseJob,
+    FlightReminderJob,
     // Мульти-провайдер: оркестратор (scheduler.service.ts) получает список
     // джоб через DI и не знает о них поимённо. Новые джобы дописываются в
     // КОНЕЦ массива намеренно (риск 1 проекта архитектора): если в одной из
@@ -47,8 +49,15 @@ import { PayrollModule } from '../payroll/payroll.module';
         b: ApplicationAutoArchiveJob,
         c: AcademicYearReminderJob,
         d: PayrollPeriodCloseJob,
-      ) => [a, b, c, d],
-      inject: [FollowUpReminderJob, ApplicationAutoArchiveJob, AcademicYearReminderJob, PayrollPeriodCloseJob],
+        e: FlightReminderJob,
+      ) => [a, b, c, d, e],
+      inject: [
+        FollowUpReminderJob,
+        ApplicationAutoArchiveJob,
+        AcademicYearReminderJob,
+        PayrollPeriodCloseJob,
+        FlightReminderJob,
+      ],
     },
   ],
 })

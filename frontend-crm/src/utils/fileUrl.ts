@@ -56,3 +56,25 @@ export function buildFileUrl(url: string | null | undefined): string {
   }
   return `${API_BASE}${url}`;
 }
+
+/**
+ * Скачивание файла «в загрузки», а не открытие во вкладке.
+ *
+ * Атрибут `download` у <a> работает только для same-origin ссылок, а после
+ * `UPLOADS_PROTECTED` отдача файлов ещё и требует cookie. Поэтому тянем файл
+ * через fetch с credentials и отдаём как blob — так браузер точно сохранит
+ * его под нормальным именем (`Билет_Иванов.pdf`, а не `a3f9...pdf`).
+ *
+ * Бросает исключение при ошибке — вызывающий код показывает toast.
+ */
+export async function downloadProtectedFile(url: string, filename: string): Promise<void> {
+  const res = await fetch(buildFileUrl(url), { credentials: 'include' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(objectUrl);
+}

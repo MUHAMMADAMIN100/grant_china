@@ -6,7 +6,15 @@ import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import { toPeriodRange } from '../utils/datetime';
 
-const ACTION_BADGE: Record<ActivityAction, string> = {
+// Partial + фолбэк ниже НАМЕРЕННО, а не полный Record: словарь событий живёт
+// на бэкенде и растёт волнами. Полный Record требует править этот файл в тот
+// же коммит, иначе TS падает — а на практике происходило обратное: бэкенд
+// добавлял событие, фронт про него не знал, и в ленте появлялся бейдж без
+// подписи и без цвета (ровно так «потерялись» все события договоров и
+// зарплаты из волны 6). Теперь незнакомое событие деградирует до серого
+// бейджа с техническим именем — видно, что событие есть, и видно, что
+// подпись для него ещё не написана.
+const ACTION_BADGE: Partial<Record<ActivityAction, string>> = {
   STATUS_CHANGE: 'badge-info',
   STUDENT_UPDATE: 'badge-warning',
   STUDENT_CREATE: 'badge-success',
@@ -47,6 +55,31 @@ const ACTION_BADGE: Record<ActivityAction, string> = {
   GRANT_UPDATE: 'badge-warning',
   GRANT_YEAR_ADVANCE: 'badge-success',
   GRANT_CLOSE: 'badge-gray',
+  CONTRACT_CREATE: 'badge-info',
+  CONTRACT_SIGN: 'badge-success',
+  CONTRACT_TERMINATE: 'badge-danger',
+  CONTRACT_UPDATE: 'badge-warning',
+  PAYROLL_GENERATE: 'badge-info',
+  PAYROLL_RECALC: 'badge-info',
+  PAYROLL_ADJUST: 'badge-warning',
+  PAYROLL_APPROVE: 'badge-success',
+  PAYROLL_RECALL: 'badge-warning',
+  PAYROLL_PAY: 'badge-success',
+  PAYROLL_VOID: 'badge-danger',
+  PAYROLL_REISSUE: 'badge-info',
+  PAYROLL_DRAFT_DELETE: 'badge-gray',
+  PAYROLL_RULESET_CREATE: 'badge-info',
+  PAYROLL_RULESET_ACTIVATE: 'badge-success',
+  PAYROLL_RULESET_ARCHIVE: 'badge-gray',
+  COMPENSATION_SET: 'badge-warning',
+  TICKET_CREATE: 'badge-success',
+  TICKET_UPDATE: 'badge-warning',
+  TICKET_DELETE: 'badge-gray',
+  KNOWLEDGE_CREATE: 'badge-success',
+  KNOWLEDGE_UPDATE: 'badge-warning',
+  KNOWLEDGE_DELETE: 'badge-gray',
+  CONVERSATION_LINK: 'badge-info',
+  MESSAGE_SENT: 'badge-info',
 };
 
 export default function Activity() {
@@ -151,7 +184,9 @@ export default function Activity() {
                 animate={{ opacity: 1, y: 0 }}
               >
                 <div className="activity-item-head">
-                  <span className={`badge ${ACTION_BADGE[e.action]}`}>{ACTIVITY_LABEL[e.action]}</span>
+                  <span className={`badge ${ACTION_BADGE[e.action] || 'badge-gray'}`}>
+                    {ACTIVITY_LABEL[e.action] || e.action}
+                  </span>
                   <span className="activity-time">{new Date(e.createdAt).toLocaleString('ru-RU')}</span>
                 </div>
                 <div className="activity-actor">

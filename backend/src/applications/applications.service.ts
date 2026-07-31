@@ -547,8 +547,21 @@ export class ApplicationsService implements OnModuleInit {
         };
         const student = await this.prisma.student.create({ data: studentData });
         studentId = student.id;
-      } catch {
-        // Если студент с таким email уже есть — просто переводим статус без создания
+      } catch (e) {
+        // Ожидаемый случай — студент с таким email уже есть (P2002 по
+        // Student.email): переводим статус без создания, это норма.
+        // ЛЮБАЯ ДРУГАЯ ошибка (пул БД, нарушение FK, таймаут) раньше глоталась
+        // здесь молча: заявка уезжала в DOCS_REVIEW без карточки студента, и
+        // об этом не узнавал ни менеджер, ни лог. Теперь неожиданные ошибки
+        // попадают в лог с id заявки — статус всё равно переводим (потерять
+        // действие пользователя из-за сбоя создания студента хуже, карточку
+        // добьёт кнопка «Создать заявку» в students.ensureApplication).
+        const isDuplicateEmail = e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+        if (!isDuplicateEmail) {
+          this.logger.error(
+            `Не удалось авто-создать студента по заявке ${id}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
       }
       const updated = await this.prisma.application.update({
         where: { id },

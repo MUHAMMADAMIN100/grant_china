@@ -2,12 +2,26 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './Sidebar';
 import NotificationBell from './NotificationBell';
+import AiAssistant from './AiAssistant';
+import IncomingCallPopup from './IncomingCallPopup';
 
 const TITLES: Record<string, string> = {
   '/dashboard': 'Дашборд',
   '/applications': 'Заявки',
+  '/consultations': 'Консультации',
   '/students': 'Студенты',
+  '/conversations': 'Диалоги',
   '/finance': 'Финансы',
+  '/contracts': 'Договоры',
+  '/grants': 'Гранты',
+  '/tickets': 'Билеты',
+  '/programs': 'Программы',
+  '/tasks': 'Задачи',
+  '/knowledge': 'База знаний',
+  '/my-payroll': 'Моя зарплата',
+  '/payroll': 'Зарплаты',
+  '/analytics': 'Аналитика',
+  '/activity': 'Активность',
   '/users': 'Пользователи',
 };
 
@@ -55,6 +69,12 @@ export default function Layout() {
           </AnimatePresence>
         </div>
       </div>
+      {/* ТЗ 6.1 и 6.2 — живут в Layout, а не на конкретной странице: помощник
+          нужен там, где сотрудник застрял, а входящий звонок застаёт его на
+          любом экране. Оба компонента сами прячутся, когда интеграция не
+          настроена. */}
+      <AiAssistant />
+      <IncomingCallPopup />
     </div>
   );
 }

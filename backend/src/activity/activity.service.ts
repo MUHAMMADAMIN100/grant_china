@@ -101,7 +101,22 @@ export type ActivityAction =
   | 'PAYROLL_RULESET_ACTIVATE'
   | 'PAYROLL_RULESET_ARCHIVE'
   // ТЗ 2.8 — кадровые ведомости (compensation.service.ts).
-  | 'COMPENSATION_SET';
+  | 'COMPENSATION_SET'
+  // Раздел «Билеты» (волна 8) — перелёты студентов (tickets.service.ts).
+  // studentId ЕСТЬ всегда (билет без студента невозможен), поэтому события
+  // попадают в ленту менеджера как активность его студента.
+  | 'TICKET_CREATE'
+  | 'TICKET_UPDATE'
+  | 'TICKET_DELETE'
+  // ТЗ 6.1 (волна 8) — база знаний (knowledge.service.ts). studentId: null —
+  // это внутренний регламент, а не событие карточки студента.
+  | 'KNOWLEDGE_CREATE'
+  | 'KNOWLEDGE_UPDATE'
+  | 'KNOWLEDGE_DELETE'
+  // ТЗ 6.4 (волна 8) — единое окно диалогов (messaging/). Привязка диалога к
+  // карточке и отправка ответа из CRM — события ленты студента.
+  | 'CONVERSATION_LINK'
+  | 'MESSAGE_SENT';
 
 @Injectable()
 export class ActivityService {

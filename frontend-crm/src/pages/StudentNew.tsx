@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createStudent } from '../api/students';
 import type { Direction } from '../api/types';
+import { LEAD_SOURCES } from '../api/types';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, phoneRule, required, validateAll } from '../utils/validators';
@@ -44,6 +45,13 @@ export default function StudentNew() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [direction, setDirection] = useState<Direction>('BACHELOR');
+  // ТЗ 3.1 — источник привлечения. Пусто по умолчанию и НЕ обязателен:
+  // подставлять значение за менеджера нельзя (выдуманный источник ломает
+  // отчёт по каналам), а заставлять выбирать — лишний барьер при заведении
+  // студента. Заявка, которая создаётся вместе со студентом, получает это
+  // значение; без него она осталась бы «Источник не указан» навсегда.
+  const [source, setSource] = useState('');
+  const [sourceDetail, setSourceDetail] = useState('');
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +86,8 @@ export default function StudentNew() {
         email,
         direction,
         comment: comment || undefined,
+        source: source || undefined,
+        sourceDetail: sourceDetail.trim() || undefined,
       });
       setCredentials({
         id: res.id,
@@ -156,6 +166,36 @@ export default function StudentNew() {
               <option value="LANGUAGE_BACHELOR">Языковой + бакалавриат → каб. 5</option>
               <option value="COLLEGE">Колледж → каб. 6</option>
             </select>
+          </div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label>
+                Источник привлечения{' '}
+                <span style={{ fontWeight: 400, color: 'var(--text-soft)', fontSize: 12 }}>
+                  — откуда пришёл клиент
+                </span>
+              </label>
+              <select value={source} onChange={(e) => setSource(e.target.value)}>
+                <option value="">Не указан</option>
+                {LEAD_SOURCES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>
+                Уточнение{' '}
+                <span style={{ fontWeight: 400, color: 'var(--text-soft)', fontSize: 12 }}>
+                  — @ник, кампания, кто порекомендовал
+                </span>
+              </label>
+              <input
+                value={sourceDetail}
+                onChange={(e) => setSourceDetail(e.target.value)}
+                maxLength={200}
+                placeholder="необязательно"
+              />
+            </div>
           </div>
           <div className="form-group">
             <label>Комментарий <span style={{ fontWeight: 400, color: 'var(--text-soft)', fontSize: 12 }}>— до 1000 символов</span></label>

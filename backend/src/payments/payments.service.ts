@@ -21,6 +21,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { FileResolverService } from '../files/file-resolver.service';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
+import { localDayStart } from '../scheduler/time';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { SetScheduleDto } from './dto/set-schedule.dto';
@@ -459,8 +460,14 @@ export class PaymentsService {
       paymentsByStage.set(p.stage, list);
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Граница «сегодня» — начало КАЛЕНДАРНЫХ СУТОК ПО ДУШАНБЕ, а не по
+    // таймзоне процесса. На Railway процесс живёт в UTC, поэтому
+    // `new Date().setHours(0,0,0,0)` давал полночь UTC — на пять часов
+    // раньше местной, и этап считался просроченным на пять часов раньше,
+    // чем видит менеджер. Весь остальной проект (планировщик, границы
+    // расчётного периода, календарные даты грантов) уже считает по
+    // APP_TZ_OFFSET_MINUTES — приводим к тому же правилу.
+    const today = localDayStart(new Date());
 
     let totalPlanned = new Prisma.Decimal(0);
     let totalPaid = new Prisma.Decimal(0);

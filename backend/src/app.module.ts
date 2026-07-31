@@ -30,6 +30,12 @@ import { CommentsModule } from './comments/comments.module';
 import { CallsModule } from './calls/calls.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { PayrollModule } from './payroll/payroll.module';
+// Волна 8: раздел «Билеты», база знаний + AI-помощник (ТЗ 6.1),
+// единое окно диалогов (ТЗ 6.4).
+import { TicketsModule } from './tickets/tickets.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
+import { AiModule } from './ai/ai.module';
+import { MessagingModule } from './messaging/messaging.module';
 
 // Проблема E аудита: ServeStaticModule отдавал ВЕСЬ каталог /uploads (сканы
 // паспортов, BANK/MEDICAL справки, фото студентов) анониму без всякой
@@ -101,6 +107,10 @@ if (!UPLOADS_PROTECTED) {
     CallsModule,
     ContractsModule,
     PayrollModule,
+    TicketsModule,
+    KnowledgeModule,
+    AiModule,
+    MessagingModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

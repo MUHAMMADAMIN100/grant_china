@@ -57,7 +57,18 @@ export async function updateStudentForm(id: string, form: any) {
   return data;
 }
 
-export async function createStudent(payload: Partial<Student>) {
+/**
+ * ТЗ 3.1: source/sourceDetail не поля Student — они уезжают в ЗАЯВКУ, которую
+ * бэкенд создаёт вместе со студентом (students.service.buildApplicationSeed).
+ * Поэтому тип шире, чем Partial<Student>: иначе TS ругался бы на «лишние»
+ * свойства, а без них заявка из CRM навсегда оставалась бы без источника.
+ */
+export type CreateStudentPayload = Partial<Student> & {
+  source?: string;
+  sourceDetail?: string;
+};
+
+export async function createStudent(payload: CreateStudentPayload) {
   const { data } = await api.post<Student>('/students', payload);
   return data;
 }

@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { STUDENT_RESTRICTED_DOC_TYPES } from '../common/access';
+import { MANAGED_DOCUMENT_TYPES } from '../common/documents';
 
 function generatePassword(length = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -14,10 +15,11 @@ function generatePassword(length = 8): string {
 
 // Soft-delete: при include'ах не подтягиваем удалённые документы/заявки.
 const STUDENT_INCLUDE = {
-  // type: { not: 'RECEIPT' } — чеки платежей (payments/) не должны попадать
-  // в личный кабинет студента вообще (финансовый документ сотрудника, а не
-  // документ студента) — см. STUDENT_RESTRICTED_DOC_TYPES в common/access.ts.
-  documents: { where: { deletedAt: null, type: { not: 'RECEIPT' } } },
+  // MANAGED_DOCUMENT_TYPES — чеки платежей (payments/) и файлы билетов
+  // (tickets/) не должны попадать в личный кабинет студента: это документы
+  // сотрудника, живущие в своих разделах CRM. См. также
+  // STUDENT_RESTRICTED_DOC_TYPES в common/access.ts.
+  documents: { where: { deletedAt: null, type: { notIn: MANAGED_DOCUMENT_TYPES } } },
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
   applications: {

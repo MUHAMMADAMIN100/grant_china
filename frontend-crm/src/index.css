@@ -2202,3 +2202,493 @@ select.input-error {
    поднята до уровня .table tbody tr:hover, иначе наведение мышью её перебивало. */
 .table tbody tr.payroll-row-review,
 .table tbody tr.payroll-row-review:hover { background: var(--danger-soft); }
+
+/* ==========================================================================
+   ВОЛНА 8 — билеты, база знаний, AI-помощник, телефония, диалоги.
+   ========================================================================== */
+
+/* Ссылка внутри ячейки таблицы. Глобальное правило `a { color: inherit }`
+   делает ссылки невидимыми, а кликабельность ФИО студента в таблице билетов
+   прописана в ТЗ явно — значит, и выглядеть она должна как ссылка. */
+.link-cell { color: var(--primary); font-weight: 600; }
+.link-cell:hover { text-decoration: underline; }
+
+/* Группа кнопок действий в строке таблицы или карточке. */
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* Чекбокс в панели фильтров — визуально в одном ряду с input/select. */
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-soft);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.filter-check input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+
+/* --------------------------------------------------------------------------
+   Подчинённые блоки карточки студента/заявки (билеты, звонки). Тот же язык,
+   что у .grant-card, но отдельные классы: блоки живут своей жизнью и не
+   должны ломаться при правке грантов.
+   -------------------------------------------------------------------------- */
+.sub-card { margin-top: 28px; }
+.sub-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.sub-card-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; }
+.sub-card-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  text-align: center;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+.sub-card-list { display: flex; flex-direction: column; gap: 12px; }
+.sub-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sub-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sub-item-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; flex-wrap: wrap; }
+.sub-item-muted { font-weight: 400; color: var(--text-soft); }
+.sub-item-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px 14px;
+}
+.sub-item-figures > div { display: flex; flex-direction: column; gap: 2px; }
+.sub-item-figures > div span { font-size: 11px; color: var(--text-soft); }
+.sub-item-figures > div strong { font-size: 14px; font-weight: 700; }
+.sub-item-note {
+  font-size: 13px;
+  color: var(--text-soft);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}
+.sub-item-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* --------------------------------------------------------------------------
+   ТЗ 6.1 — база знаний.
+   -------------------------------------------------------------------------- */
+.kb-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--info-soft);
+  color: #1e40af;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.kb-hint .material-symbols-rounded { color: var(--info); flex-shrink: 0; }
+.kb-hint code {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.kb-list { display: flex; flex-direction: column; gap: 10px; }
+.kb-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.kb-item.open { border-color: var(--primary); }
+.kb-item-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+}
+.kb-item-head:hover { background: var(--bg); }
+.kb-item-title { flex: 1; font-size: 14px; font-weight: 700; display: flex; align-items: center; flex-wrap: wrap; }
+.kb-item-body {
+  padding: 0 16px 16px 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Регламенты пишут в обычном текстовом поле — переводы строк должны
+   сохраняться, иначе пронумерованный список схлопнется в один абзац. */
+.kb-article-text { font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
+.kb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-tag {
+  font-size: 12px;
+  color: var(--text-soft);
+  background: var(--bg);
+  border-radius: 20px;
+  padding: 2px 10px;
+}
+.kb-item-meta { font-size: 12px; color: var(--text-light); }
+
+/* --------------------------------------------------------------------------
+   ТЗ 6.1 — плавающий виджет AI-помощника.
+   -------------------------------------------------------------------------- */
+.ai-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 900;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(213, 43, 43, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ai-fab .material-symbols-rounded { color: #fff; }
+
+.ai-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  z-index: 900;
+  width: min(400px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 140px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+.ai-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.ai-panel-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.ai-panel-sub { font-size: 12px; color: var(--text-soft); }
+.ai-panel-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-soft);
+  display: flex;
+  padding: 4px;
+}
+.ai-panel-clear:hover { color: var(--danger); }
+
+.ai-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-empty { font-size: 13px; color: var(--text-soft); text-align: center; line-height: 1.6; padding: 12px 4px; }
+.ai-empty-note { margin-top: 10px; font-size: 12px; color: var(--text-light); }
+.ai-msg {
+  max-width: 88%;
+  font-size: 13.5px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border-radius: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ai-msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
+.ai-msg.assistant { align-self: flex-start; background: var(--bg); border-bottom-left-radius: 4px; }
+
+/* Три точки «печатает» — ответ модели занимает несколько секунд, и без
+   индикатора виджет выглядит зависшим. */
+.ai-typing { display: flex; gap: 5px; align-items: center; }
+.ai-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-light);
+  animation: ai-blink 1.2s infinite ease-in-out;
+}
+.ai-typing span:nth-child(2) { animation-delay: 0.2s; }
+.ai-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ai-blink {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+.ai-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: #92610a;
+  background: var(--warning-soft);
+  padding: 8px 12px;
+  line-height: 1.45;
+}
+.ai-notice .material-symbols-rounded { color: var(--warning); flex-shrink: 0; }
+
+.ai-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.ai-composer textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+.ai-composer textarea:focus { border-color: var(--primary); }
+
+/* --------------------------------------------------------------------------
+   ТЗ 6.2 — всплывающая карточка входящего звонка.
+   -------------------------------------------------------------------------- */
+.call-popup {
+  position: fixed;
+  right: 24px;
+  top: 24px;
+  z-index: 950;
+  width: min(340px, calc(100vw - 32px));
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--success);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+.call-popup-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 0;
+}
+.call-popup-icon { display: flex; color: var(--success); }
+.call-popup-icon .material-symbols-rounded { color: var(--success); }
+.call-popup-title { flex: 1; font-size: 13px; font-weight: 700; color: var(--success); }
+.call-popup-close { background: none; border: none; cursor: pointer; color: var(--text-soft); display: flex; padding: 2px; }
+.call-popup-body { padding: 8px 14px 12px; }
+.call-popup-phone { font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
+.call-popup-name { font-size: 14px; color: var(--text-soft); margin-top: 2px; }
+.call-popup-unknown { font-size: 12.5px; color: var(--warning); margin-top: 4px; line-height: 1.45; }
+.call-popup-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 14px; }
+
+/* --------------------------------------------------------------------------
+   ТЗ 6.4 — единое окно диалогов.
+   -------------------------------------------------------------------------- */
+.conv-count { font-size: 13px; color: var(--text-soft); }
+.conv-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  min-height: 60vh;
+  max-height: calc(100vh - 220px);
+  border-top: 1px solid var(--border);
+}
+.conv-list { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-width: 0; }
+.conv-filters { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border); }
+.conv-filters input, .conv-filters select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.conv-filters input:focus, .conv-filters select:focus { border-color: var(--primary); }
+.conv-chips { display: flex; gap: 6px; }
+.conv-chip {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+.conv-chip.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); font-weight: 600; }
+
+.conv-items { flex: 1; overflow-y: auto; }
+.conv-more { padding: 10px 14px; font-size: 12px; color: var(--text-light); text-align: center; }
+.conv-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+}
+.conv-item:hover { background: var(--bg); }
+.conv-item.active { background: var(--primary-soft); }
+.conv-item.unread .conv-item-name { font-weight: 700; }
+.conv-item-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.conv-item-name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-badge {
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.conv-item-preview {
+  font-size: 12.5px;
+  color: var(--text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-item-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--text-light); }
+
+.conv-thread { display: flex; flex-direction: column; min-width: 0; }
+.conv-thread-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.conv-thread-name { font-size: 16px; font-weight: 700; }
+.conv-thread-sub { font-size: 12.5px; color: var(--text-soft); }
+.conv-thread-links { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.conv-link-bar, .conv-assign-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.conv-link-bar input, .conv-assign-bar select {
+  flex: 1;
+  min-width: 180px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  background: var(--bg-card);
+}
+.conv-assign-bar label { color: var(--text-soft); flex: 0 0 auto; }
+
+.conv-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.conv-msg {
+  max-width: 72%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.conv-msg-text { white-space: pre-wrap; }
+.conv-msg.in { align-self: flex-start; background: var(--bg); border-bottom-left-radius: 4px; }
+.conv-msg.out { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
+.conv-msg-attach { display: flex; align-items: center; gap: 4px; font-size: 12.5px; opacity: 0.9; margin-top: 4px; }
+.conv-msg-meta { font-size: 11px; opacity: 0.7; margin-top: 4px; }
+
+.conv-composer { display: flex; gap: 8px; align-items: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
+.conv-composer textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+.conv-composer textarea:focus { border-color: var(--primary); }
+.conv-composer-disabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-soft);
+  background: var(--bg);
+}
+
+/* На узком экране двухпанельный режим невозможен: список и переписка
+   встают друг под другом, у каждой части своя область прокрутки. */
+@media (max-width: 900px) {
+  .conv-layout { grid-template-columns: 1fr; max-height: none; }
+  .conv-list { border-right: none; border-bottom: 1px solid var(--border); }
+  .conv-items { max-height: 40vh; }
+  .conv-messages { max-height: 50vh; }
+  .conv-msg { max-width: 88%; }
+}
+
+@media (max-width: 720px) {
+  .ai-fab { right: 16px; bottom: 16px; width: 50px; height: 50px; }
+  .ai-panel { right: 12px; left: 12px; bottom: 76px; width: auto; }
+  .call-popup { right: 12px; left: 12px; top: 12px; width: auto; }
+}

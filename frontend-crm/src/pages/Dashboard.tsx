@@ -65,15 +65,28 @@ export default function Dashboard() {
     studentStats().then(setStuStats).catch(() => {});
   }, []);
 
-  const newCount = appStats?.byStatus?.find((s: any) => s.status === 'NEW')?._count || 0;
-  const inProgress = appStats?.byStatus?.find((s: any) => s.status === 'IN_PROGRESS')?._count || 0;
-  const completed = appStats?.byStatus?.find((s: any) => s.status === 'COMPLETED')?._count || 0;
+  // Считаем по АКТУАЛЬНЫМ статусам воронки. Раньше здесь искались
+  // 'IN_PROGRESS' и 'COMPLETED' — легаси-значения, которые PrismaService
+  // мигрирует в DOCS_REVIEW/ENROLLED при каждом старте приложения. В базе их
+  // не остаётся, ни одна строка кода их больше не пишет, и обе карточки
+  // показывали ноль всегда. Считаем группами, а не одним статусом: «в работе»
+  // это любой промежуточный этап воронки, а не один конкретный.
+  const countByStatus = (statuses: string[]): number =>
+    (appStats?.byStatus || []).reduce(
+      (sum: number, s: any) => (statuses.includes(s.status) ? sum + (s._count || 0) : sum),
+      0,
+    );
+  const newCount = countByStatus(['NEW']);
+  const inProgress = countByStatus(['DOCS_REVIEW', 'DOCS_SUBMITTED', 'PRE_ADMISSION', 'AWAITING_PAYMENT']);
+  // COMPLETED оставлен в списке как страховка на случай, если миграция
+  // легаси-статусов почему-то не отработала на конкретной базе.
+  const enrolled = countByStatus(['ENROLLED', 'COMPLETED']);
 
   const statCards = [
     { label: 'Всего заявок', value: appStats?.total ?? '—', color: '#3b82f6', bg: '#eff6ff', icon: 'assignment' },
     { label: 'Новые', value: newCount, color: '#3b82f6', bg: '#eff6ff', icon: 'fiber_new' },
     { label: 'В работе', value: inProgress, color: '#f59e0b', bg: '#fffbeb', icon: 'pending_actions' },
-    { label: 'Завершено', value: completed, color: '#10b981', bg: '#ecfdf5', icon: 'task_alt' },
+    { label: 'Зачислено', value: enrolled, color: '#10b981', bg: '#ecfdf5', icon: 'task_alt' },
     { label: 'Всего студентов', value: stuStats?.total ?? '—', color: '#d52b2b', bg: '#fff0f0', icon: 'school' },
   ];
 
@@ -112,7 +125,12 @@ export default function Dashboard() {
         ))}
       </motion.div>
 
-      {me?.role === 'EMPLOYEE' && <MyPayrollWidget />}
+      {/* ТЗ 5.2 «интерфейс сотрудника». Показываем всем, у кого вообще
+          бывает расчётный лист: payslips.service.generate() создаёт листы для
+          EMPLOYEE и ADMIN (FOUNDER исключён — у него не зарплата, а прибыль).
+          Раньше условие было `role === 'EMPLOYEE'`, и администратор не видел
+          на дашборде собственную зарплату, хотя лист ему начислялся. */}
+      {(me?.role === 'EMPLOYEE' || me?.role === 'ADMIN') && <MyPayrollWidget />}
 
       <motion.div
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18 }}
