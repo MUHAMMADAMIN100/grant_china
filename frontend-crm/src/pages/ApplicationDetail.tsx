@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { assignApplicationManager, deleteApplication, getApplication, updateApplication } from '../api/applications';
 import { getStudent, updateStudent, uploadPhoto } from '../api/students';
-import type { Application, ApplicationStatus, Direction, Student, StudentStatus } from '../api/types';
+import { listContracts } from '../api/contracts';
+import type { Application, ApplicationStatus, Contract, Direction, Student, StudentStatus } from '../api/types';
 import { APPLICATION_STAGES, DIRECTION_LABEL, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
@@ -13,8 +14,10 @@ import ManagerBar from '../components/ManagerBar';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import BackButton from '../components/BackButton';
 import CommentsFeed from '../components/CommentsFeed';
+import ContractStatusBadge from '../components/ContractStatusBadge';
+import ContractFormModal from '../components/ContractFormModal';
 import Icon from '../Icon';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
 
 import { buildFileUrl } from '../utils/fileUrl';
@@ -31,6 +34,11 @@ export default function ApplicationDetail() {
   const [error, setError] = useState<string | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  // Раздел 5 ТЗ (волна 6) — договор, оформленный по ЭТОЙ заявке (атрибуция
+  // конверсии «лид → договор»). У студента договоров может быть несколько
+  // (расторгли и подписали заново), поэтому ищем именно связанный с app.id.
+  const [contract, setContract] = useState<Contract | null>(null);
+  const [contractModalOpen, setContractModalOpen] = useState(false);
 
   const formErrors = form
     ? validateAll(
@@ -88,12 +96,25 @@ export default function ApplicationDetail() {
         } catch {
           setStudent(null);
         }
+        try {
+          // Договоров у студента может быть несколько — берём привязанный
+          // именно к этой заявке (applicationId НЕ @unique, см. contracts.service.ts).
+          const contracts = await listContracts({ studentId: a.studentId, pageSize: 50 });
+          const forThisApp = contracts.items
+            .filter((c) => c.applicationId === a.id)
+            .sort((x, y) => new Date(y.signedAt || y.createdAt).getTime() - new Date(x.signedAt || x.createdAt).getTime());
+          setContract(forThisApp[0] ?? null);
+        } catch {
+          setContract(null);
+        }
       } else {
         setStudent(null);
+        setContract(null);
       }
     } catch (e: any) {
       setApp(null);
       setStudent(null);
+      setContract(null);
       setError(e?.response?.data?.message || 'Нет доступа к этой заявке');
     }
   };
@@ -101,6 +122,9 @@ export default function ApplicationDetail() {
   useEffect(() => { reload(); }, [id]);
 
   useRealtime({
+    'contract:updated': (data: any) => {
+      if (data?.studentId && data.studentId === app?.studentId) reload();
+    },
     'application:updated': (data: any) => {
       // Бэкенд переходит на «тонкие» realtime-события: вместо всего объекта
       // { application: {...} } может прийти { id } / { applicationId } без
@@ -462,6 +486,26 @@ export default function ApplicationDetail() {
               </div>
             </div>
 
+            <div className="detail-row">
+              <div className="detail-label">Договор</div>
+              <div className="detail-value">
+                {contract ? (
+                  <>
+                    <Link to={`/contracts/${contract.id}`}>{contract.number}</Link>{' '}
+                    <ContractStatusBadge status={contract.status} />
+                    {contract.signedAt && ` от ${new Date(contract.signedAt).toLocaleDateString('ru-RU')}`}
+                  </>
+                ) : canEdit ? (
+                  <button className="btn btn-sm btn-secondary" onClick={() => setContractModalOpen(true)}>
+                    <Icon name="description" size={15} style={{ marginRight: 4 }} />
+                    Оформить договор
+                  </button>
+                ) : (
+                  '—'
+                )}
+              </div>
+            </div>
+
             <DocumentsChecklist
               studentId={student.id}
               studentName={student.fullName}
@@ -485,6 +529,19 @@ export default function ApplicationDetail() {
         <CommentsFeed applicationId={app.id} canAdd={canAct} />
       </div>
       </div>
+
+      <AnimatePresence>
+        {contractModalOpen && student && (
+          <ContractFormModal
+            key="contract-create"
+            studentId={student.id}
+            applications={[{ id: app.id, fullName: app.fullName, status: app.status }]}
+            defaultApplicationId={app.id}
+            onClose={() => setContractModalOpen(false)}
+            onSaved={(c) => { setContract(c); setContractModalOpen(false); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

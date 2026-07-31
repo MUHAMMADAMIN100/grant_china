@@ -1,12 +1,62 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { applicationStats } from '../api/applications';
 import { studentStats } from '../api/students';
+import { getMyKpi, getMyPreview } from '../api/payroll';
+import type { PayrollMyKpi, PayrollPreview } from '../api/types';
 import { DIRECTION_LABEL, STATUS_LABEL } from '../api/types';
+import { useAuth } from '../store/auth';
+import { currentMonthKey } from '../utils/datetime';
+import { formatMoney, formatPercent } from '../utils/money';
 import { fadeUp, staggerContainer, listItem } from '../motion';
 import Icon from '../Icon';
 
+/**
+ * ТЗ 5.2 «интерфейс сотрудника» — компактный виджет своих KPI и предварительного
+ * итога зарплаты за текущий месяц прямо на дашборде, со ссылкой на полную
+ * страницу /my-payroll. Только СВОИ данные (userId берётся на бэкенде из JWT).
+ */
+function MyPayrollWidget() {
+  const [kpi, setKpi] = useState<PayrollMyKpi | null>(null);
+  const [preview, setPreview] = useState<PayrollPreview | null>(null);
+
+  useEffect(() => {
+    const period = currentMonthKey();
+    getMyKpi(period).then(setKpi).catch(() => {});
+    getMyPreview(period).then(setPreview).catch(() => {});
+  }, []);
+
+  if (!kpi || !preview) return null;
+
+  return (
+    <motion.div className="card" variants={fadeUp} whileHover={{ y: -3, transition: { duration: 0.2 } }}>
+      <div className="card-header">
+        <h2 className="card-title">Моя зарплата за текущий месяц</h2>
+        <Link to="/my-payroll" className="btn btn-sm btn-secondary">Подробнее</Link>
+      </div>
+      <div className="card-body">
+        <div className="receipt-dropzone-hint" style={{ marginBottom: 10 }}>
+          Предварительный расчёт — итог может измениться до утверждения руководством.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+          <div><div className="stat-label">Лиды / консультации</div><strong>{kpi.leadsProcessed} / {kpi.consultationsHeld}</strong></div>
+          <div><div className="stat-label">Конверсия в договор</div><strong>{formatPercent(kpi.conversionRate)}</strong></div>
+          <div><div className="stat-label">Своевременность оплат</div><strong>{formatPercent(kpi.timelinessRate)}</strong></div>
+          <div><div className="stat-label">Зачислено / переехало</div><strong>{kpi.enrolledCount} / {kpi.relocatedCount}</strong></div>
+        </div>
+        <div className="payments-totals">
+          <div><span>Оклад</span><strong>{formatMoney(preview.baseAmount)}</strong></div>
+          <div><span>Бонус + премия KPI</span><strong className="text-success">{formatMoney((parseFloat(preview.bonusAmount) + parseFloat(preview.kpiBonusAmount)).toFixed(2))}</strong></div>
+          <div><span>Итого (предварительно)</span><strong style={{ fontSize: 18 }}>{formatMoney(preview.totalAmount)}</strong></div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function Dashboard() {
+  const me = useAuth((s) => s.user);
   const [appStats, setAppStats] = useState<any>(null);
   const [stuStats, setStuStats] = useState<any>(null);
 
@@ -61,6 +111,8 @@ export default function Dashboard() {
           </motion.div>
         ))}
       </motion.div>
+
+      {me?.role === 'EMPLOYEE' && <MyPayrollWidget />}
 
       <motion.div
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18 }}

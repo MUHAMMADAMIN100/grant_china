@@ -609,6 +609,8 @@ export interface PaymentSummary {
   studentId: string;
   currency: string;
   enrollmentUnlocked: boolean;
+  /** Раздел 5 ТЗ (волна 6) — id действующего (SIGNED) договора студента, null если его нет. */
+  contractId: string | null;
   stages: PaymentStageSummary[];
   onSite: {
     total: string;
@@ -690,4 +692,417 @@ export interface PaymentsAnalytics {
   overdue: AnalyticsAmountCount;
   /** Не зависит от периода — сколько ещё должно прийти по всему графику (план минус уже одобренное). */
   plannedRemaining: { amount: string };
+}
+
+// ============================================================================
+// Раздел 5 ТЗ (волна 6) — договоры, KPI менеджеров, зарплата (Payroll).
+// Контракт зеркалит backend/src/contracts/ и backend/src/payroll/ — реальные
+// формы ответов смотреть там же (эти типы намеренно узкие, под то, что
+// реально отдают контроллеры, а не всю схему Prisma).
+// ============================================================================
+
+/**
+ * РЕШЕНИЕ ЗАКАЗЧИКА: договор — ОТДЕЛЬНАЯ СУЩНОСТЬ, не статус заявки.
+ * DRAFT — готовится, в KPI/зарплате не участвует. SIGNED — единственный
+ * статус, дающий конверсию и бонус менеджеру. TERMINATED/COMPLETED — конечные.
+ */
+export type ContractStatus = 'DRAFT' | 'SIGNED' | 'TERMINATED' | 'COMPLETED';
+
+export const CONTRACT_STATUS_LABEL: Record<ContractStatus, string> = {
+  DRAFT: 'Черновик',
+  SIGNED: 'Подписан',
+  TERMINATED: 'Расторгнут',
+  COMPLETED: 'Исполнен',
+};
+
+export const CONTRACT_STATUS_BADGE: Record<ContractStatus, string> = {
+  DRAFT: 'badge-gray',
+  SIGNED: 'badge-success',
+  TERMINATED: 'badge-danger',
+  COMPLETED: 'badge-info',
+};
+
+export interface ContractStudentRef {
+  id: string;
+  fullName: string;
+  managerId: string | null;
+  chinaManagerId: string | null;
+}
+
+export interface ContractApplicationRef {
+  id: string;
+  fullName: string;
+  status: ApplicationStatus;
+}
+
+export interface ContractActorRef {
+  id: string;
+  fullName: string;
+}
+
+export interface Contract {
+  id: string;
+  number: string;
+  studentId: string;
+  student: ContractStudentRef;
+  applicationId: string | null;
+  application: ContractApplicationRef | null;
+  managerId: string | null;
+  manager: ContractActorRef | null;
+  status: ContractStatus;
+  signedAt: string | null;
+  signedById: string | null;
+  signedBy: ContractActorRef | null;
+  /** 'ACTIVE' пока status=SIGNED, иначе null — справочно, бизнес-логику по нему на фронте не строим. */
+  activeSlot: string | null;
+  terminatedAt: string | null;
+  terminatedById: string | null;
+  terminatedBy: ContractActorRef | null;
+  terminationReason: string | null;
+  /** Decimal сериализован строкой — арифметику на фронте не делать. */
+  amount: string;
+  currency: string;
+  /** Веха «переезд» (ТЗ 5.1) — ставится автоматически при одобрении платежа этапа RELOCATION. */
+  relocatedAt: string | null;
+  note: string | null;
+  createdById: string | null;
+  createdBy: ContractActorRef | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Payroll (ТЗ 5.2) — зарплата менеджеров.
+// ---------------------------------------------------------------------------
+
+export type PayslipStatus = 'DRAFT' | 'APPROVED' | 'PAID' | 'VOID';
+
+export const PAYSLIP_STATUS_LABEL: Record<PayslipStatus, string> = {
+  DRAFT: 'Черновик',
+  APPROVED: 'Утверждён',
+  PAID: 'Выплачен',
+  VOID: 'Аннулирован',
+};
+
+export const PAYSLIP_STATUS_BADGE: Record<PayslipStatus, string> = {
+  DRAFT: 'badge-gray',
+  APPROVED: 'badge-info',
+  PAID: 'badge-success',
+  VOID: 'badge-danger',
+};
+
+/** ЗАКРЫТЫЙ список типов бонусов — формула ВСЕГДА выбор типа + числа, никогда текст/выражение. */
+export type BonusRuleKind =
+  | 'PERCENT_OF_CONTRACTS'
+  | 'PERCENT_OF_PAYMENTS'
+  | 'FIXED_PER_CONTRACT'
+  | 'FIXED_PER_STAGE'
+  | 'FIXED_PER_ENROLLMENT'
+  | 'FIXED_PER_RELOCATION'
+  | 'FIXED_PER_CONSULTATION'
+  | 'KPI_THRESHOLD_BONUS';
+
+export const BONUS_RULE_KIND_LABEL: Record<BonusRuleKind, string> = {
+  PERCENT_OF_CONTRACTS: '% от суммы подписанных договоров',
+  PERCENT_OF_PAYMENTS: '% от собранных платежей',
+  FIXED_PER_CONTRACT: 'Фиксированная сумма за договор',
+  FIXED_PER_STAGE: 'Фиксированная сумма за закрытый этап',
+  FIXED_PER_ENROLLMENT: 'Фиксированная сумма за зачисление',
+  FIXED_PER_RELOCATION: 'Фиксированная сумма за переезд',
+  FIXED_PER_CONSULTATION: 'Фиксированная сумма за консультацию',
+  KPI_THRESHOLD_BONUS: 'Премия за достижение порога KPI',
+};
+
+export type KpiMetric =
+  | 'LEADS_PROCESSED'
+  | 'CONSULTATIONS_HELD'
+  | 'CONTRACTS_SIGNED'
+  | 'CONVERSION_RATE'
+  | 'PAYMENT_TIMELINESS'
+  | 'DELIVERY_RATE'
+  | 'ENROLLED_COUNT'
+  | 'RELOCATED_COUNT';
+
+export const KPI_METRIC_LABEL: Record<KpiMetric, string> = {
+  LEADS_PROCESSED: 'Обработанные лиды',
+  CONSULTATIONS_HELD: 'Проведённые консультации',
+  CONTRACTS_SIGNED: 'Подписанные договоры',
+  CONVERSION_RATE: 'Конверсия в договор',
+  PAYMENT_TIMELINESS: 'Своевременность оплат',
+  DELIVERY_RATE: 'Доведение до зачисления',
+  ENROLLED_COUNT: 'Зачислено',
+  RELOCATED_COUNT: 'Переехало',
+};
+
+/** Метрики-доли (0..1) — в форме показываются и вводятся как проценты. Остальные — счётчики. */
+export const KPI_RATE_METRICS: readonly KpiMetric[] = ['CONVERSION_RATE', 'PAYMENT_TIMELINESS', 'DELIVERY_RATE'];
+
+export type BonusMetricScope = 'PERSONAL' | 'TEAM';
+
+export const BONUS_METRIC_SCOPE_LABEL: Record<BonusMetricScope, string> = {
+  PERSONAL: 'Личный показатель',
+  TEAM: 'Командный показатель',
+};
+
+export type BonusRuleScope = 'ALL' | 'USER';
+
+export const BONUS_RULE_SCOPE_LABEL: Record<BonusRuleScope, string> = {
+  ALL: 'Все сотрудники',
+  USER: 'Персонально',
+};
+
+export type BonusRuleSetStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+
+export const BONUS_RULE_SET_STATUS_LABEL: Record<BonusRuleSetStatus, string> = {
+  DRAFT: 'Черновик',
+  ACTIVE: 'Действует',
+  ARCHIVED: 'В архиве',
+};
+
+export const BONUS_RULE_SET_STATUS_BADGE: Record<BonusRuleSetStatus, string> = {
+  DRAFT: 'badge-gray',
+  ACTIVE: 'badge-success',
+  ARCHIVED: 'badge-warning',
+};
+
+/**
+ * Одно правило бонуса. rate/threshold — «сырые» доли/числа СТРОКОЙ, как их
+ * отдаёт RulesService (см. backend/src/payroll/rules.service.ts money()) —
+ * НЕ проценты. Конвертацию в проценты для формы делает сама форма правила.
+ */
+export interface BonusRule {
+  id: string;
+  ruleSetId: string;
+  kind: BonusRuleKind;
+  label: string;
+  scope: BonusRuleScope;
+  userId: string | null;
+  rate: string | null;
+  amount: string | null;
+  threshold: string | null;
+  cap: string | null;
+  stage: PaymentStage | null;
+  metric: KpiMetric | null;
+  metricScope: BonusMetricScope;
+  tierGroup: string | null;
+  enabled: boolean;
+  sortOrder: number;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface BonusRuleSet {
+  id: string;
+  version: number;
+  title: string;
+  status: BonusRuleSetStatus;
+  effectiveFrom: string;
+  createdById: string | null;
+  createdBy?: { id: string; fullName: string } | null;
+  activatedAt: string | null;
+  activatedById: string | null;
+  activatedBy?: { id: string; fullName: string } | null;
+  rules: BonusRule[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Построчная расшифровка бонуса — «правило → база → сумма», см. bonus-engine.ts BonusLine. */
+export interface BonusLine {
+  ruleId: string;
+  kind: BonusRuleKind;
+  label: string;
+  base: string;
+  amount: string;
+  bucket: 'bonus' | 'kpi';
+}
+
+export interface PayslipUserRef {
+  id: string;
+  fullName: string;
+  email: string;
+  role: Role;
+}
+
+export interface PayslipActorRef {
+  id: string;
+  fullName: string;
+}
+
+export interface Payslip {
+  id: string;
+  userId: string;
+  user: PayslipUserRef;
+  periodStart: string;
+  periodEnd: string;
+  periodKey: string;
+  revision: number;
+  activeSlot: string | null;
+  status: PayslipStatus;
+  baseAmount: string;
+  baseOverride: string | null;
+  bonusAmount: string;
+  kpiBonusAmount: string;
+  adjustmentAmount: string;
+  adjustmentReason: string | null;
+  totalAmount: string;
+  currency: string;
+  ruleSetId: string | null;
+  ruleSetVersion: number | null;
+  formulaSnapshot: unknown;
+  metricsSnapshot: unknown;
+  breakdown: BonusLine[];
+  leadsProcessed: number;
+  consultationsHeld: number;
+  contractsSigned: number;
+  enrolledCount: number;
+  relocatedCount: number;
+  /** Доли 0..1 либо null — «нет базы», НЕ ноль (см. риск 11 проекта архитектора). */
+  conversionRate: string | null;
+  timelinessRate: string | null;
+  deliveryRate: string | null;
+  needsReview: boolean;
+  calculatedAt: string | null;
+  calculatedById: string | null;
+  calculatedBy: PayslipActorRef | null;
+  approvedAt: string | null;
+  approvedById: string | null;
+  approvedBy: PayslipActorRef | null;
+  paidAt: string | null;
+  paidById: string | null;
+  paidBy: PayslipActorRef | null;
+  paidReference: string | null;
+  voidedAt: string | null;
+  voidedById: string | null;
+  voidedBy: PayslipActorRef | null;
+  voidReason: string | null;
+  replacedById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Прогресс к порогу премии (KPI_THRESHOLD_BONUS, metricScope=PERSONAL) — GET /payroll/me/kpi. */
+export interface PayrollProgressItem {
+  ruleId: string;
+  label: string;
+  metric: KpiMetric;
+  value: string | null;
+  threshold: string;
+  reached: boolean;
+  remaining: string | null;
+  reward: string | null;
+}
+
+/**
+ * Командный показатель — ОДНО число по всему отделу, БЕЗ разбивки по людям,
+ * и только если правило с этой метрикой реально влияет на премию сотрудника
+ * (см. accessModel проекта архитектора, k-анонимность). null — нет такого
+ * правила либо в отделе меньше 5 человек (сервер прячет число сам).
+ */
+export interface PayrollTeamMetric {
+  metric: KpiMetric;
+  value: string;
+  threshold: string;
+}
+
+export interface PayrollMyKpi {
+  period: string;
+  /** «Метрика ведётся с ДД.ММ.ГГГГ» — раздел 5 выкатывается без бэкфилла истории. */
+  metricsSince: string;
+  leadsProcessed: number;
+  consultationsHeld: number;
+  contractsSigned: number;
+  enrolledCount: number;
+  relocatedCount: number;
+  conversionRate: string | null;
+  timelinessRate: string | null;
+  deliveryRate: string | null;
+  progress: PayrollProgressItem[];
+  team: PayrollTeamMetric | null;
+}
+
+/** GET /payroll/me/preview — предварительный расчёт, НИЧЕГО не пишет в БД, всегда preliminary=true. */
+export interface PayrollPreview {
+  period: string;
+  preliminary: true;
+  metricsSince: string;
+  baseAmount: string;
+  bonusAmount: string;
+  kpiBonusAmount: string;
+  totalAmount: string;
+  needsReview: boolean;
+  breakdown: BonusLine[];
+  ruleSetVersion: number | null;
+}
+
+export interface PayrollMyRuleView {
+  id: string;
+  kind: BonusRuleKind;
+  label: string;
+  scope: BonusRuleScope;
+  /** Уже отформатировано на бэкенде под кабинет сотрудника: "3.00%" (не доля!). */
+  rate: string | null;
+  amount: string | null;
+  threshold: string | null;
+  cap: string | null;
+  stage: PaymentStage | null;
+  metric: KpiMetric | null;
+  metricScope: BonusMetricScope;
+  tierGroup: string | null;
+}
+
+export interface PayrollMyRules {
+  ruleSetVersion: number | null;
+  rules: PayrollMyRuleView[];
+}
+
+export interface MyCompensation {
+  baseSalary: string | null;
+  currency: string;
+}
+
+export interface PayrollAdminKpiItem {
+  userId: string;
+  fullName?: string;
+  role?: Role;
+  leadsProcessed: number;
+  consultationsHeld: number;
+  contractsSigned: number;
+  contractsAmount: string;
+  enrolledCount: number;
+  relocatedCount: number;
+  lostCount: number;
+  conversionRate: string | null;
+  timelinessRate: string | null;
+  deliveryRate: string | null;
+}
+
+export interface PayrollAdminKpi {
+  period: string;
+  metricsSince: string;
+  items: PayrollAdminKpiItem[];
+}
+
+export interface PayrollSummary {
+  period: string;
+  metricsSince: string;
+  items: Payslip[];
+  fundApproved: string;
+  fundPaid: string;
+}
+
+export interface BonusRuleSimulateItem {
+  userId: string;
+  fullName: string;
+  before: string;
+  after: string;
+  diff: string;
+}
+
+export interface BonusRuleSimulateResult {
+  period: string;
+  ruleSetVersion: number;
+  items: BonusRuleSimulateItem[];
 }

@@ -28,6 +28,8 @@ import { SchedulerModule } from './scheduler/scheduler.module';
 import { GrantsModule } from './grants/grants.module';
 import { CommentsModule } from './comments/comments.module';
 import { CallsModule } from './calls/calls.module';
+import { ContractsModule } from './contracts/contracts.module';
+import { PayrollModule } from './payroll/payroll.module';
 
 // Проблема E аудита: ServeStaticModule отдавал ВЕСЬ каталог /uploads (сканы
 // паспортов, BANK/MEDICAL справки, фото студентов) анониму без всякой
@@ -97,6 +99,8 @@ if (!UPLOADS_PROTECTED) {
     GrantsModule,
     CommentsModule,
     CallsModule,
+    ContractsModule,
+    PayrollModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

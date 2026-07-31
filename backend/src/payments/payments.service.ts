@@ -197,17 +197,50 @@ export class PaymentsService {
     return row?.dueDate ?? null;
   }
 
-  /** Гарантирует существование строк графика (5 этапов SCHEDULE) для студента — идемпотентно (upsert). */
+  /**
+   * Гарантирует существование строк графика (5 этапов SCHEDULE) для студента —
+   * идемпотентно (upsert).
+   *
+   * ЗАОДНО ПРИВЯЗЫВАЕТ ГРАФИК К ДЕЙСТВУЮЩЕМУ ДОГОВОРУ. Раньше contractId
+   * не проставлялся здесь вообще (в create его не было, а update: {} не
+   * трогал существующие строки), и метрика «своевременность сбора оплат»
+   * из ТЗ 5.1 считалась неверно: её третье слагаемое — непокрытый остаток
+   * по этапам, чей срок наступил — джойнит PaymentSchedule к Contract
+   * именно по contractId, то есть всегда получало пустой результат.
+   * Метрика молча показывала завышенную своевременность.
+   *
+   * Договор появляется ПОЗЖЕ графика (график заводится при первом открытии
+   * карточки, договор подписывают потом), поэтому привязку доливаем на
+   * каждом вызове — а он идёт на каждый показ сводки по студенту.
+   */
   private async ensureScheduleRows(studentId: string): Promise<void> {
+    const activeContract = await this.prisma.contract.findFirst({
+      where: { studentId, activeSlot: 'ACTIVE', deletedAt: null },
+      select: { id: true },
+    });
+    const contractId = activeContract?.id ?? null;
+
     await this.prisma.$transaction(
       SCHEDULE_STAGES.map((stage) =>
         this.prisma.paymentSchedule.upsert({
           where: { studentId_stage: { studentId, stage } },
           update: {},
-          create: { studentId, stage, stageOrder: STAGE_ORDER[stage] },
+          create: { studentId, stage, stageOrder: STAGE_ORDER[stage], contractId },
         }),
       ),
     );
+
+    // Доливаем привязку отдельным запросом — только там, где её ещё нет.
+    // upsert.update этого не умеет (условие «только если null» в нём не
+    // выразить), а безусловная перезапись сломала бы историю: график
+    // расторгнутого договора должен остаться при нём, а не переехать
+    // на новый.
+    if (contractId) {
+      await this.prisma.paymentSchedule.updateMany({
+        where: { studentId, contractId: null, deletedAt: null },
+        data: { contractId },
+      });
+    }
   }
 
   private async loadStudentScope(studentId: string) {
@@ -392,7 +425,7 @@ export class PaymentsService {
 
     await this.ensureScheduleRows(studentId);
 
-    const [scheduleRows, payments, sums, enrollmentUnlocked] = await Promise.all([
+    const [scheduleRows, payments, sums, enrollmentUnlocked, activeContract] = await Promise.all([
       this.prisma.paymentSchedule.findMany({ where: { studentId, deletedAt: null }, orderBy: { stageOrder: 'asc' } }),
       this.prisma.payment.findMany({
         where: { studentId, deletedAt: null },
@@ -405,6 +438,11 @@ export class PaymentsService {
         _sum: { amount: true },
       }),
       this.isEnrollmentUnlocked(studentId),
+      // Раздел 5 ТЗ (волна 6) — плашка «Договор» в карточке студента.
+      this.prisma.contract.findFirst({
+        where: { studentId, activeSlot: 'ACTIVE', deletedAt: null },
+        select: { id: true },
+      }),
     ]);
 
     const paidByStage = new Map<PaymentStage, Prisma.Decimal>();
@@ -479,6 +517,7 @@ export class PaymentsService {
       studentId,
       currency: 'TJS',
       enrollmentUnlocked,
+      contractId: activeContract?.id ?? null,
       stages,
       onSite: {
         total: this.money(onSiteTotal),
@@ -541,10 +580,21 @@ export class PaymentsService {
     const dueDate = await this.getScheduleDueDate(dto.studentId, dto.stage);
     const now = new Date();
 
+    // Раздел 5 ТЗ (волна 6): сервис САМ проставляет contractId из активного
+    // договора студента, если он есть — DTO это поле НЕ принимает (клиент не
+    // может подделать привязку). Требовать договор для создания платежа
+    // ЗАПРЕЩЕНО (см. contractModel проекта архитектора) — 197 легаси-студентов
+    // без договора продолжают вносить платежи как раньше, contractId=null.
+    const activeContract = await this.prisma.contract.findFirst({
+      where: { studentId: dto.studentId, activeSlot: 'ACTIVE', deletedAt: null },
+      select: { id: true },
+    });
+
     const created = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.create({
         data: {
           studentId: dto.studentId,
+          contractId: activeContract?.id ?? null,
           stage: dto.stage,
           stageOrder,
           kind,
@@ -863,6 +913,17 @@ export class PaymentsService {
       data: { status: 'APPROVED', approvedById: user.id, approvedAt: now },
     });
     if (result.count === 0) throw new ConflictException('Статус платежа изменился, обновите страницу');
+
+    // Раздел 5 ТЗ (волна 6) — веха «ПЕРЕЕЗД» (Contract.relocatedAt, метрика
+    // ТЗ 5.1). Деньги за переезд — доказательство переезда. Claim-апдейт
+    // (WHERE relocatedAt: null) — ставится один раз, необратимо: последующий
+    // VOID этого платежа её НЕ обнуляет (см. schema.prisma, комментарий к полю).
+    if (payment.stage === 'RELOCATION' && payment.contractId) {
+      await this.prisma.contract.updateMany({
+        where: { id: payment.contractId, relocatedAt: null },
+        data: { relocatedAt: now },
+      });
+    }
 
     this.activity
       .log({

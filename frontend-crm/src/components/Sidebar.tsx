@@ -38,13 +38,22 @@ export default function Sidebar() {
     { to: '/consultations', icon: 'record_voice_over', label: 'Консультации' },
     { to: '/students', icon: 'school', label: 'Студенты' },
     { to: '/finance', icon: 'payments', label: 'Финансы', badge: isPriv ? pendingCount : 0 },
+    // Раздел 5 ТЗ (волна 6) — договоры, доступны всем ролям (видимость
+    // своих/чужих режется внутри ContractsService, как /finance).
+    { to: '/contracts', icon: 'description', label: 'Договоры' },
     { to: '/programs', icon: 'menu_book', label: 'Программы' },
     { to: '/tasks', icon: 'task_alt', label: 'Задачи' },
-    // FOUNDER + ADMIN видят финансовую аналитику, активность и список
-    // пользователей. На странице /users редактирование доступно только
-    // FOUNDER (бэк проверяет). ТЗ 2.6: аналитика — тоже только руководству.
+    // ТЗ 5.2 «интерфейс сотрудника» — своя зарплата и KPI, доступна ВСЕМ
+    // ролям. Пункта «Ведомость» здесь нет намеренно — менеджер не должен
+    // видеть чужую зарплату даже в виде пункта меню.
+    { to: '/my-payroll', icon: 'account_balance_wallet', label: 'Моя зарплата' },
+    // FOUNDER + ADMIN видят финансовую аналитику, активность, зарплатную
+    // ведомость и список пользователей. На странице /users редактирование
+    // доступно только FOUNDER (бэк проверяет). ТЗ 2.6: аналитика — тоже
+    // только руководству.
     ...(isPrivileged(user?.role) ? [
       { to: '/analytics', icon: 'insights', label: 'Аналитика' },
+      { to: '/payroll', icon: 'payroll', label: 'Зарплаты' },
       { to: '/activity', icon: 'history', label: 'Активность' },
       { to: '/users', icon: 'group', label: 'Пользователи' },
     ] : []),

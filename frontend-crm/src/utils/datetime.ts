@@ -42,6 +42,16 @@ export function toPeriodRange(
   };
 }
 
+/**
+ * Раздел 5 ТЗ (волна 6) — 'YYYY-MM' для <input type="month"> и параметра
+ * period в /payroll/*. Локальное время браузера — достаточно для дефолта
+ * фильтра, точные границы периода считает бэкенд (payroll/period.ts, UTC+5).
+ */
+export function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 /** Человекочитаемые дата+время (ru-RU) — для бейджей и подсказок. */
 export function formatDateTimeRu(iso: string | null | undefined): string {
   if (!iso) return '—';

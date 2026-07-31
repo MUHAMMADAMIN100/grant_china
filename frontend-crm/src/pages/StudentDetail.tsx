@@ -15,6 +15,7 @@ import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
 import DirectionOptions from '../components/DirectionOptions';
 import BackButton from '../components/BackButton';
 import GrantCard from '../components/GrantCard';
+import ContractCard from '../components/ContractCard';
 import CommentsFeed from '../components/CommentsFeed';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
@@ -460,6 +461,14 @@ export default function StudentDetail() {
           applicationForm={student.applicationForm}
           onChange={reload}
           editable={canEdit}
+        />
+
+        {/* Раздел 5 ТЗ (волна 6) — договор рядом с блоком платежей: график
+            платежей (PaymentsSection) привязывается именно к нему. */}
+        <ContractCard
+          studentId={student.id}
+          applications={(student.applications || []).map((a) => ({ id: a.id, fullName: a.fullName, status: a.status }))}
+          canEdit={canEdit}
         />
 
         <div style={{ marginTop: 28 }}>

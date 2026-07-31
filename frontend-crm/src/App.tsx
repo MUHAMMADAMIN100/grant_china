@@ -17,6 +17,11 @@ import Programs from './pages/Programs';
 import Activity from './pages/Activity';
 import Payments from './pages/Payments';
 import Analytics from './pages/Analytics';
+import Contracts from './pages/Contracts';
+import ContractDetail from './pages/ContractDetail';
+import MyPayroll from './pages/MyPayroll';
+import Payroll from './pages/Payroll';
+import PayrollRules from './pages/PayrollRules';
 
 export default function App() {
   const init = useAuth((s) => s.init);
@@ -52,6 +57,14 @@ export default function App() {
             одобрения) режется внутри самой страницы по роли, как /dashboard
             и /students. Отдельный ProtectedRoute roles не нужен. */}
         <Route path="/finance" element={<Payments />} />
+        {/* Раздел 5 ТЗ (волна 6) — договоры. РЕШЕНИЕ ЗАКАЗЧИКА: отдельная
+            сущность. Видимость (свои/все) режется внутри ContractsService,
+            как /finance и /consultations — отдельный ProtectedRoute не нужен. */}
+        <Route path="/contracts" element={<Contracts />} />
+        <Route path="/contracts/:id" element={<ContractDetail />} />
+        {/* ТЗ 5.2 «интерфейс сотрудника» — доступна всем ролям, каждый видит
+            СТРОГО свои KPI и свой расчётный лист (userId только из JWT). */}
+        <Route path="/my-payroll" element={<MyPayroll />} />
         {/* /users, /activity и /analytics — только FOUNDER и ADMIN (БАГ 3
             аудита: раньше роутинг это не проверял, доступ ограничивался лишь
             скрытием пункта меню, что не мешало прямому переходу по URL).
@@ -77,6 +90,25 @@ export default function App() {
           element={
             <ProtectedRoute roles={['FOUNDER', 'ADMIN']}>
               <Analytics />
+            </ProtectedRoute>
+          }
+        />
+        {/* ТЗ 5.2 «интерфейс руководства» — сводная ведомость, утверждение
+            начислений, фиксация выплат, формулы бонусов. Кнопки действий
+            дополнительно сужены до FOUNDER внутри страниц (см. Payroll.tsx). */}
+        <Route
+          path="/payroll"
+          element={
+            <ProtectedRoute roles={['FOUNDER', 'ADMIN']}>
+              <Payroll />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/payroll/rules"
+          element={
+            <ProtectedRoute roles={['FOUNDER', 'ADMIN']}>
+              <PayrollRules />
             </ProtectedRoute>
           }
         />

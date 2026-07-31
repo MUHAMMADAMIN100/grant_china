@@ -87,6 +87,26 @@ model User {
   comments      Comment[]      @relation("CommentAuthor")
   calls         Call[]         @relation("CallUser")
 
+  // Раздел 5 ТЗ (волна 6) — договоры, KPI, зарплата. Скалярных полей у User
+  // НЕ появляется намеренно: в проекте есть prisma.user.findFirst({ where })
+  // без select — любой новый скаляр User разъехался бы по коду сам собой.
+  contracts            Contract[]             @relation("ContractManager")
+  signedContracts      Contract[]             @relation("ContractSignedBy")
+  terminatedContracts  Contract[]             @relation("ContractTerminatedBy")
+  createdContracts     Contract[]             @relation("ContractCreatedBy")
+  touchedApplications  Application[]          @relation("ApplicationFirstTouchBy")
+  enrolledApplications Application[]          @relation("ApplicationEnrolledBy")
+  compensations        EmployeeCompensation[] @relation("CompensationEmployee")
+  setCompensations     EmployeeCompensation[] @relation("CompensationCreatedBy")
+  createdRuleSets      BonusRuleSet[]         @relation("BonusRuleSetCreatedBy")
+  activatedRuleSets    BonusRuleSet[]         @relation("BonusRuleSetActivatedBy")
+  personalBonusRules   BonusRule[]            @relation("BonusRuleUser")
+  payslips             Payslip[]              @relation("PayslipUser")
+  calculatedPayslips   Payslip[]              @relation("PayslipCalculatedBy")
+  approvedPayslips     Payslip[]              @relation("PayslipApprovedBy")
+  paidPayslips         Payslip[]              @relation("PayslipPaidBy")
+  voidedPayslips       Payslip[]              @relation("PayslipVoidedBy")
+
   @@index([deletedAt])
 }
 
@@ -178,6 +198,36 @@ model Application {
   comments Comment[]
   calls    Call[]
 
+  // Раздел 5 ТЗ (волна 6) — договоры, заключённые по этой заявке.
+  contracts Contract[]
+
+  // ВЕХА «ЛИД ОБРАБОТАН» (метрика ТЗ 5.1). Денормализованные поля, а не
+  // вычисление из ActivityLog: журнал НЕ содержит applicationId (STATUS_CHANGE
+  // пишет только studentId, а у заявки без студента он null), парсинг
+  // details-строки хрупок, а индекса под такой запрос там нет вовсе.
+  // Тот же приём, что Payment.stageOrder и StudentGrant.nextYearStartsAt.
+  // Ставятся РОВНО ОДИН РАЗ claim-апдейтом (паттерн B из job.contract.ts):
+  //   updateMany({ where: { id, firstTouchAt: null }, data: { ... } })
+  // Триггеры: первый уход статуса из NEW, архивация с причиной, привязка
+  // первой консультации. АТРИБУЦИЯ: managerId заявки ?? id действующего
+  // пользователя — заслуга у закреплённого менеджера, а не у администратора,
+  // который нажал кнопку за него. Снимок, а не чтение managerId на лету:
+  // переназначение в октябре не имеет права переписать сентябрьский KPI.
+  // 229 исторических заявок остаются с null — бэкфилла НЕТ намеренно
+  // (тот же довод, что у Application.source: выдуманный факт испортит ровно
+  // ту метрику, ради которой поле заводится). Метрика ведётся с даты выката.
+  firstTouchAt   DateTime?
+  firstTouchById String?
+  firstTouchBy   User?     @relation("ApplicationFirstTouchBy", fields: [firstTouchById], references: [id], onDelete: SetNull)
+
+  // ВЕХА «ЗАЧИСЛЕН» (метрика ТЗ 5.1 «доведение до зачисления»). Тот же
+  // claim-апдейт. НЕОБРАТИМА: откат статуса назад её не обнуляет — иначе
+  // мартовский KPI переписался бы задним числом апрельским откатом.
+  // Повторное зачисление после отката второго факта не создаёт (поле занято).
+  enrolledAt   DateTime?
+  enrolledById String?
+  enrolledBy   User?     @relation("ApplicationEnrolledBy", fields: [enrolledById], references: [id], onDelete: SetNull)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -205,6 +255,13 @@ model Application {
   @@index([phoneNormalized])
   // Цепочка обращений одного человека + вкладка «Ранее зарегистрированные».
   @@index([repeatOfId])
+  // Раздел 5 ТЗ (волна 6): «обработанные лиды менеджера за период» —
+  // count целиком из индекса.
+  @@index([deletedAt, firstTouchById, firstTouchAt])
+  // «Доведено до зачисления за период».
+  @@index([deletedAt, enrolledById, enrolledAt])
+  // «Потеряно за период» (архив без зачисления) — знаменатель deliveryRate.
+  @@index([deletedAt, managerId, archivedAt])
 }
 
 model Student {
@@ -244,6 +301,10 @@ model Student {
   comments Comment[]
   calls    Call[]
 
+  // Раздел 5 ТЗ (волна 6) — договоры студента. Связь, а не скаляр — в
+  // /student-auth/me не утечёт (там include с явным перечислением).
+  contracts Contract[]
+
   @@index([direction])
   @@index([cabinet])
   @@index([status])
@@ -282,12 +343,19 @@ model Document {
   // остаться под правами студента, а не исчезнуть.
   paymentId    String?
   payment      Payment?  @relation("PaymentReceipts", fields: [paymentId], references: [id], onDelete: SetNull)
+  // Скан подписанного договора (волна 6). Тот же приём, что paymentId: документ
+  // привязан и к студенту (studentId — отсюда бесплатная защита /uploads
+  // через files/file-resolver.service.ts), и к договору. SetNull — файл
+  // обязан пережить любые операции над договором.
+  contractId   String?
+  contract     Contract? @relation("ContractDocuments", fields: [contractId], references: [id], onDelete: SetNull)
   createdAt    DateTime  @default(now())
   deletedAt    DateTime?
 
   @@index([studentId, type])
   @@index([deletedAt])
   @@index([paymentId])
+  @@index([contractId])
 }
 
 model Task {
@@ -488,6 +556,13 @@ model Payment {
   // Волна 6 (Contract) добавит сюда relation. Сейчас — «голый» nullable-скаляр:
   // так волна 6 навесит связь одним ALTER TABLE ADD CONSTRAINT, без миграции данных.
   contractId String?
+  // Волна 6 навешивает связь на уже существующий «голый» скаляр: db push
+  // делает один ALTER TABLE ADD CONSTRAINT, миграции данных нет — во всех
+  // строках contractId сейчас NULL (в коде нет ни одной записи этого поля),
+  // поэтому FK валидируется мгновенно и ни одна строка его не нарушает.
+  // Restrict (не SetNull): платёж, потерявший договор, молча выпадает из
+  // зарплатной атрибуции — это тихая порча денежного отчёта.
+  contract   Contract? @relation("ContractPayments", fields: [contractId], references: [id], onDelete: Restrict)
 
   stage      PaymentStage
   // Денормализация ради сортировки/группировки в отчётах: ORDER BY stageOrder
@@ -577,6 +652,10 @@ model Payment {
   @@index([createdById])
   // Волна 6: платежи по договору.
   @@index([contractId])
+  // KPI «своевременность»: JOIN Contract → Payment по contractId с фильтром
+  // status='APPROVED' и range по paidAt. Существующий @@index([contractId])
+  // НЕ удаляем (db push сделал бы реальный DROP INDEX, а выигрыш нулевой).
+  @@index([contractId, status, paidAt])
 }
 
 // ПЛАН по этапу: индивидуальные суммы и сроки договора. Отдельная сущность,
@@ -595,6 +674,7 @@ model PaymentSchedule {
   student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
 
   contractId String?
+  contract   Contract? @relation("ContractSchedule", fields: [contractId], references: [id], onDelete: Restrict)
 
   stage      PaymentStage
   stageOrder Int          @default(0)
@@ -1084,4 +1164,449 @@ model Call {
   @@index([phoneNormalized])
   // Общий журнал звонков за период.
   @@index([deletedAt, startedAt(sort: Desc)])
+}
+
+// =====================================================================
+// РАЗДЕЛ 5 ТЗ (волна 6): договоры, KPI менеджеров, зарплата.
+// Всё ниже — НОВЫЕ таблицы: CREATE TABLE/CREATE TYPE не трогает ни одной
+// живой строки, риск `prisma db push --accept-data-loss` нулевой.
+// =====================================================================
+
+// Состояние ДОГОВОРА. Отдельный статус, а НЕ «есть запись = подписан»:
+//  1) договор готовится ДО подписания (согласуются суммы этапов, уже надо
+//     заполнить PaymentSchedule) — это DRAFT, и он не должен попадать
+//     ни в конверсию, ни в бонус;
+//  2) расторжение: правило проекта №1 запрещает удалять — значит нужно
+//     СОСТОЯНИЕ, а не отсутствие строки;
+//  3) у подписания обязана быть ДАТА, а дату из факта существования строки
+//     не вывести (createdAt — это «когда завели в CRM», а не «когда подписали»).
+enum ContractStatus {
+  DRAFT // готовится; в KPI и зарплате НЕ участвует
+  SIGNED // подписан — единственное состояние, дающее конверсию и бонус
+  TERMINATED // расторгнут (возврат бонуса — через Payslip.adjustmentAmount, не пересчётом)
+  COMPLETED // исполнен: все этапы оплачены, студент уехал
+}
+
+model Contract {
+  id String @id @default(uuid())
+
+  // Человекочитаемый номер («ДГ-2026-0042»), генерирует сервис. @unique —
+  // номер договора уникален в делопроизводстве, дубль = юридическая проблема.
+  number String @unique
+
+  // Договор всегда заключается с УЖЕ заведённым студентом: Payment.studentId
+  // NOT NULL, PaymentSchedule @@unique([studentId, stage]) — без карточки
+  // студента графику платежей не на чем держаться.
+  // Restrict — как у Payment.student: финансовый документ не должен беззвучно
+  // исчезнуть при гипотетическом физическом удалении студента.
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  // Заявка-источник — ТОЛЬКО для атрибуции конверсии «лид → договор».
+  // НЕ @unique намеренно: расторгли и подписали заново по той же заявке —
+  // это два договора. Двойной счёт в CR снимается COUNT(DISTINCT "applicationId").
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  // ОТВЕТСТВЕННЫЙ ЗА ДОГОВОР — тот, кому пойдёт бонус. ОТДЕЛЬНОЕ поле, а не
+  // чтение student.managerId на лету: если студента переназначат в октябре,
+  // бонус за сентябрьский договор не имеет права переехать другому человеку.
+  // Заполняется при создании из manager заявки/студента; после SIGNED меняется
+  // только Основателем и только с записью в ActivityLog.
+  // Restrict, а не SetNull (в отличие от Application.manager): договор без
+  // ответственного молча ломает всю зарплатную атрибуцию. Физического удаления
+  // User в проекте нет (только soft-delete), увольнению это не мешает.
+  managerId String?
+  manager   User?   @relation("ContractManager", fields: [managerId], references: [id], onDelete: Restrict)
+
+  status ContractStatus @default(DRAFT)
+
+  // МОМЕНТ «ПОДПИСАН». Инвариант держит сервис (CHECK в Prisma не выражается):
+  // status = SIGNED ⟺ signedAt IS NOT NULL ⟺ activeSlot = 'ACTIVE'.
+  // Отдельная дата, а не createdAt: менеджер вносит вчерашний договор сегодня —
+  // та же причина, по которой есть Payment.paidAt и Consultation.heldAt.
+  // ВСЕ метрики раздела 5 считаются по signedAt.
+  signedAt   DateTime?
+  signedById String?
+  signedBy   User?     @relation("ContractSignedBy", fields: [signedById], references: [id], onDelete: SetNull)
+
+  // ГАРАНТИЯ БД «не больше одного ДЕЙСТВУЮЩЕГО договора у студента».
+  // Приём с NULL'ами уже узаконен в проекте (Task.originKey, Call.provider+externalId):
+  // NULL'ы в уникальном индексе Postgres между собой не конфликтуют, поэтому
+  // черновиков и расторгнутых может быть сколько угодно, а SIGNED — ровно один.
+  // Зачем: PaymentSchedule уникален по [studentId, stage], график платежей
+  // физически ОДИН на студента. Два «действующих» договора молча разделили бы
+  // деньги одного графика между двумя менеджерами и двумя бонусами.
+  // 'ACTIVE' пока status = SIGNED, иначе null. Ставится той же updateMany, что и статус.
+  activeSlot String?
+
+  terminatedAt      DateTime?
+  terminatedById    String?
+  terminatedBy      User?     @relation("ContractTerminatedBy", fields: [terminatedById], references: [id], onDelete: SetNull)
+  terminationReason String?
+
+  // Сумма ПО БУМАГЕ. Отдельно от суммы этапов (PaymentSchedule): в договоре
+  // может стоять договорная цифра со скидкой, а разбивка по этапам —
+  // операционная. Расхождение показываем в UI, но не «чиним» автоматически.
+  amount   Decimal @default(0) @db.Decimal(12, 2)
+  currency String  @default("TJS")
+
+  // ВЕХА «ПЕРЕЕЗД» (метрика ТЗ 5.1 «доведение до этапа переезда»).
+  // Живёт на договоре, а НЕ на Student: любое новое СКАЛЯРНОЕ поле Student
+  // автоматически уезжает студенту в /student-auth/me (там include, а не
+  // select — прямо задокументировано у StudentGrant). Contract в кабинет
+  // студента не отдаётся вовсе.
+  // Ставится ОДИН РАЗ claim-апдейтом (updateMany where { id, relocatedAt: null })
+  // при одобрении платежа этапа RELOCATION. Необратима: откат статуса или VOID
+  // платежа её НЕ обнуляют — «дошёл хотя бы раз» это факт истории.
+  relocatedAt DateTime?
+
+  note String?
+
+  createdById String?
+  createdBy   User?   @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  payments  Payment[]         @relation("ContractPayments")
+  schedule  PaymentSchedule[] @relation("ContractSchedule")
+  documents Document[]        @relation("ContractDocuments")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([studentId, activeSlot])
+  @@index([studentId, deletedAt])
+  // ГЛАВНЫЙ индекс KPI: «договоры менеджера, подписанные в периоде» —
+  // числитель конверсии и база бонусов PERCENT_OF_CONTRACTS / FIXED_PER_CONTRACT.
+  // deletedAt зафиксирован IS NULL, managerId — равенство, signedAt — range.
+  @@index([deletedAt, managerId, signedAt])
+  // «Доведён до переезда за период» — метрика ТЗ 5.1 и FIXED_PER_RELOCATION.
+  @@index([deletedAt, managerId, relocatedAt])
+  // Реестр договоров руководства: WHERE deletedAt IS NULL [AND status] ORDER BY signedAt DESC.
+  @@index([deletedAt, status, signedAt(sort: Desc)])
+  // Атрибуция конверсии: договор по заявке-источнику.
+  @@index([applicationId])
+}
+
+// ОКЛАД — ОТДЕЛЬНАЯ ТАБЛИЦА С ИСТОРИЕЙ, а не поле в User. Три причины:
+//  1) оклад меняется во времени. Поле в User хранит только «сейчас» —
+//     пересчёт марта после апрельского повышения выдал бы новую сумму;
+//  2) УТЕЧКА: в проекте есть запросы вида prisma.user.findFirst({ where })
+//     БЕЗ select (consultations.service.resolveManagerId, tasks.service) —
+//     они тянут ВСЕ скаляры User. Сегодня туда попадает только password
+//     (наружу не отдаётся), завтра туда же попал бы оклад, и одна неосторожная
+//     отдача объекта наружу раскрыла бы зарплаты всем;
+//  3) отдельная таблица = отдельная граница доступа (@Roles(FOUNDER)) и
+//     собственный аудит, а не «ещё одно поле в общей модели».
+// effectiveTo НЕТ намеренно: он выводится из следующей записи, а два
+// источника истины про один факт разъезжаются (тот же довод, что у
+// StudentGrant — «флаг и число»).
+model EmployeeCompensation {
+  id String @id @default(uuid())
+
+  userId String
+  // Restrict — денежный документ: ставка не должна исчезнуть вместе с
+  // гипотетическим физическим удалением сотрудника.
+  user   User   @relation("CompensationEmployee", fields: [userId], references: [id], onDelete: Restrict)
+
+  baseSalary Decimal @db.Decimal(12, 2)
+  currency   String  @default("TJS")
+
+  // ДАТА начала действия. Семантика — календарная дата (сервис приводит к
+  // 00:00 по Душанбе, APP_TZ_OFFSET_MINUTES из scheduler/time.ts).
+  // ПРАВИЛО ВЫБОРА СТАВКИ НА ПЕРИОД: последняя запись с
+  // effectiveFrom <= periodStart. Повышение «с середины месяца» оформляется
+  // первым числом следующего — пропорционального расчёта в системе НЕТ
+  // намеренно (одноразовый случай закрывается Payslip.baseOverride).
+  effectiveFrom DateTime
+
+  note String?
+
+  createdById String?
+  createdBy   User?   @relation("CompensationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Две ставки одному человеку с одной датой — всегда ошибка ввода, ловим в БД.
+  @@unique([userId, effectiveFrom])
+  // «Действующая ставка на дату»: WHERE userId=? AND effectiveFrom <= ?
+  // ORDER BY effectiveFrom DESC LIMIT 1 — сортировка берётся из индекса.
+  @@index([userId, effectiveFrom(sort: Desc)])
+  @@index([deletedAt])
+}
+
+// ВЕРСИЯ набора правил бонусов. Изменение формул = создание НОВОЙ версии,
+// НИКОГДА не UPDATE действующей: иначе правка в середине месяца молча
+// переписала бы уже посчитанные начисления всем сразу.
+enum BonusRuleSetStatus {
+  DRAFT // готовится/симулируется, в расчёте не участвует
+  ACTIVE // применяется к периодам с effectiveFrom и далее
+  ARCHIVED // вытеснена более новой версией
+}
+
+model BonusRuleSet {
+  id String @id @default(uuid())
+
+  // Номер версии для человека («v3»), ставит сервис = max+1. @unique, чтобы
+  // в разговоре «посчитано по v3» значило ровно одно.
+  version Int    @unique
+  title   String
+
+  status BonusRuleSetStatus @default(DRAFT)
+
+  // Первый день месяца, с которого версия применяется. ВЫБОР ВЕРСИИ ДЛЯ
+  // ПЕРИОДА: последняя ACTIVE с effectiveFrom <= periodStart. Поэтому набор,
+  // активированный в середине месяца «со следующего», физически не может
+  // повлиять на текущий расчёт.
+  effectiveFrom DateTime
+
+  createdById   String?
+  createdBy     User?     @relation("BonusRuleSetCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  activatedAt   DateTime?
+  activatedById String?
+  activatedBy   User?     @relation("BonusRuleSetActivatedBy", fields: [activatedById], references: [id], onDelete: SetNull)
+
+  rules BonusRule[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // «Какая версия действует на дату» — один индексный скан.
+  @@index([deletedAt, status, effectiveFrom(sort: Desc)])
+}
+
+// ТИПЫ БОНУСОВ. КАЖДЫЙ — ЗАКРЫТАЯ СТРУКТУРА С ЧИСЛОВЫМИ ПАРАМЕТРАМИ.
+// НИКАКИХ строк, интерпретируемых как код: движок — обычный switch по kind
+// в payroll/bonus-engine.ts. eval/new Function/vm/шаблонизаторы ЗАПРЕЩЕНЫ
+// (это прямой RCE от лица администратора).
+enum BonusRuleKind {
+  PERCENT_OF_CONTRACTS // rate × Σ Contract.amount подписанных за период
+  PERCENT_OF_PAYMENTS // rate × Σ APPROVED-платежей по договорам менеджера [× фильтр stage]
+  FIXED_PER_CONTRACT // amount × количество подписанных договоров
+  FIXED_PER_STAGE // amount × количество этапов (stage), полностью закрытых за период
+  FIXED_PER_ENROLLMENT // amount × количество доведённых до зачисления
+  FIXED_PER_RELOCATION // amount × количество доведённых до переезда
+  FIXED_PER_CONSULTATION // amount × количество проведённых консультаций
+  KPI_THRESHOLD_BONUS // премия, если metric >= threshold: amount ЛИБО rate × оклад
+}
+
+// Метрика для KPI_THRESHOLD_BONUS. Значения = ровно те, что считает
+// payroll/kpi.service.ts. Расширяется append'ом без миграции данных.
+enum KpiMetric {
+  LEADS_PROCESSED
+  CONSULTATIONS_HELD
+  CONTRACTS_SIGNED
+  CONVERSION_RATE // доля 0..1
+  PAYMENT_TIMELINESS // доля 0..1
+  DELIVERY_RATE // доля 0..1
+  ENROLLED_COUNT
+  RELOCATED_COUNT
+}
+
+// ТЗ 5.1 требует «индивидуальные И командные показатели»: порог проверяется
+// либо по личной метрике сотрудника, либо по метрике всего отдела за период.
+enum BonusMetricScope {
+  PERSONAL
+  TEAM
+}
+
+// Кому правило адресовано: всем (командное правило) или конкретному человеку
+// (персональная надбавка). Правила СУММИРУЮТСЯ, персональное не «перекрывает»
+// общее — так поведение остаётся предсказуемым без приоритетов и наследования.
+enum BonusRuleScope {
+  ALL
+  USER
+}
+
+// ОДНО ПРАВИЛО = ОДНА СТРОКА С ТИПИЗИРОВАННЫМИ ЧИСЛОВЫМИ КОЛОНКАМИ.
+// Осознанный отказ от «одна Json-колонка с конфигом»: Json не проверяется БД,
+// не индексируется, а diff между версиями по нему нечитаем — а именно diff
+// («что изменилось в формулах») Основателю и нужен. Json в проекте
+// используется ТОЛЬКО как СНИМОК в Payslip (архив), никогда как источник
+// конфигурации.
+model BonusRule {
+  id String @id @default(uuid())
+
+  ruleSetId String
+  ruleSet   BonusRuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
+
+  kind  BonusRuleKind
+  // Подпись строки в расшифровке расчётного листа («3% от суммы договоров»).
+  label String
+
+  scope  BonusRuleScope @default(ALL)
+  // Заполнено только при scope = USER. Инвариант держит сервис.
+  userId String?
+  user   User?          @relation("BonusRuleUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  // ── Числовые параметры. Все Decimal, НИКОГДА Float (правило проекта №7). ──
+  // Доля, а не проценты: 0.0300 = 3%. UI показывает и принимает %, конвертирует
+  // на фронте. Валидация 0..1 в DTO — «процент 300%» не должен доехать до БД.
+  rate      Decimal? @db.Decimal(6, 4)
+  // Фиксированная сумма в TJS (ставка за этап/договор/консультацию либо премия).
+  amount    Decimal? @db.Decimal(12, 2)
+  // Порог для KPI_THRESHOLD_BONUS. Одна колонка на счётчики (0..10000) и
+  // на доли (0..1), поэтому 12,4.
+  threshold Decimal? @db.Decimal(12, 4)
+  // ОБЯЗАТЕЛЬНЫЙ предохранитель от опечатки в проценте: потолок вклада ОДНОГО
+  // правила в один расчётный лист. Сервис требует его для всех PERCENT_*.
+  cap       Decimal? @db.Decimal(12, 2)
+
+  // Для FIXED_PER_STAGE обязателен, для PERCENT_OF_PAYMENTS — необязательный
+  // фильтр («3% только с этапа 1»). Переиспользуем существующий enum.
+  stage PaymentStage?
+
+  // Для KPI_THRESHOLD_BONUS.
+  metric      KpiMetric?
+  metricScope BonusMetricScope @default(PERSONAL)
+  // Ступенчатая шкала БЕЗ отдельного типа правила и без кода в данных:
+  // правила с одинаковым tierGroup конкурируют, применяется РОВНО ОДНО —
+  // с наибольшим пройденным threshold. Пример: 60% → 200, 80% → 500, 95% → 1000.
+  tierGroup   String?
+
+  enabled   Boolean @default(true)
+  sortOrder Int     @default(0)
+  note      String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Загрузка набора целиком в порядке отображения/расчёта.
+  @@index([ruleSetId, deletedAt, sortOrder])
+  @@index([userId])
+}
+
+// Жизненный цикл расчётного листа. Зеркалит PaymentStatus волны 1:
+// после фиксации выплаты правится ТОЛЬКО сторнированием (VOID), не редактированием.
+enum PayslipStatus {
+  DRAFT // считается и пересчитывается; сотруднику НЕ показывается
+  APPROVED // начисление утверждено, состав заморожен
+  PAID // выплата зафиксирована, лист полностью иммутабелен
+  VOID // аннулирован; в суммах не учитывается, из БД не исчезает
+}
+
+model Payslip {
+  id String @id @default(uuid())
+
+  userId String
+  // Restrict — расчётный лист это денежный документ, он обязан пережить
+  // любые операции над карточкой сотрудника (та же семантика, что Payment.student).
+  user   User   @relation("PayslipUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  // Границы периода в UTC, ЯВНО сохранённые. Считаются один раз из локального
+  // месяца Душанбе (scheduler/time.ts). Хранятся, а не выводятся из periodKey:
+  // если завтра поменяется APP_TZ_OFFSET_MINUTES, пересчёт старого листа не
+  // должен молча захватить другой набор платежей. Полуинтервал [start, end).
+  periodStart DateTime
+  periodEnd   DateTime
+  // 'YYYY-MM' — человекочитаемый ключ периода, он же участвует в @@unique.
+  periodKey   String
+
+  // Номер ревизии. Нужен из-за сторнирования: аннулированный лист остаётся
+  // в БД, а исправленный выпускается за ТОТ ЖЕ период — без revision
+  // @@unique([userId, periodKey]) сделал бы исправление невозможным.
+  revision   Int     @default(1)
+  // 'ACTIVE' пока status != VOID, иначе null. Даёт БД-гарантию
+  // «не больше одного НЕ аннулированного листа на сотрудника за месяц»,
+  // то есть физическую невозможность выплатить дважды за один период.
+  activeSlot String?
+
+  status PayslipStatus @default(DRAFT)
+
+  // ── Суммы. Все Decimal(12,2), TJS. ──
+  // Оклад периода (снимок EmployeeCompensation на periodStart).
+  baseAmount       Decimal  @default(0) @db.Decimal(12, 2)
+  // Ручная замена оклада в ЭТОМ листе (сотрудник отработал полмесяца, разовая
+  // договорённость). Заполняется только Основателем и только вместе с причиной.
+  baseOverride     Decimal? @db.Decimal(12, 2)
+  // Бонусная часть: PERCENT_* + FIXED_* правила.
+  bonusAmount      Decimal  @default(0) @db.Decimal(12, 2)
+  // Премия за KPI — ОТДЕЛЬНОЕ поле: ТЗ 5.2 различает «бонусную часть» и
+  // «премию за выполнение KPI», в ведомости это разные колонки.
+  kpiBonusAmount   Decimal  @default(0) @db.Decimal(12, 2)
+  // Ручная корректировка. МОЖЕТ БЫТЬ ОТРИЦАТЕЛЬНОЙ: возврат бонуса за
+  // расторгнутый договор делается здесь, а НЕ пересчётом прошлого периода.
+  adjustmentAmount Decimal  @default(0) @db.Decimal(12, 2)
+  adjustmentReason String?
+  // Хранится, а не вычисляется на лету: выплаченный документ обязан показывать
+  // одну и ту же цифру навсегда, даже если завтра поменяется порядок округления.
+  totalAmount      Decimal  @default(0) @db.Decimal(12, 2)
+  currency         String   @default("TJS")
+
+  // ── СНИМКИ. Ради них модуль и существует. ──
+  // Версия правил, по которой посчитано (для отчёта «все листы по v3»).
+  ruleSetId       String?
+  ruleSetVersion  Int?
+  // ПОЛНАЯ копия применённых правил и их параметров. Дублирует ruleSetId
+  // НАМЕРЕННО: даже если версию soft-удалят или связь потеряется, лист
+  // остаётся самодостаточным документом. Json здесь — АРХИВ, не конфигурация:
+  // расчёт его никогда не читает.
+  formulaSnapshot Json
+  // Все посчитанные метрики периода целиком (включая промежуточные суммы).
+  metricsSnapshot Json
+  // Построчная расшифровка «правило → база → сумма» — ровно то, что видит
+  // сотрудник. Хранится, потому что восстановить её пересчётом уже нельзя.
+  breakdown       Json
+
+  // ── Денормализованные метрики для СОРТИРОВКИ ведомости. ──
+  // Сортировать ведомость по конверсии, читая jsonb, = seq scan + cast;
+  // тот же приём, что Payment.stageOrder.
+  leadsProcessed    Int      @default(0)
+  consultationsHeld Int      @default(0)
+  contractsSigned   Int      @default(0)
+  enrolledCount     Int      @default(0)
+  relocatedCount    Int      @default(0)
+  // null = «нет базы» (знаменатель 0), это НЕ ноль: новый сотрудник без лидов
+  // не должен считаться провалившим KPI.
+  conversionRate    Decimal? @db.Decimal(6, 4)
+  timelinessRate    Decimal? @db.Decimal(6, 4)
+  deliveryRate      Decimal? @db.Decimal(6, 4)
+
+  // Итог выбился за предохранитель (например > 3× оклада) — лист создаётся,
+  // но помечается, и UI показывает Основателю красный баннер. Защита от
+  // опечатки в проценте, которая иначе всплыла бы уже после выплаты.
+  needsReview Boolean @default(false)
+
+  calculatedAt   DateTime?
+  calculatedById String?
+  calculatedBy   User?     @relation("PayslipCalculatedBy", fields: [calculatedById], references: [id], onDelete: SetNull)
+
+  approvedAt   DateTime?
+  approvedById String?
+  approvedBy   User?     @relation("PayslipApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  // Фиксация выплаты. paidAt НИКОГДА не обнуляется, даже при последующем
+  // VOID — иначе теряется дата проведения для аудита (точно как Payment.approvedAt).
+  paidAt        DateTime?
+  paidById      String?
+  paidBy        User?     @relation("PayslipPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  paidReference String?
+
+  voidedAt   DateTime?
+  voidedById String?
+  voidedBy   User?     @relation("PayslipVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidReason String?
+
+  // Сторно-цепочка: какой лист заменил этот и какой этот заменяет.
+  replacedById String?   @unique
+  replacedBy   Payslip?  @relation("PayslipReissue", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces     Payslip[] @relation("PayslipReissue")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Идемпотентность генератора: повторный прогон джобы падает с P2002 и
+  // молча считается skipped (паттерн A из scheduler/job.contract.ts).
+  @@unique([userId, periodKey, revision])
+  // «Не больше одного живого листа на период» — гарантия против двойной выплаты.
+  @@unique([userId, periodKey, activeSlot])
+  // Кабинет сотрудника: WHERE userId=? AND deletedAt IS NULL ORDER BY periodStart DESC.
+  @@index([userId, deletedAt, periodStart(sort: Desc)])
+  // Ведомость за период: WHERE periodKey=? AND deletedAt IS NULL [AND status].
+  @@index([deletedAt, periodKey, status])
 }

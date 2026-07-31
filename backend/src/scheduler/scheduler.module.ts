@@ -7,8 +7,10 @@ import { SCHEDULED_JOBS } from './job.contract';
 import { FollowUpReminderJob } from './jobs/follow-up-reminder.job';
 import { ApplicationAutoArchiveJob } from './jobs/application-auto-archive.job';
 import { AcademicYearReminderJob } from './jobs/academic-year-reminder.job';
+import { PayrollPeriodCloseJob } from './jobs/payroll-period-close.job';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksModule } from '../tasks/tasks.module';
+import { PayrollModule } from '../payroll/payroll.module';
 
 @Module({
   imports: [
@@ -21,6 +23,9 @@ import { TasksModule } from '../tasks/tasks.module';
     // ИСКЛЮЧИТЕЛЬНО через TasksService.createSystemTask(), прямой доступ к
     // prisma.task из джобы запрещён архитектурой (единая точка идемпотентности).
     TasksModule,
+    // Раздел 5 ТЗ (волна 6) — PayrollPeriodCloseJob генерирует листы через
+    // PayslipsService (экспортирован из PayrollModule), минуя HTTP-слой.
+    PayrollModule,
   ],
   controllers: [SchedulerController],
   providers: [
@@ -29,15 +34,21 @@ import { TasksModule } from '../tasks/tasks.module';
     FollowUpReminderJob,
     ApplicationAutoArchiveJob,
     AcademicYearReminderJob,
+    PayrollPeriodCloseJob,
     // Мульти-провайдер: оркестратор (scheduler.service.ts) получает список
-    // джоб через DI и не знает о них поимённо. AcademicYearReminderJob стоит
-    // ПОСЛЕДНЕЙ в массиве намеренно (риск 1 проекта архитектора): если в ней
-    // когда-нибудь появится баг, напоминания о звонках и авто-архив заявок
-    // (обе идут раньше) всё равно успеют отработать в этом тике.
+    // джоб через DI и не знает о них поимённо. Новые джобы дописываются в
+    // КОНЕЦ массива намеренно (риск 1 проекта архитектора): если в одной из
+    // них когда-нибудь появится баг, более ранние джобы (звонки, авто-архив,
+    // учебный год) всё равно успеют отработать в этом тике.
     {
       provide: SCHEDULED_JOBS,
-      useFactory: (a: FollowUpReminderJob, b: ApplicationAutoArchiveJob, c: AcademicYearReminderJob) => [a, b, c],
-      inject: [FollowUpReminderJob, ApplicationAutoArchiveJob, AcademicYearReminderJob],
+      useFactory: (
+        a: FollowUpReminderJob,
+        b: ApplicationAutoArchiveJob,
+        c: AcademicYearReminderJob,
+        d: PayrollPeriodCloseJob,
+      ) => [a, b, c, d],
+      inject: [FollowUpReminderJob, ApplicationAutoArchiveJob, AcademicYearReminderJob, PayrollPeriodCloseJob],
     },
   ],
 })

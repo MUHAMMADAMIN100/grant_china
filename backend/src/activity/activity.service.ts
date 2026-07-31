@@ -75,7 +75,33 @@ export type ActivityAction =
   | 'GRANT_CREATE'
   | 'GRANT_UPDATE'
   | 'GRANT_YEAR_ADVANCE'
-  | 'GRANT_CLOSE';
+  | 'GRANT_CLOSE'
+  // Раздел 5 ТЗ (волна 6) — договоры (contracts.service.ts). Кадровое/финансовое
+  // событие, studentId ЕСТЬ (у контракта всегда есть studentId) — попадает
+  // в фильтр видимости EMPLOYEE (см. list() ниже) как активность его студента.
+  | 'CONTRACT_CREATE'
+  | 'CONTRACT_SIGN'
+  | 'CONTRACT_TERMINATE'
+  | 'CONTRACT_UPDATE'
+  // Раздел 5 ТЗ (волна 6) — зарплата и формулы бонусов (payroll/). ВСЕ пишутся
+  // со studentId: null намеренно — это кадровые/финансовые события, а не
+  // события карточки студента; фильтр видимости EMPLOYEE (см. list() ниже:
+  // OR по actorId и studentId своих студентов) их менеджеру не покажет —
+  // рядовой сотрудник не должен узнавать чужой оклад/бонус из журнала.
+  | 'PAYROLL_GENERATE'
+  | 'PAYROLL_RECALC'
+  | 'PAYROLL_ADJUST'
+  | 'PAYROLL_APPROVE'
+  | 'PAYROLL_RECALL'
+  | 'PAYROLL_PAY'
+  | 'PAYROLL_VOID'
+  | 'PAYROLL_REISSUE'
+  | 'PAYROLL_DRAFT_DELETE'
+  | 'PAYROLL_RULESET_CREATE'
+  | 'PAYROLL_RULESET_ACTIVATE'
+  | 'PAYROLL_RULESET_ARCHIVE'
+  // ТЗ 2.8 — кадровые ведомости (compensation.service.ts).
+  | 'COMPENSATION_SET';
 
 @Injectable()
 export class ActivityService {

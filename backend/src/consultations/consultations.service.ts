@@ -15,6 +15,7 @@ import { canAccessStudentRecord } from '../common/access';
 import { normalizePhone } from '../common/phone';
 import { normalizeSource } from '../common/lead-source';
 import { findRepeatOfId } from '../common/application-repeat';
+import { claimFirstTouch } from '../common/lead-touch';
 import { CreateConsultationDto } from './dto/create-consultation.dto';
 import { UpdateConsultationDto } from './dto/update-consultation.dto';
 
@@ -88,9 +89,17 @@ export class ConsultationsService {
     return this.prisma.consultation.findUniqueOrThrow({ where: { id }, include: CONSULTATION_INCLUDE });
   }
 
-  /** IDOR-защита: связать консультацию можно только с заявкой, к которой есть доступ (иначе 404, не 403). */
-  private async validateApplicationLink(applicationId: string | undefined, user: CurrentUser): Promise<void> {
-    if (!applicationId) return;
+  /**
+   * IDOR-защита: связать консультацию можно только с заявкой, к которой есть
+   * доступ (иначе 404, не 403). Возвращает саму заявку (не void) — раздел 5
+   * ТЗ (волна 6) использует managerId отсюда для claimFirstTouch(), чтобы не
+   * делать вторую выборку той же строки.
+   */
+  private async validateApplicationLink(
+    applicationId: string | undefined,
+    user: CurrentUser,
+  ): Promise<{ id: string; managerId: string | null } | null> {
+    if (!applicationId) return null;
     const app = await this.prisma.application.findFirst({
       where: { id: applicationId, deletedAt: null },
       select: { id: true, managerId: true, chinaManagerId: true },
@@ -98,6 +107,7 @@ export class ConsultationsService {
     if (!app || !canAccessStudentRecord(app, user)) {
       throw new NotFoundException('Заявка не найдена');
     }
+    return app;
   }
 
   private async validateStudentLink(studentId: string | undefined, user: CurrentUser): Promise<void> {
@@ -225,7 +235,7 @@ export class ConsultationsService {
    */
   async create(dto: CreateConsultationDto, user: CurrentUser) {
     const managerId = await this.resolveManagerId(dto.managerId, user.id, user);
-    await this.validateApplicationLink(dto.applicationId, user);
+    const linkedApplication = await this.validateApplicationLink(dto.applicationId, user);
     await this.validateStudentLink(dto.studentId, user);
 
     const phone = dto.phone.trim();
@@ -262,6 +272,13 @@ export class ConsultationsService {
       });
     }
 
+    // Раздел 5 ТЗ (волна 6) — метрика KPI «обработанный лид» (ТЗ 5.1):
+    // «привязка первой консультации к заявке» — фиксация консультации
+    // сразу со ссылкой на существующую заявку считается касанием.
+    if (linkedApplication) {
+      await claimFirstTouch(this.prisma, linkedApplication.id, linkedApplication.managerId, user.id);
+    }
+
     this.activity
       .log({
         actorId: user.id,
@@ -290,7 +307,8 @@ export class ConsultationsService {
     const existing = await this.loadForMutation(id, user);
     const managerId = await this.resolveManagerId(dto.managerId, existing.managerId ?? user.id, user);
 
-    if (dto.applicationId !== undefined) await this.validateApplicationLink(dto.applicationId || undefined, user);
+    let linkedApplication: { id: string; managerId: string | null } | null = null;
+    if (dto.applicationId !== undefined) linkedApplication = await this.validateApplicationLink(dto.applicationId || undefined, user);
     if (dto.studentId !== undefined) await this.validateStudentLink(dto.studentId || undefined, user);
 
     const data: Prisma.ConsultationUncheckedUpdateInput = {};
@@ -329,6 +347,10 @@ export class ConsultationsService {
     }
 
     await this.prisma.consultation.update({ where: { id }, data });
+    // Раздел 5 ТЗ (волна 6) — «привязка первой консультации к заявке» (см. create()).
+    if (linkedApplication) {
+      await claimFirstTouch(this.prisma, linkedApplication.id, linkedApplication.managerId, user.id);
+    }
     let updated = await this.refetch(id);
 
     // ТЗ 3.2 + риск 9 проекта архитектора: перенос/отмена повторного звонка

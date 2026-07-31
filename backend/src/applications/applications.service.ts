@@ -18,6 +18,7 @@ import { FileResolverService } from '../files/file-resolver.service';
 import { normalizePhone } from '../common/phone';
 import { normalizeSource } from '../common/lead-source';
 import { findRepeatOfId } from '../common/application-repeat';
+import { claimEnrolled, claimFirstTouch } from '../common/lead-touch';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
@@ -501,6 +502,11 @@ export class ApplicationsService implements OnModuleInit {
     const existing = await this.findOne(id);
     this.ensureCanEdit(existing, user);
 
+    // Раздел 5 ТЗ (волна 6) — метрика KPI «обработанный лид» (ТЗ 5.1):
+    // «первый уход статуса из NEW» — ЛЮБАЯ смена статуса, уводящая заявку
+    // с NEW, а не только конкретный переход на DOCS_REVIEW ниже.
+    const leavingNew = dto.status !== undefined && dto.status !== existing.status && existing.status === ApplicationStatus.NEW;
+
     // Ручная правка телефона обязана держать phoneNormalized (ключ поиска
     // повторных обращений) в актуальном состоянии — иначе денормализованная
     // колонка тихо разъедется с исходным полем после первого же PATCH.
@@ -549,6 +555,9 @@ export class ApplicationsService implements OnModuleInit {
         data: { ...updateData, ...(studentId ? { studentId } : {}) },
         include: MANAGER_INCLUDE,
       });
+      if (leavingNew) {
+        await claimFirstTouch(this.prisma, updated.id, updated.managerId, user.id);
+      }
       // Проблема B аудита: раньше сюда летел весь `updated` с MANAGER_INCLUDE
       // (паспортные данные, дата рождения, phones, email вложенного student) —
       // ВСЕМ сотрудникам в комнате staff. Теперь только id + маршрутизация
@@ -591,6 +600,15 @@ export class ApplicationsService implements OnModuleInit {
       data: updateData,
       include: MANAGER_INCLUDE,
     });
+    if (leavingNew) {
+      await claimFirstTouch(this.prisma, updated.id, updated.managerId, user.id);
+    }
+    // Раздел 5 ТЗ (волна 6) — метрика KPI «доведён до зачисления» (ТЗ 5.1).
+    // НЕОБРАТИМА: claimEnrolled ставится claim-апдейтом (WHERE enrolledAt: null),
+    // откат статуса назад её не обнуляет — «дошёл хотя бы раз» это факт истории.
+    if (dto.status && dto.status !== existing.status && (updated.status === 'ENROLLED' || updated.status === 'COMPLETED')) {
+      await claimEnrolled(this.prisma, updated.id, updated.managerId, user.id);
+    }
     // Проблема B аудита: было {application: updated} с полными данными
     // студента ВСЕМ сотрудникам — теперь id + маршрутизация по реальным
     // менеджерам заявки, студент получает то же событие в свой канал
@@ -747,6 +765,10 @@ export class ApplicationsService implements OnModuleInit {
       },
       include: MANAGER_INCLUDE,
     });
+    // Раздел 5 ТЗ (волна 6) — «архивация с ручной причиной» тоже считается
+    // обработкой лида (ТЗ 5.1): отказ — это отработанный лид, а не забытый.
+    // ТОЛЬКО ручной архив (эта функция), НЕ авто-архив джобы — см. common/lead-touch.ts.
+    await claimFirstTouch(this.prisma, updated.id, updated.managerId, user.id);
     this.activity
       .log({
         actorId: user.id,

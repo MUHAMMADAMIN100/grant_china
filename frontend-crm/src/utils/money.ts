@@ -25,3 +25,16 @@ export function formatAmount(value: string | number | null | undefined): string 
 export function formatMoney(value: string | number | null | undefined): string {
   return `${formatAmount(value)} сомони`;
 }
+
+/**
+ * Раздел 5 ТЗ (волна 6) — доля 0..1 (Decimal-строка "0.0523") -> "5.23%".
+ * null означает «нет базы для расчёта» (например 0 обработанных лидов),
+ * а НЕ 0% — показываем прочерк, чтобы не выглядело как провал KPI
+ * (см. риск 11 проекта архитектора).
+ */
+export function formatPercent(value: string | null | undefined, digits = 1): string {
+  if (value === null || value === undefined) return '—';
+  const num = parseFloat(value);
+  if (!Number.isFinite(num)) return '—';
+  return `${(num * 100).toFixed(digits)}%`;
+}

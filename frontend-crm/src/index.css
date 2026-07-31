@@ -2161,3 +2161,44 @@ select.input-error {
 }
 .comment-icon-btn:hover { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
 .role-legend-desc { font-size: 12.5px; color: var(--text-soft); line-height: 1.5; }
+
+/* Раздел 5 ТЗ (волна 6) — договоры, KPI менеджеров, зарплата (Payroll). */
+
+/* Связь строки графика платежей с договором студента (ContractCard/ContractDetail). */
+.contract-linkage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-soft);
+  margin-top: 8px;
+}
+.contract-linkage .material-symbols-rounded { color: var(--primary); font-size: 15px; }
+
+/* «ПРЕДВАРИТЕЛЬНО» — предупреждение о том, что расчёт зарплаты ещё не
+   утверждён руководством (ТЗ 5.2). Явно отличается от error-banner цветом,
+   чтобы не читаться как ошибка. */
+.payroll-preview-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--warning-soft);
+  color: #92610a;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 10px;
+}
+.payroll-preview-banner .material-symbols-rounded { color: var(--warning); flex-shrink: 0; }
+
+/* Полная расшифровка расчётного листа (PayslipDetailModal) и реестр окладов
+   (CompensationPanel) — шире обычного диалога, там таблицы. */
+.payroll-detail-card { max-width: 640px; text-align: left; max-height: 86vh; overflow-y: auto; }
+
+/* Строка ведомости, чей итог вышел за предохранитель (needsReview) —
+   тот же приём, что подсветка просроченных платежей. Специфичность
+   поднята до уровня .table tbody tr:hover, иначе наведение мышью её перебивало. */
+.table tbody tr.payroll-row-review,
+.table tbody tr.payroll-row-review:hover { background: var(--danger-soft); }
