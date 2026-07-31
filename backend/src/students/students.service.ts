@@ -10,6 +10,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
+import { REQUIRED_DOCUMENT_TYPES } from '../common/documents';
 import { assertNotReceiptDocument } from '../payments/payment-rules';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
@@ -64,6 +65,14 @@ const STUDENT_LIST_SELECT = {
     select: { id: true, status: true, createdAt: true },
   },
 } as const;
+
+// Раздел 6.3 ТЗ (волна 4): человекочитаемые подписи для DOCUMENT_UPLOAD/
+// DOCUMENT_DELETE в журнале активности. Не экспортируется — узкий локальный
+// справочник, единственный источник значений остаётся common/documents.ts.
+const DOCUMENT_TYPE_LABEL: Record<string, string> = {
+  ...Object.fromEntries(REQUIRED_DOCUMENT_TYPES.map((d) => [d.type, d.label])),
+  OTHER: 'Другое',
+};
 
 type CurrentUser = { id: string; role: Role };
 
@@ -246,6 +255,15 @@ export class StudentsService {
     /** Фильтр по этапу — либо ApplicationStatus последней заявки,
      *  либо специальный StudentStatus (PAUSED/GRADUATED/ARCHIVED). */
     stage?: string;
+    /**
+     * Раздел 4 ТЗ (волна 4) — реестр «двойных грантов» прямо в общем списке:
+     * 'multi' — есть незакрытый грант с totalYears > 1 (собственно «двойной»
+     * грант); 'any' — есть хоть какой-то незакрытый грант (в т.ч. разовый);
+     * 'none' — грантов нет вовсе. Без фильтра (undefined) условие не
+     * применяется — 197 существующих студентов без единой строки в реестре
+     * не должны внезапно пропасть из списка.
+     */
+    grant?: 'multi' | 'any' | 'none';
     /** Серверная пагинация. Если не передано — возвращаем всё (бэк-совместимость). */
     page?: number;
     pageSize?: number;
@@ -304,6 +322,17 @@ export class StudentsService {
           },
         });
       }
+    }
+    // Раздел 4 ТЗ (волна 4) — переиспользуем ЭТОТ ЖЕ where-билдер вместо
+    // отдельного метода: реестр грантов живёт в GrantsService (grants/), но
+    // общий список студентов тоже должен уметь отфильтровать «у кого есть
+    // двойной грант» без похода на отдельный экран.
+    if (filters.grant === 'multi') {
+      and.push({ grants: { some: { deletedAt: null, totalYears: { gt: 1 } } } });
+    } else if (filters.grant === 'any') {
+      and.push({ grants: { some: { deletedAt: null } } });
+    } else if (filters.grant === 'none') {
+      and.push({ grants: { none: { deletedAt: null } } });
     }
     if (and.length) where.AND = and;
 
@@ -551,6 +580,25 @@ export class StudentsService {
     // где авторизация уже проверена.
     this.realtime.emitForStudent(existing, 'document:uploaded', { studentId, docId: doc.id }, { studentId });
     this.realtime.emitForStudent(existing, 'student:updated', { studentId }, { studentId });
+
+    // Раздел 6.3 ТЗ (волна 4): загрузка документа студента раньше не
+    // логировалась вообще (в отличие от чеков платежей). Загрузка из личного
+    // кабинета студента (student-auth.controller.ts) идёт СВОИМ путём, минуя
+    // этот метод — здесь `user` всегда присутствует (единственный вызывающий
+    // код — students.controller.ts, за JwtAuthGuard).
+    if (user) {
+      this.activity
+        .log({
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'DOCUMENT_UPLOAD',
+          studentId,
+          studentName: existing.fullName,
+          details: `Загружен документ: ${DOCUMENT_TYPE_LABEL[type] ?? type}`,
+        })
+        .catch(() => undefined);
+    }
+
     return doc;
   }
 
@@ -559,8 +607,8 @@ export class StudentsService {
       where: { id: documentId, deletedAt: null },
       // chinaManagerId обязателен в select — без него ensureCanEdit ниже
       // сравнивал бы с undefined, и китайский менеджер не мог бы удалить
-      // документ своего же студента.
-      include: { student: { select: { managerId: true, chinaManagerId: true } } },
+      // документ своего же студента. fullName — только для ActivityLog (волна 4).
+      include: { student: { select: { managerId: true, chinaManagerId: true, fullName: true } } },
     });
     if (!doc) throw new NotFoundException('Документ не найден');
     // ПОРЯДОК ПРОВЕРОК ВАЖЕН: сначала права на студента, потом бизнес-инвариант.
@@ -589,6 +637,18 @@ export class StudentsService {
     if (studentId && doc.student) {
       this.realtime.emitForStudent(doc.student, 'document:deleted', { studentId, docId: documentId }, { studentId });
       this.realtime.emitForStudent(doc.student, 'student:updated', { studentId }, { studentId });
+      // Раздел 6.3 ТЗ (волна 4): раньше удаление документа студента не
+      // логировалось вообще (в отличие от удаления чека платежа).
+      this.activity
+        .log({
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'DOCUMENT_DELETE',
+          studentId,
+          studentName: doc.student.fullName,
+          details: `Удалён документ: ${DOCUMENT_TYPE_LABEL[doc.type] ?? doc.type}`,
+        })
+        .catch(() => undefined);
     }
     return { ok: true };
   }

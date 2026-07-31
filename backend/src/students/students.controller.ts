@@ -83,6 +83,11 @@ export class StudentsController {
     @Query('mine') mine?: string,
     @Query('manager') manager?: string,
     @Query('stage') stage?: string,
+    // Раздел 4 ТЗ (волна 4) — опциональный фильтр реестра «двойных грантов»
+    // прямо в общем списке студентов: 'multi' | 'any' | 'none'. По умолчанию
+    // не применяется (undefined) — колонка/фильтр не показывается, пока
+    // пользователь явно его не выберет.
+    @Query('grant') grant?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -96,6 +101,7 @@ export class StudentsController {
       currentUserId: user?.id,
       currentUserRole: user?.role,
       stage: stage || undefined,
+      grant: grant === 'multi' || grant === 'any' || grant === 'none' ? grant : undefined,
       page: parsePage(page),
       pageSize: parsePageSize(pageSize),
     });

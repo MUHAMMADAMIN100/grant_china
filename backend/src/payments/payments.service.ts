@@ -590,6 +590,23 @@ export class PaymentsService {
         details: `${STAGE_LABEL[dto.stage]}: ${this.money(amount)} TJS (${PURPOSE_LABEL[dto.purpose]})${submit ? ' — отправлен на одобрение' : ''}`,
       })
       .catch(() => undefined);
+    // Раздел 6.3 ТЗ (волна 4): раньше чек, приложенный ПРИ СОЗДАНИИ платежа
+    // (основной сценарий), не логировался отдельно вообще — PAYMENT_CREATE
+    // не упоминал о нём ни словом, а «прикрепление чеков» как событие ленты
+    // было невозможно отфильтровать. Второй, отдельный лог — не замена
+    // PAYMENT_CREATE, а именно СОБЫТИЕ «прикреплён чек».
+    if (file) {
+      this.activity
+        .log({
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'PAYMENT_RECEIPT_ADD',
+          studentId: dto.studentId,
+          studentName: student.fullName,
+          details: 'Прикреплён чек к новому платежу',
+        })
+        .catch(() => undefined);
+    }
     this.realtime.emitForStudent(student, 'payment:created', { studentId: dto.studentId, paymentId: created.id }, { studentId: dto.studentId });
 
     if (submit) {
@@ -1012,7 +1029,9 @@ export class PaymentsService {
       .log({
         actorId: user.id,
         actorRole: user.role,
-        action: 'PAYMENT_UPDATE',
+        // Раздел 6.3 ТЗ (волна 4): было PAYMENT_UPDATE — «прикрепление чеков»
+        // было неотличимо от правки суммы/назначения платежа в фильтре ленты.
+        action: 'PAYMENT_RECEIPT_ADD',
         studentId: payment.studentId,
         studentName: payment.student.fullName,
         details: 'Добавлен чек к платежу',
@@ -1076,7 +1095,8 @@ export class PaymentsService {
       .log({
         actorId: user.id,
         actorRole: user.role,
-        action: 'PAYMENT_UPDATE',
+        // Раздел 6.3 ТЗ (волна 4): было PAYMENT_UPDATE — та же причина, что у addReceipt().
+        action: 'PAYMENT_RECEIPT_REMOVE',
         studentId: payment.studentId,
         studentName: payment.student.fullName,
         details: 'Удалён чек платежа',

@@ -45,10 +45,37 @@ export type ActivityAction =
   | 'CONSULTATION_DELETE'
   | 'CONSULTATION_CONVERT'
   // Системная (авто-созданная) задача — TasksService.createSystemTask().
-  // Единая точка входа для ВСЕХ автозадач: сейчас это консультации (ТЗ 3.2),
-  // волна 4 добавит сюда же напоминания о начале учебного года — оба случая
+  // Единая точка входа для ВСЕХ автозадач: сейчас это консультации (ТЗ 3.2)
+  // и напоминания о начале учебного года (раздел 4, волна 4) — оба случая
   // логируются этим же action без правок в местах вызова.
-  | 'TASK_AUTO_CREATE';
+  | 'TASK_AUTO_CREATE'
+  // Раздел 6.3 ТЗ (волна 4) — ручное создание задачи (в отличие от
+  // TASK_AUTO_CREATE выше). Пишется из tasks.service.ts create().
+  | 'TASK_CREATE'
+  // Раздел 6.3 ТЗ — «прикрепление чеков» как ОТДЕЛЬНОЕ событие ленты (раньше
+  // размазано по PAYMENT_UPDATE — было невозможно отфильтровать в UI).
+  // Пишутся из payments.service.ts create()/addReceipt()/removeReceipt().
+  | 'PAYMENT_RECEIPT_ADD'
+  | 'PAYMENT_RECEIPT_REMOVE'
+  // Раздел 6.3 ТЗ — загрузка/удаление обычного документа студента (паспорт,
+  // диплом и т.п., не чек). Пишутся из students.service.ts addDocument()/removeDocument().
+  | 'DOCUMENT_UPLOAD'
+  | 'DOCUMENT_DELETE'
+  // Раздел 6.3 ТЗ — текстовые комментарии как события ленты (новая модель
+  // Comment, отдельная от Student.comment/Application.comment). Пишутся из
+  // comments.service.ts.
+  | 'COMMENT_CREATE'
+  | 'COMMENT_UPDATE'
+  | 'COMMENT_DELETE'
+  // Раздел 6.3 ТЗ — заготовка под IP-телефонию (волна 7). Тип события заведён
+  // сейчас, вызовов пока нет (новая модель Call, записей в волне 4 не создаётся).
+  | 'CALL_LOGGED'
+  // Раздел 4 ТЗ (волна 4) — реестр студентов с «двойным грантом». Пишутся из
+  // grants.service.ts.
+  | 'GRANT_CREATE'
+  | 'GRANT_UPDATE'
+  | 'GRANT_YEAR_ADVANCE'
+  | 'GRANT_CLOSE';
 
 @Injectable()
 export class ActivityService {

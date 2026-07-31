@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listStudents, listStudentsPaged } from '../api/students';
 import { listUsers } from '../api/users';
+import { listGrants, ordinalShortRu } from '../api/grants';
 import type { Direction, Student, User } from '../api/types';
 import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_STATUS_BADGE, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
@@ -15,6 +16,12 @@ import Icon from '../Icon';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 
 const PAGE_SIZE = 10;
+
+const GRANT_FILTER_LABEL: Record<'multi' | 'any' | 'none', string> = {
+  multi: 'Двойной грант',
+  any: 'Есть грант',
+  none: 'Без гранта',
+};
 
 export default function Students() {
   const navigate = useNavigate();
@@ -32,6 +39,10 @@ export default function Students() {
       cabinet: '',
       manager: '',
       scope: isAdmin ? 'all' : 'mine',
+      // Раздел 4 ТЗ (волна 4) — реестр «двойных грантов» как фильтр общего
+      // списка студентов, а не отдельный экран. По умолчанию выключен —
+      // данных о грантах на старте почти нет, лишний параметр в URL не нужен.
+      grant: '',
       page: '1',
     }),
     [isAdmin],
@@ -43,6 +54,7 @@ export default function Students() {
   const cabinet = filters.cabinet;
   const manager = filters.manager;
   const scope = filters.scope as 'all' | 'mine';
+  const grant = filters.grant as 'multi' | 'any' | 'none' | '';
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
 
   const [items, setItems] = useState<Student[]>([]);
@@ -72,6 +84,7 @@ export default function Students() {
       mine: scope === 'mine',
       manager: manager || undefined,
       stage: stageFilter || undefined,
+      grant: grant || undefined,
       page,
       pageSize: PAGE_SIZE,
     })
@@ -86,7 +99,7 @@ export default function Students() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, direction, cabinet, scope, manager, stageFilter, page]);
+  }, [search, direction, cabinet, scope, manager, stageFilter, grant, page]);
 
   // При перезагрузке после realtime/удаления — если страница перешла
   // за пределы (например, удалили последнего на странице), сдвигаемся
@@ -105,7 +118,7 @@ export default function Students() {
   // При смене любого фильтра сбрасываем страницу на 1 — атомарно через
   // setFilters, иначе два setFilter подряд гонятся (второй перетирает первый).
   const onFilterChange = (
-    key: 'search' | 'direction' | 'stageFilter' | 'cabinet' | 'manager' | 'scope',
+    key: 'search' | 'direction' | 'stageFilter' | 'cabinet' | 'manager' | 'scope' | 'grant',
     value: string,
   ) => {
     setFilters({ [key]: value, page: '1' });
@@ -143,6 +156,7 @@ export default function Students() {
       const u = users.find((x) => x.id === manager);
       parts.push(`Менеджер: ${u?.fullName || manager}`);
     }
+    if (grant) parts.push(`Грант: ${GRANT_FILTER_LABEL[grant]}`);
     return parts.join(' · ');
   };
 
@@ -155,6 +169,9 @@ export default function Students() {
     try {
       // Для отчёта надо ВСЕ студенты по фильтру, не одна страница.
       // Дёргаем listStudents без page/pageSize → бэкенд вернёт массив.
+      // grant передаётся тем же значением, что и в списке — реестр Multi-Grant
+      // (фильтр «Двойной грант») выгружается в отчёт автоматически, без
+      // отдельной кнопки/экрана.
       const all = await listStudents({
         search: search || undefined,
         direction: direction || undefined,
@@ -162,16 +179,56 @@ export default function Students() {
         mine: scope === 'mine',
         manager: manager || undefined,
         stage: stageFilter || undefined,
+        grant: grant || undefined,
       });
       await generateStudentsReport({
         students: all,
         filterSummary: buildFilterSummary(),
+        grantByStudentId: await buildGrantColumn(all.map((s) => s.id)),
       });
       toast(`Отчёт сгенерирован (${all.length} студентов)`, 'success');
     } catch (e: any) {
       toast(e?.message || 'Ошибка генерации отчёта', 'error');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Раздел 4 ТЗ — колонка «Грант» в Word-отчёте. GET /students не отдаёт
+  // связь grants (чтобы новое поле случайно не утекло студенту в личный
+  // кабинет через include, см. решение архитектора), поэтому для отчёта
+  // делаем дополнительный запрос в /grants и строим карту studentId → подпись.
+  // multiOnly: false — в отчёт должен попасть любой грант, не только «двойной».
+  //
+  // Идём ПО ВСЕМ СТРАНИЦАМ. Бэкенд режет pageSize максимумом 100, и один
+  // запрос молча обрезал бы карту: у студентов с 101-го гранта в колонке
+  // стояло бы «—», неотличимое от честного «гранта нет». Отчёт, который
+  // врёт без единой ошибки, хуже отчёта, который не собрался.
+  const GRANTS_PAGE_SIZE = 100;
+  // Страховка от бесконечного цикла, если бэкенд однажды начнёт врать про total.
+  const MAX_GRANT_PAGES = 50;
+
+  const buildGrantColumn = async (studentIds: string[]): Promise<Record<string, string>> => {
+    if (studentIds.length === 0) return {};
+    const idSet = new Set(studentIds);
+    const map: Record<string, string> = {};
+    try {
+      let page = 1;
+      let total = Infinity;
+      while ((page - 1) * GRANTS_PAGE_SIZE < total && page <= MAX_GRANT_PAGES) {
+        const res = await listGrants({ multiOnly: false, page, pageSize: GRANTS_PAGE_SIZE });
+        total = res.total;
+        for (const g of res.items) {
+          if (!idSet.has(g.studentId) || map[g.studentId]) continue;
+          map[g.studentId] = `${ordinalShortRu(g.currentYear)} из ${g.totalYears}`;
+        }
+        if (res.items.length === 0) break;
+        page += 1;
+      }
+      return map;
+    } catch {
+      // Частично собранная карта лучше пустой: то, что успели, попадёт в отчёт.
+      return map;
     }
   };
 
@@ -269,6 +326,16 @@ export default function Students() {
               ))}
             </select>
           )}
+          <select
+            value={grant}
+            onChange={(e) => onFilterChange('grant', e.target.value)}
+            title="Реестр «двойных грантов» (раздел 4 ТЗ)"
+          >
+            <option value="">Любой грант</option>
+            <option value="multi">Двойной грант (2+ года)</option>
+            <option value="any">Есть грант</option>
+            <option value="none">Без гранта</option>
+          </select>
         </div>
 
         <AnimatePresence mode="wait">

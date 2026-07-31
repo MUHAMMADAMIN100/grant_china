@@ -25,6 +25,9 @@ import { ActivityModule } from './activity/activity.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
+import { GrantsModule } from './grants/grants.module';
+import { CommentsModule } from './comments/comments.module';
+import { CallsModule } from './calls/calls.module';
 
 // Проблема E аудита: ServeStaticModule отдавал ВЕСЬ каталог /uploads (сканы
 // паспортов, BANK/MEDICAL справки, фото студентов) анониму без всякой
@@ -91,6 +94,9 @@ if (!UPLOADS_PROTECTED) {
     PaymentsModule,
     ConsultationsModule,
     SchedulerModule,
+    GrantsModule,
+    CommentsModule,
+    CallsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -82,6 +82,11 @@ model User {
   heldConsultations    Consultation[] @relation("ConsultationManager")
   createdConsultations Consultation[] @relation("ConsultationCreatedBy")
 
+  // Волна 4: реестр грантов, комментарии, звонки.
+  createdGrants StudentGrant[] @relation("StudentGrantCreatedBy")
+  comments      Comment[]      @relation("CommentAuthor")
+  calls         Call[]         @relation("CallUser")
+
   @@index([deletedAt])
 }
 
@@ -162,12 +167,16 @@ model Application {
   // группируются одним индексным запросом, без рекурсии по цепочке.
   // Это ПОДСКАЗКА, а не склейка личностей: ничего не копируется, студент не
   // привязывается, менеджер сбрасывает флаг в null одной кнопкой.
-  repeatOfId String?
-  repeatOf   Application?  @relation("ApplicationRepeat", fields: [repeatOfId], references: [id], onDelete: SetNull)
-  repeats    Application[] @relation("ApplicationRepeat")
+  repeatOfId      String?
+  repeatOf        Application?  @relation("ApplicationRepeat", fields: [repeatOfId], references: [id], onDelete: SetNull)
+  repeats         Application[] @relation("ApplicationRepeat")
 
   // ТЗ 3.2 — таймлайн консультаций в карточке заявки.
   consultations Consultation[]
+
+  // ТЗ 6.3 (волна 4) — лента комментариев и звонков в карточке заявки.
+  comments Comment[]
+  calls    Call[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -226,6 +235,14 @@ model Student {
   paymentSchedule PaymentSchedule[]
   // Раздел 3.2 ТЗ — таймлайн консультаций/собеседований в карточке студента.
   consultations   Consultation[]
+
+  // ТЗ 4 (волна 4) — реестр «двойных грантов». Скалярных полей у Student НЕ
+  // появляется намеренно: они автоматически уехали бы студенту в
+  // /student-auth/me (student-auth.service.ts:129 читает через include).
+  grants   StudentGrant[]
+  // ТЗ 6.3 (волна 4) — лента комментариев и звонков в карточке студента.
+  comments Comment[]
+  calls    Call[]
 
   @@index([direction])
   @@index([cabinet])
@@ -466,7 +483,7 @@ model Payment {
   // заставит такую операцию упасть с ошибкой БД, а не молча снести бухгалтерию.
   // Сейчас студент удаляется только soft (deletedAt), поэтому ограничение
   // ничего не ломает при обычной работе.
-  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
 
   // Волна 6 (Contract) добавит сюда relation. Сейчас — «голый» nullable-скаляр:
   // так волна 6 навесит связь одним ALTER TABLE ADD CONSTRAINT, без миграции данных.
@@ -575,7 +592,7 @@ model PaymentSchedule {
   // onDelete: Restrict — та же причина, что у Payment.student выше: план
   // оплат не должен беззвучно исчезнуть при гипотетическом физическом
   // удалении студента.
-  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
 
   contractId String?
 
@@ -655,15 +672,15 @@ model Consultation {
   // ни карточки студента. Только для ЧТЕНИЯ истории — автосклейки по нему нет.
   phoneNormalized String?
 
-  kind      ConsultationKind     @default(CONSULTATION)
-  outcome   ConsultationOutcome?
+  kind         ConsultationKind     @default(CONSULTATION)
+  outcome      ConsultationOutcome?
   // Источник привлечения — тот же справочник, что у заявки (common/lead-source.ts).
-  source    String?
+  source       String?
   sourceDetail String?
   // Направление, если человек уже определился. Опционально — на консультации
   // его часто ещё нет; при конвертации в заявку переносится как есть.
-  direction Direction?
-  comment   String?
+  direction    Direction?
+  comment      String?
 
   // Когда консультация ФАКТИЧЕСКИ проведена. Отдельно от createdAt: менеджер
   // вносит вчерашнюю встречу сегодня, а отчёт «сколько консультаций за неделю»
@@ -691,6 +708,10 @@ model Consultation {
   application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
   studentId     String?
   student       Student?     @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  // Волна 7: фактические звонки по этой консультации (замыкает петлю ТЗ 3.2
+  // «повторный звонок назначен» → «звонок сделан»). В волне 4 записей нет.
+  calls Call[]
 
   // ТЗ 3.2 — дата и время ПОВТОРНОГО ЗВОНКА.
   followUpAt     DateTime?
@@ -769,4 +790,298 @@ model SchedulerRun {
 
   // Индексов кроме @unique(job) нет НАМЕРЕННО: в таблице 3–5 строк, любой
   // дополнительный индекс здесь только замедлил бы запись при каждом тике.
+}
+
+// =====================================================================
+// Раздел 4 ТЗ (волна 4): реестр студентов с «двойным грантом» (Multi-Grant).
+// =====================================================================
+
+// Набор, с которого стартует учебный год. В Китае это сентябрь, но февральский
+// набор существует и у нас есть такие студенты. Поле ВЫЧИСЛЯЕТСЯ СЕРВИСОМ из
+// startDate при каждой записи startDate и руками не редактируется — поэтому
+// разъехаться с датой не может.
+// Зачем вообще хранить производное значение: Prisma не умеет фильтровать по
+// EXTRACT(MONTH FROM ...) без $queryRaw, а raw SQL в проекте нет ни одного.
+// Тот же приём уже применён в проекте к Payment.stageOrder.
+// enum, а не String (в отличие от Application.source): набор закрыт реальностью
+// (два набора в году + «прочее»), а таблица НОВАЯ — CREATE TYPE с нуля не
+// трогает ни одной живой строки, риск db push нулевой.
+enum GrantIntake {
+  SEPTEMBER
+  FEBRUARY
+  OTHER
+}
+
+// Состояние гранта, а НЕ состояние студента (Student.status — про человека:
+// ACTIVE/PAUSED/GRADUATED/ARCHIVED). Разделены намеренно: студент может быть
+// ACTIVE, а грант уже TERMINATED (лишили за неуспеваемость) — и наоборот,
+// студент в PAUSED (академ), а грант жив и в сентябре продолжится.
+// Джоба напоминаний работает ТОЛЬКО со status = ACTIVE.
+enum GrantStatus {
+  ACTIVE // действует, годы впереди ещё есть
+  SUSPENDED // приостановлен (академотпуск, спор с вузом) — напоминания молчат
+  COMPLETED // отучился все totalYears
+  TERMINATED // прекращён досрочно (отчисление, отказ, лишение)
+}
+
+// ТЗ 4 — «отдельная категория базы данных» для студентов с грантом,
+// пролонгированным на 2-й и последующие годы.
+//
+// ОТДЕЛЬНАЯ ТАБЛИЦА, а не поля в Student:
+//  1) у одного человека грантов бывает НЕСКОЛЬКО и подряд (языковой год по
+//     одному гранту, затем бакалавриат по другому) — это и есть «двойной
+//     грант» в лексике агентства, плоские поля вместили бы ровно один;
+//  2) УТЕЧКА В ЛИЧНЫЙ КАБИНЕТ: student-auth.service.ts читает студента через
+//     `include: STUDENT_INCLUDE`, а include тянет ВСЕ скаляры модели — любое
+//     новое скалярное поле Student автоматически уехало бы студенту в
+//     /student-auth/me. Поля отдельной таблицы через include не подтягиваются
+//     никогда, пока их явно не попросят;
+//  3) реестр — отдельный экран со своими фильтрами/сортировкой, вешать
+//     индексы под него на Student (главный список CRM) — лишняя плата записью;
+//  4) джоба планировщика сканирует маленькую таблицу реестра, а не всех студентов.
+//
+// ПРИЗНАК «ДВОЙНОГО ГРАНТА» — ВЫЧИСЛЯЕМЫЙ: totalYears > 1. Отдельного булева
+// флага НЕТ намеренно: флаг и число — два источника истины про один факт и
+// разъедутся в первый же месяц. Число нужно автоматизации в любом случае —
+// оно знает, КОГДА ПЕРЕСТАТЬ напоминать.
+model StudentGrant {
+  id String @id @default(uuid())
+
+  studentId String
+  // onDelete: Restrict — та же семантика, что у Document/Payment/PaymentSchedule.
+  // Физического удаления студента в проекте нет, но если оно когда-нибудь
+  // появится, реестр грантов должен уронить операцию ошибкой БД, а не
+  // беззвучно исчезнуть.
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  // Название/тип гранта как его называет вуз: «CSC Type A», «Стипендия
+  // провинции Хэнань», «Грант университета». Свободный текст, а не справочник.
+  name       String?
+  // Вуз, ВЫДАВШИЙ грант. Снимок, а не ссылка на Program: программа у студента
+  // может смениться, а факт «грант дал этот вуз» — исторический.
+  university String?
+
+  // Сколько лет обучения покрывает грант. 1 = разовый (в реестр «двойных» не
+  // попадает и напоминаний не порождает).
+  totalYears  Int @default(1)
+  // Какой год обучения идёт СЕЙЧАС, 1-based. Двигается ТОЛЬКО явным действием
+  // человека (POST /grants/:id/advance), а не автоматически по календарю:
+  // грант могли не продлить (не сдал сессию, лишили), и CRM не имеет права
+  // записать факт, которого не было.
+  currentYear Int @default(1)
+
+  // Старт ПЕРВОГО учебного года по гранту. Иммутабелен по смыслу (правится
+  // только как исправление ошибки ввода). Семантика — КАЛЕНДАРНАЯ ДАТА:
+  // сервис приводит её к 00:00 по Душанбе (APP_TZ_OFFSET_MINUTES из
+  // scheduler/time.ts).
+  startDate DateTime
+  // Производное от месяца startDate, считает сервис (см. комментарий к enum).
+  intake    GrantIntake @default(SEPTEMBER)
+
+  // ГЛАВНОЕ ПОЛЕ АВТОМАТИЗАЦИИ: плановая дата старта СЛЕДУЮЩЕГО учебного
+  // года. Денормализация вынужденная: Prisma не умеет ни арифметику дат в
+  // WHERE, ни сравнение двух колонок между собой без $queryRaw (которого в
+  // проекте нет вовсе). Обычная индексируемая колонка превращает выборку
+  // джобы в один range-скан.
+  //
+  // ИНВАРИАНТ (держит сервис на КАЖДОЙ записи):
+  //   nextYearStartsAt IS NOT NULL  ⟺  status = ACTIVE И currentYear < totalYears.
+  // При переводе на следующий год новое значение считается ЦЕПОЧКОЙ:
+  // next_new = next_old + 1 год (а не «startDate + N лет») — если вуз сдвинул
+  // старт второго года на две недели, сдвиг обязан унаследоваться третьим годом.
+  nextYearStartsAt DateTime?
+
+  // Флаг идемпотентности планировщика — тот же приём, что Consultation.reminderSentAt:
+  // джоба сначала атомарно ЗАНИМАет строку (updateMany where { id, reminderSentAt: null }
+  // → count === 1 значит «моя»), и только потом создаёт задачу. Сбрасывается
+  // сервисом в null при каждом изменении nextYearStartsAt и при переводе на
+  // следующий год — новый срок = новый цикл напоминания.
+  // ВТОРОЙ, независимый слой защиты от дублей — Task.originKey @unique.
+  reminderSentAt DateTime?
+
+  status GrantStatus @default(ACTIVE)
+  // Условия продления (нужный GPA, требования вуза), договорённости.
+  note   String?
+
+  // Кто завёл грант в реестр. SetNull — уволенного сотрудника soft-удаляют,
+  // запись остаётся. Используется ещё и как ФОЛБЭК-исполнитель автозадачи,
+  // если у студента нет менеджера.
+  createdById String?
+  createdBy   User?   @relation("StudentGrantCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Блок «Грант» в карточке студента.
+  @@index([studentId])
+  // ОДИН индекс на два сценария:
+  //  а) джоба: deletedAt IS NULL AND status='ACTIVE' AND nextYearStartsAt BETWEEN ?;
+  //  б) реестр: та же голова + ORDER BY nextYearStartsAt.
+  @@index([deletedAt, status, nextYearStartsAt])
+}
+
+// =====================================================================
+// Раздел 6.3 ТЗ (волна 4): комментарии как СОБЫТИЯ ленты активности.
+// =====================================================================
+
+// По умолчанию комментарий ВНУТРЕННИЙ — это заметка менеджера, а не сообщение
+// студенту. В волне 4 API значение не принимает и не отдаёт — DTO его не
+// содержит, эндпоинтов комментариев в личном кабинете нет вовсе.
+enum CommentVisibility {
+  INTERNAL
+  STUDENT_VISIBLE
+}
+
+// ТЗ 6.3 — «добавление текстовых комментариев» как события ленты.
+//
+// Почему НЕ расширение Student.comment/Application.comment: там ОДНА строка
+// без автора и без времени, второй комментарий затирает первый. Лента
+// требует истории — значит нужна строка на комментарий.
+// Существующие поля НЕ ТРОГАЕМ и НЕ ПЕРЕНОСИМ: в Application.comment лежит
+// сообщение клиента с лендинга, в Student.comment — заметка менеджера. В UI
+// старое поле остаётся отдельным блоком НАД лентой.
+//
+// СВЯЗЬ — ДВЕ NULLABLE-ССЫЛКИ, А НЕ ПОЛИМОРФИЗМ (entityType+entityId): тот же
+// паттерн, что уже есть и работает — Consultation.applicationId? + studentId?.
+// ИНВАРИАНТ (держит сервис, CHECK в Prisma не выражается): заполнена хотя бы
+// одна из ссылок.
+model Comment {
+  id String @id @default(uuid())
+
+  // Текст. Длина режется в DTO (@MaxLength(4000)) — в ActivityLog.details
+  // уезжает только превью ~200 символов.
+  body String
+
+  studentId String?
+  // Restrict, а не SetNull: комментарий — часть аудит-следа. Комментарий,
+  // потерявший якорь, не виден ни в одной ленте — тихая потеря данных.
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  // Автор. Nullable + SetNull для единообразия со всей схемой (Payment.createdBy).
+  authorId String?
+  author   User?   @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  visibility CommentVisibility @default(INTERNAL)
+
+  // Отметка «отредактирован» — лента обязана честно показывать, что текст
+  // меняли после публикации. Сам исходный текст остаётся в ActivityLog.
+  editedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Лента в карточке студента: WHERE studentId=? AND deletedAt IS NULL
+  // ORDER BY createdAt DESC — сортировка из индекса.
+  @@index([studentId, deletedAt, createdAt(sort: Desc)])
+  // То же в карточке заявки.
+  @@index([applicationId, deletedAt, createdAt(sort: Desc)])
+  // «Что писал этот сотрудник» — срез для Основателя.
+  @@index([authorId, createdAt(sort: Desc)])
+}
+
+// =====================================================================
+// Раздел 6.3 ТЗ — ЗАГОТОВКА ПОД IP-ТЕЛЕФОНИЮ (волна 7).
+// В ЭТОЙ ВОЛНЕ ЗАПИСЕЙ НЕ СОЗДАЁТСЯ НИ ОДНОЙ: эндпоинтов записи нет, сидов
+// нет, фикстур нет. Таблица заводится сейчас, чтобы волна 7 добавила ТОЛЬКО
+// адаптер провайдера и вебхук, не трогая схему на живой базе.
+// =====================================================================
+
+// INTERNAL (звонок между сотрудниками) сознательно НЕ заводим: он не нужен
+// ни одному отчёту ТЗ. Добавление значения в pg-enum — безопасная операция
+// для db push, поэтому расширить набор волна 7 сможет без миграции данных.
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+// Надмножество исходов, которые отдают IP-АТС. Провайдер ещё не выбран,
+// поэтому набор сознательно шире, чем нужно сегодня — всё, что не свелось,
+// переживает в Call.raw без потери информации.
+enum CallStatus {
+  COMPLETED // разговор состоялся
+  NO_ANSWER // не ответили
+  BUSY // занято
+  FAILED // техническая ошибка/недоступен
+  CANCELED // отменён до соединения
+  VOICEMAIL // ушёл на автоответчик
+}
+
+model Call {
+  id String @id @default(uuid())
+
+  // Имя провайдера. String, а не enum: провайдер НЕ ВЫБРАН. 'MANUAL' —
+  // звонок, зафиксированный менеджером руками (если такой эндпоинт появится
+  // — НЕ в этой волне).
+  provider   String  @default("MANUAL")
+  // Идентификатор звонка НА СТОРОНЕ ПРОВАЙДЕРА. Ключ идемпотентности вебхука.
+  // Составной @@unique с provider — NULL'ы в Postgres в уникальном индексе
+  // между собой не конфликтуют, ручные звонки без externalId проходят как есть.
+  externalId String?
+
+  direction CallDirection
+  status    CallStatus    @default(COMPLETED)
+
+  // Номер СОБЕСЕДНИКА (клиента) в том виде, как его отдал провайдер.
+  phone           String
+  // Тот же ключ склейки, что у Application.phoneNormalized/Consultation.phoneNormalized.
+  line            String? // номер/линия агентства, на которую пришёл или с которой ушёл звонок
+  phoneNormalized String?
+
+  // Три момента: длительность СОЕДИНЕНИЯ и длительность ОЖИДАНИЯ — разные
+  // метрики (KPI раздела 5 считается именно по answeredAt − startedAt).
+  startedAt   DateTime
+  answeredAt  DateTime?
+  endedAt     DateTime?
+  // Длительность РАЗГОВОРА в секундах, денормализована — любая АТС отдаёт
+  // её готовой.
+  durationSec Int       @default(0)
+
+  // Ссылка на запись У ПРОВАЙДЕРА. В /uploads в этой волне ничего не
+  // скачивается — хранение записей разговоров решает Основатель отдельно.
+  recordingUrl String?
+
+  // Сотрудник на внутренней линии. SetNull — как везде в схеме.
+  userId String?
+  user   User?   @relation("CallUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  // Три опциональные привязки, как у Comment/Consultation. Звонок с
+  // неизвестного номера не привязан ни к кому — нормальное состояние данных.
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  // Замыкает петлю ТЗ 3.2: «повторный звонок назначен» → «звонок сделан».
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  // Итог разговора словами менеджера (не транскрипция).
+  comment String?
+  // СЫРОЙ payload вебхука. Провайдер не выбран — поля неизвестны заранее.
+  // ВНИМАНИЕ ДЛЯ ВОЛНЫ 7: raw содержит PII и НЕ ОТДАЁТСЯ наружу — ни
+  // студенту, ни EMPLOYEE; только FOUNDER и только явным запросом.
+  raw     Json?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Один звонок = одна строка, повторная доставка вебхука отбивается БД.
+  @@unique([provider, externalId])
+  // Блок «Звонки» в карточке студента.
+  @@index([studentId, deletedAt, startedAt(sort: Desc)])
+  // То же в карточке заявки.
+  @@index([applicationId, startedAt(sort: Desc)])
+  // «Сколько звонков сделал сотрудник за период» — KPI раздела 5.
+  @@index([userId, startedAt(sort: Desc)])
+  // Сшивка с историей обращений по номеру.
+  @@index([phoneNormalized])
+  // Общий журнал звонков за период.
+  @@index([deletedAt, startedAt(sort: Desc)])
 }

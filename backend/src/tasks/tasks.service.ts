@@ -81,6 +81,21 @@ export class TasksService {
     this.realtime.emitAllStaff('task:new', { id: task.id });
     // notifyUser() выше уже отправил 'notification:new' в user-room
     // назначенного сотрудника — второй, дублирующий emit убран.
+
+    // Раздел 6.3 ТЗ (волна 4): раньше РУЧНОЕ создание задачи не попадало в
+    // журнал вообще (в отличие от TASK_AUTO_CREATE у системных задач) —
+    // Основатель не видел в «Активности», кто и когда завёл задачу вручную.
+    // studentId у Task нет (общая таблица задач, не привязанная к студенту) —
+    // так же, как у TASK_AUTO_CREATE ниже.
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'TASK_CREATE',
+        details: `Создана задача «${task.title}» для ${assignee.fullName}`,
+      })
+      .catch(() => undefined);
+
     return task;
   }
 

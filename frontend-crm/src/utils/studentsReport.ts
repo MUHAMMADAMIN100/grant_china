@@ -10,8 +10,16 @@ export async function generateStudentsReport(params: {
    *  «Статус: Подача документов · Менеджер: Иван Петров».
    *  Пустая строка → «Без фильтра — все студенты». */
   filterSummary?: string;
+  /**
+   * Раздел 4 ТЗ (волна 4) — карта studentId → «2-й из 4» для колонки «Грант».
+   * GET /students не отдаёт связь grants (см. api/students.ts), поэтому
+   * карту строит вызывающий код отдельным запросом к /grants. Студент без
+   * записи в карте показывается как «—» — это норма: реестр грантов на
+   * старте почти пуст, не ошибка отчёта.
+   */
+  grantByStudentId?: Record<string, string>;
 }) {
-  const { students, filterSummary } = params;
+  const { students, filterSummary, grantByStudentId = {} } = params;
 
   const {
     Document,
@@ -54,8 +62,9 @@ export async function generateStudentsReport(params: {
   // ⇒ доступная ширина для таблицы 15398 twips. Округляем до 15400.
   const TABLE_WIDTH = 15400;
   // Доли колонок — сумма ровно 1.0, проценты выбраны под реальный контент:
-  // длинные ФИО и Менеджер шире, № и Кабинет узкие.
-  const COL_RATIOS = [0.04, 0.22, 0.13, 0.06, 0.10, 0.13, 0.18, 0.14];
+  // длинные ФИО и Менеджер шире, № и Кабинет узкие. Девятая колонка «Грант»
+  // (раздел 4 ТЗ) добавлена узкой — там короткая подпись вида «2-й из 4».
+  const COL_RATIOS = [0.035, 0.20, 0.12, 0.05, 0.09, 0.12, 0.16, 0.12, 0.105];
   const COL_WIDTHS = COL_RATIOS.map((r) => Math.round(TABLE_WIDTH * r));
 
   const headerCell = (text: string, colIdx: number) =>
@@ -97,6 +106,7 @@ export async function generateStudentsReport(params: {
         headerCell('Телефон', 5),
         headerCell('Менеджер', 6),
         headerCell('Дата', 7),
+        headerCell('Грант', 8),
       ],
     }),
     ...students.map(
@@ -111,6 +121,7 @@ export async function generateStudentsReport(params: {
             bodyCell(s.phones.join(', '), 5, i % 2 === 1),
             bodyCell(s.manager?.fullName || '—', 6, i % 2 === 1),
             bodyCell(fmtDate(s.createdAt), 7, i % 2 === 1),
+            bodyCell(grantByStudentId[s.id] || '—', 8, i % 2 === 1),
           ],
         }),
     ),

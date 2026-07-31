@@ -6,7 +6,9 @@ import { SchedulerController } from './scheduler.controller';
 import { SCHEDULED_JOBS } from './job.contract';
 import { FollowUpReminderJob } from './jobs/follow-up-reminder.job';
 import { ApplicationAutoArchiveJob } from './jobs/application-auto-archive.job';
+import { AcademicYearReminderJob } from './jobs/academic-year-reminder.job';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { TasksModule } from '../tasks/tasks.module';
 
 @Module({
   imports: [
@@ -15,6 +17,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
     // то есть двойные прогоны внутри одного процесса.
     ScheduleModule.forRoot(),
     NotificationsModule,
+    // ТЗ 4 (волна 4) — AcademicYearReminderJob создаёт системные задачи
+    // ИСКЛЮЧИТЕЛЬНО через TasksService.createSystemTask(), прямой доступ к
+    // prisma.task из джобы запрещён архитектурой (единая точка идемпотентности).
+    TasksModule,
   ],
   controllers: [SchedulerController],
   providers: [
@@ -22,13 +28,16 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SchedulerLockService,
     FollowUpReminderJob,
     ApplicationAutoArchiveJob,
+    AcademicYearReminderJob,
     // Мульти-провайдер: оркестратор (scheduler.service.ts) получает список
-    // джоб через DI и не знает о них поимённо — волна 4 добавит джобу сюда
-    // одной строкой, не трогая ни одну существующую.
+    // джоб через DI и не знает о них поимённо. AcademicYearReminderJob стоит
+    // ПОСЛЕДНЕЙ в массиве намеренно (риск 1 проекта архитектора): если в ней
+    // когда-нибудь появится баг, напоминания о звонках и авто-архив заявок
+    // (обе идут раньше) всё равно успеют отработать в этом тике.
     {
       provide: SCHEDULED_JOBS,
-      useFactory: (a: FollowUpReminderJob, b: ApplicationAutoArchiveJob) => [a, b],
-      inject: [FollowUpReminderJob, ApplicationAutoArchiveJob],
+      useFactory: (a: FollowUpReminderJob, b: ApplicationAutoArchiveJob, c: AcademicYearReminderJob) => [a, b, c],
+      inject: [FollowUpReminderJob, ApplicationAutoArchiveJob, AcademicYearReminderJob],
     },
   ],
 })

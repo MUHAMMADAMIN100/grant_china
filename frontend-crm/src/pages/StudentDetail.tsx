@@ -14,6 +14,8 @@ import ApplicationFormSection from '../components/ApplicationFormSection';
 import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
 import DirectionOptions from '../components/DirectionOptions';
 import BackButton from '../components/BackButton';
+import GrantCard from '../components/GrantCard';
+import CommentsFeed from '../components/CommentsFeed';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
 
@@ -365,7 +367,7 @@ export default function StudentDetail() {
                 <div className="detail-row"><div className="detail-label">Направление</div><div className="detail-value">{DIRECTION_LABEL[student.direction]}</div></div>
                 <div className="detail-row"><div className="detail-label">Кабинет</div><div className="detail-value">№{student.cabinet}</div></div>
                 <div className="detail-row"><div className="detail-label">Статус</div><div className="detail-value">{STUDENT_STATUS_LABEL[student.status]}</div></div>
-                <div className="detail-row"><div className="detail-label">Комментарий</div><div className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>{student.comment || '—'}</div></div>
+                <div className="detail-row"><div className="detail-label">Комментарий из анкеты</div><div className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>{student.comment || '—'}</div></div>
                 <div className="detail-row"><div className="detail-label">Создан</div><div className="detail-value">{new Date(student.createdAt).toLocaleString('ru-RU')}</div></div>
               </>
             ) : (
@@ -434,7 +436,7 @@ export default function StudentDetail() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Комментарий</label>
+                  <label>Комментарий из анкеты</label>
                   <textarea
                     value={form.comment}
                     onChange={(e) => setForm({ ...form, comment: e.target.value })}
@@ -448,6 +450,8 @@ export default function StudentDetail() {
             )}
           </div>
         </div>
+
+        <GrantCard studentId={student.id} canEdit={canEdit} />
 
         <DocumentsChecklist
           studentId={student.id}
@@ -470,6 +474,8 @@ export default function StudentDetail() {
             onSaved={reload}
           />
         </div>
+
+        <CommentsFeed studentId={student.id} canAdd={canEdit} />
       </div>
 
       <AnimatePresence>

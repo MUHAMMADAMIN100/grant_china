@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { listActivity, ACTIVITY_LABEL, type ActivityAction, type ActivityEntry } from '../api/activity';
+import { listActivity, ACTIVITY_GROUPS, ACTIVITY_LABEL, type ActivityAction, type ActivityEntry } from '../api/activity';
 import { ROLE_LABEL, type Role } from '../api/types';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
@@ -34,6 +34,19 @@ const ACTION_BADGE: Record<ActivityAction, string> = {
   CONSULTATION_DELETE: 'badge-gray',
   CONSULTATION_CONVERT: 'badge-success',
   TASK_AUTO_CREATE: 'badge-info',
+  TASK_CREATE: 'badge-success',
+  PAYMENT_RECEIPT_ADD: 'badge-success',
+  PAYMENT_RECEIPT_REMOVE: 'badge-gray',
+  DOCUMENT_UPLOAD: 'badge-info',
+  DOCUMENT_DELETE: 'badge-gray',
+  COMMENT_CREATE: 'badge-info',
+  COMMENT_UPDATE: 'badge-gray',
+  COMMENT_DELETE: 'badge-gray',
+  CALL_LOGGED: 'badge-info',
+  GRANT_CREATE: 'badge-success',
+  GRANT_UPDATE: 'badge-warning',
+  GRANT_YEAR_ADVANCE: 'badge-success',
+  GRANT_CLOSE: 'badge-gray',
 };
 
 export default function Activity() {
@@ -64,8 +77,20 @@ export default function Activity() {
     return () => clearTimeout(t);
   }, [action, from, to]);
 
+  // Раздел 6.3 (волна 4) кратно увеличивает число типов событий — 'activity:new'
+  // на каждое из них раньше перезапрашивало журнал целиком СРАЗУ. При активной
+  // работе нескольких менеджеров это давало несколько полных перезагрузок
+  // списка в минуту. Схлопываем события за 2 секунды в один load() —
+  // тот же приём, что scheduleReload в pages/Students.tsx.
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useRealtime({
-    'activity:new': () => load(),
+    'activity:new': () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = setTimeout(() => {
+        reloadTimerRef.current = null;
+        load();
+      }, 2000);
+    },
   });
 
   const reset = () => {
@@ -86,8 +111,12 @@ export default function Activity() {
         <div className="filters">
           <select value={action} onChange={(e) => setAction(e.target.value as any)}>
             <option value="">Все действия</option>
-            {Object.entries(ACTIVITY_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
+            {ACTIVITY_GROUPS.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.actions.map((a) => (
+                  <option key={a} value={a}>{ACTIVITY_LABEL[a]}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
           <input

@@ -45,7 +45,7 @@ export class SchedulerService {
   async tick(): Promise<void> {
     if (!SCHEDULER_ENABLED) return;
     for (const job of this.jobs) {
-      await this.runJobIfDue(job);
+      await this.runOneSafely(job);
     }
   }
 
@@ -57,7 +57,23 @@ export class SchedulerService {
   async catchUp(): Promise<void> {
     if (!SCHEDULER_ENABLED) return;
     for (const job of this.jobs) {
+      await this.runOneSafely(job);
+    }
+  }
+
+  // Волна 4 (риск 1 проекта архитектора): runJob() уже ловит ошибки ВНУТРИ
+  // конкретной джобы, но runJobIfDue() читает `job.name`/`job.everyMinutes`
+  // ДО этого — если DI когда-нибудь подставит на позицию мульти-провайдера
+  // undefined (опечатка в useFactory/inject при добавлении новой джобы), это
+  // бросит TypeError прямо из цикла for..of и оборвёт обработку ВСЕХ джоб,
+  // идущих ПОСЛЕ сломанной, без единого следа в SchedulerRun. Три строки
+  // здесь стоят дешевле, чем «напоминания молча не работают неделю».
+  private async runOneSafely(job: ScheduledJob): Promise<void> {
+    try {
       await this.runJobIfDue(job);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      this.logger.error(`[${job?.name ?? '?'}] джоба выпала из цикла планировщика: ${message}`);
     }
   }
 

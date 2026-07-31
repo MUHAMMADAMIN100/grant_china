@@ -36,7 +36,33 @@ export type ActivityAction =
   | 'CONSULTATION_DELETE'
   | 'CONSULTATION_CONVERT'
   // Системная (авто-созданная) задача — TasksService.createSystemTask().
-  | 'TASK_AUTO_CREATE';
+  // Используется и консультациями (ТЗ 3.2), и напоминаниями о начале
+  // учебного года по гранту (раздел 4, волна 4).
+  | 'TASK_AUTO_CREATE'
+  // Раздел 6.3 ТЗ (волна 4) — ручное создание задачи (в отличие от
+  // TASK_AUTO_CREATE выше). Пишется из tasks.service.ts create().
+  | 'TASK_CREATE'
+  // Раздел 6.3 ТЗ — «прикрепление чеков» как ОТДЕЛЬНОЕ событие ленты (раньше
+  // размазано по PAYMENT_UPDATE — было невозможно отфильтровать в UI).
+  | 'PAYMENT_RECEIPT_ADD'
+  | 'PAYMENT_RECEIPT_REMOVE'
+  // Раздел 6.3 ТЗ — загрузка/удаление обычного документа студента (паспорт,
+  // диплом и т.п., не чек).
+  | 'DOCUMENT_UPLOAD'
+  | 'DOCUMENT_DELETE'
+  // Раздел 6.3 ТЗ — текстовые комментарии как события ленты (новая модель
+  // Comment, отдельная от Student.comment/Application.comment).
+  | 'COMMENT_CREATE'
+  | 'COMMENT_UPDATE'
+  | 'COMMENT_DELETE'
+  // Раздел 6.3 ТЗ — заготовка под IP-телефонию (волна 7). Тип события заведён
+  // сейчас, записей звонков в волне 4 не создаётся.
+  | 'CALL_LOGGED'
+  // Раздел 4 ТЗ (волна 4) — реестр студентов с «двойным грантом».
+  | 'GRANT_CREATE'
+  | 'GRANT_UPDATE'
+  | 'GRANT_YEAR_ADVANCE'
+  | 'GRANT_CLOSE';
 
 export interface ActivityEntry {
   id: string;
@@ -91,4 +117,49 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   CONSULTATION_DELETE: 'Удалена консультация',
   CONSULTATION_CONVERT: 'Создана заявка из консультации',
   TASK_AUTO_CREATE: 'Автоматически создана задача',
+  TASK_CREATE: 'Создана задача',
+  PAYMENT_RECEIPT_ADD: 'Прикреплён чек',
+  PAYMENT_RECEIPT_REMOVE: 'Удалён чек',
+  DOCUMENT_UPLOAD: 'Загружен документ',
+  DOCUMENT_DELETE: 'Удалён документ',
+  COMMENT_CREATE: 'Добавлен комментарий',
+  COMMENT_UPDATE: 'Изменён комментарий',
+  COMMENT_DELETE: 'Удалён комментарий',
+  CALL_LOGGED: 'Зафиксирован звонок',
+  GRANT_CREATE: 'Добавлен грант',
+  GRANT_UPDATE: 'Изменён грант',
+  GRANT_YEAR_ADVANCE: 'Переход на следующий год гранта',
+  GRANT_CLOSE: 'Грант закрыт',
 };
+
+// Группировка пунктов фильтра по доменам — при ~35 значениях плоский список
+// в <select> нечитаем. Порядок группы — как в ленте: сначала часто
+// используемые (заявки/студенты), затем финансы, задачи, консультации,
+// гранты, комментарии, звонки, кадры.
+export const ACTIVITY_GROUPS: { label: string; actions: ActivityAction[] }[] = [
+  { label: 'Заявки', actions: ['STATUS_CHANGE', 'APPLICATION_ARCHIVE', 'APPLICATION_UNARCHIVE', 'APPLICATION_SOURCE_CHANGE', 'APPLICATION_CLEAR_REPEAT'] },
+  { label: 'Студенты', actions: ['STUDENT_CREATE', 'STUDENT_UPDATE', 'STUDENT_DELETE', 'MANAGER_CHANGE', 'PROGRAM_CHANGE'] },
+  { label: 'Документы', actions: ['DOCUMENT_UPLOAD', 'DOCUMENT_DELETE'] },
+  {
+    label: 'Финансы',
+    actions: [
+      'PAYMENT_CREATE',
+      'PAYMENT_UPDATE',
+      'PAYMENT_SUBMIT',
+      'PAYMENT_RECALL',
+      'PAYMENT_APPROVE',
+      'PAYMENT_REJECT',
+      'PAYMENT_VOID',
+      'PAYMENT_DELETE',
+      'PAYMENT_SCHEDULE_UPDATE',
+      'PAYMENT_RECEIPT_ADD',
+      'PAYMENT_RECEIPT_REMOVE',
+    ],
+  },
+  { label: 'Задачи', actions: ['TASK_CREATE', 'TASK_AUTO_CREATE'] },
+  { label: 'Консультации', actions: ['CONSULTATION_CREATE', 'CONSULTATION_UPDATE', 'CONSULTATION_DELETE', 'CONSULTATION_CONVERT'] },
+  { label: 'Гранты', actions: ['GRANT_CREATE', 'GRANT_UPDATE', 'GRANT_YEAR_ADVANCE', 'GRANT_CLOSE'] },
+  { label: 'Комментарии', actions: ['COMMENT_CREATE', 'COMMENT_UPDATE', 'COMMENT_DELETE'] },
+  { label: 'Звонки', actions: ['CALL_LOGGED'] },
+  { label: 'Сотрудники', actions: ['USER_CREATE', 'USER_ROLE_CHANGE', 'USER_DELETE'] },
+];

@@ -12,6 +12,7 @@ import DirectionOptions from '../components/DirectionOptions';
 import ManagerBar from '../components/ManagerBar';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import BackButton from '../components/BackButton';
+import CommentsFeed from '../components/CommentsFeed';
 import Icon from '../Icon';
 import { motion } from 'framer-motion';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
@@ -327,7 +328,7 @@ export default function ApplicationDetail() {
             <div className="detail-row"><div className="detail-label">Телефон</div><div className="detail-value">{app.phone}</div></div>
             <div className="detail-row"><div className="detail-label">Email</div><div className="detail-value">{app.email || '—'}</div></div>
             <div className="detail-row"><div className="detail-label">Направление</div><div className="detail-value">{DIRECTION_LABEL[app.direction]}</div></div>
-            <div className="detail-row"><div className="detail-label">Комментарий</div><div className="detail-value">{app.comment || '—'}</div></div>
+            <div className="detail-row"><div className="detail-label">Сообщение с сайта</div><div className="detail-value">{app.comment || '—'}</div></div>
             <div className="detail-row"><div className="detail-label">Создана</div><div className="detail-value">{new Date(app.createdAt).toLocaleString('ru-RU')}</div></div>
           </>
         )}
@@ -377,7 +378,7 @@ export default function ApplicationDetail() {
                     <div className="detail-row"><div className="detail-label">Направление</div><div className="detail-value">{DIRECTION_LABEL[student.direction]}</div></div>
                     <div className="detail-row"><div className="detail-label">Кабинет</div><div className="detail-value">№{student.cabinet}</div></div>
                     <div className="detail-row"><div className="detail-label">Статус студента</div><div className="detail-value">{STUDENT_STATUS_LABEL[student.status]}</div></div>
-                    <div className="detail-row"><div className="detail-label">Комментарий</div><div className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>{student.comment || '—'}</div></div>
+                    <div className="detail-row"><div className="detail-label">Комментарий из анкеты</div><div className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>{student.comment || '—'}</div></div>
                     <div className="detail-row"><div className="detail-label">Создана заявка</div><div className="detail-value">{new Date(app.createdAt).toLocaleString('ru-RU')}</div></div>
                   </>
                 ) : (
@@ -446,7 +447,7 @@ export default function ApplicationDetail() {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Комментарий</label>
+                      <label>Комментарий из анкеты</label>
                       <textarea
                         value={form.comment}
                         onChange={(e) => setForm({ ...form, comment: e.target.value })}
@@ -480,6 +481,8 @@ export default function ApplicationDetail() {
             </div>
           </>
         )}
+
+        <CommentsFeed applicationId={app.id} canAdd={canAct} />
       </div>
       </div>
     </div>
