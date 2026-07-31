@@ -23,6 +23,7 @@ import Pagination from '../components/Pagination';
 import PaymentStatusBadge from '../components/PaymentStatusBadge';
 import PaymentReasonPrompt from '../components/PaymentReasonPrompt';
 import Icon from '../Icon';
+import { toPeriodRange } from '../utils/datetime';
 
 const PAGE_SIZE = 10;
 const ALL_STAGES: PaymentStage[] = [...SCHEDULE_PAYMENT_STAGES, 'LIVING_EXPENSES'];
@@ -94,8 +95,7 @@ export default function Payments() {
       purpose: purpose || undefined,
       method: method || undefined,
       managerId: isPriv ? manager || undefined : undefined,
-      from: from ? new Date(from).toISOString() : undefined,
-      to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+      ...toPeriodRange(from, to),
       search: search || undefined,
       page,
       pageSize: PAGE_SIZE,

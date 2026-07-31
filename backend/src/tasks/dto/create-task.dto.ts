@@ -1,4 +1,4 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import { IsISO8601, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateTaskDto {
   @IsString()
@@ -13,4 +13,11 @@ export class CreateTaskDto {
 
   @IsString()
   assignedToId: string;
+
+  // ТЗ 3.2 — дата и время повторного звонка/срок задачи. Опционально: у
+  // существующих задач срока нет и большинство ручных задач его тоже не
+  // указывает. Фронт шлёт ISO-строку из <input type="datetime-local">.
+  @IsOptional()
+  @IsISO8601()
+  dueDate?: string;
 }

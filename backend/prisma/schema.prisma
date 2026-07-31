@@ -77,6 +77,11 @@ model User {
   voidedPayments          Payment[]         @relation("PaymentVoidedBy")
   updatedPaymentSchedules PaymentSchedule[] @relation("PaymentScheduleUpdatedBy")
 
+  // Раздел 3 ТЗ (заявки/консультации, волна 3).
+  archivedApplications Application[]  @relation("ApplicationArchivedBy")
+  heldConsultations    Consultation[] @relation("ConsultationManager")
+  createdConsultations Consultation[] @relation("ConsultationCreatedBy")
+
   @@index([deletedAt])
 }
 
@@ -107,9 +112,66 @@ model Application {
   programId      String?
   // Удалили программу → у заявки programId становится null.
   program        Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  deletedAt      DateTime?
+
+  // ── ТЗ 3.1: источник привлечения ───────────────────────────────────
+  // String, а НЕ enum. Причина: деплой гоняет `prisma db push --accept-data-loss`.
+  // Добавить значение в pg-enum он умеет, но удалить/переименовать/переставить —
+  // это DROP TYPE + CREATE TYPE, то есть потеря колонки на живых данных.
+  // Волна 7 (Chat Place) принесёт реальные названия каналов из вебхуков, и
+  // список ТОЧНО будет меняться. Тот же приём уже применён в проекте к
+  // ActivityLog.action и Document.type — новые значения без миграции.
+  // Единственный источник истины по значениям — backend/src/common/lead-source.ts,
+  // валидация @IsIn(LEAD_SOURCE_VALUES) в DTO на ОБОИХ путях записи.
+  // null у 229 исторических заявок = «источник не указан». Бэкфилла НЕТ
+  // намеренно: проставить всем WEBSITE — значит выдумать факт и испортить
+  // ровно тот отчёт по каналам, ради которого поле и заводится.
+  source       String?
+  // Уточнение свободным текстом: @ник аккаунта, id рекламной кампании,
+  // имя рекомендателя, utm_source «как пришёл». Отдельно от source, чтобы
+  // source оставался счётным для GROUP BY. Длина режется в DTO (@MaxLength(200)).
+  sourceDetail String?
+
+  // ── ТЗ 3.1: архив ──────────────────────────────────────────────────
+  // Признак архивности — nullable timestamp, а не Boolean: тот же приём,
+  // что у deletedAt (бесплатно получаем «когда»), плюс на живой таблице это
+  // ADD COLUMN NULL без переписывания 229 строк. Архив ПОЛНОСТЬЮ обратим:
+  // «Вернуть из архива» ставит archivedAt = null, данные не трогаются.
+  archivedAt    DateTime?
+  archivedById  String?
+  // Уволенного сотрудника soft-удаляют → ссылка обнуляется, факт архивации
+  // остаётся (та же семантика, что у manager/chinaManager выше).
+  archivedBy    User?     @relation("ApplicationArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  // 'MANUAL: <текст менеджера>' либо 'AUTO: зачислен, 30 дней без изменений'.
+  // Свободная строка, а не enum: причин будет больше, чем мы сейчас знаем.
+  archiveReason String?
+
+  // ── ТЗ 3.1: «повторное обращение» ──────────────────────────────────
+  // Ключ склейки — НОРМАЛИЗОВАННЫЙ телефон. phone хранится так, как ввёл
+  // клиент («+992 90 123-45-67», «901234567»), сравнивать сырые строки
+  // бесполезно. Денормализованная колонка, а не вычисление на лету: по ней
+  // идёт индексный поиск на КАЖДОЕ создание заявки.
+  // Заполняется normalizePhone() из common/phone.ts при создании + разовым
+  // идемпотентным бэкфиллом на старте (условие `phoneNormalized: null`).
+  // ВАЖНО для кода: у заявки, созданной из students.service (phones[0] || ''),
+  // телефона может не быть вовсе → здесь остаётся null, и поиск «повторных»
+  // обязан ВЫХОДИТЬ РАНЬШЕ, а не искать `phoneNormalized: null` (Prisma
+  // превратит это в IS NULL и склеит все безтелефонные заявки в одну кучу).
+  phoneNormalized String?
+  // Ссылка на ПЕРВУЮ (корневую) заявку с тем же phoneNormalized — не на
+  // предыдущую. Тогда все обращения одного человека имеют ОДИН repeatOfId и
+  // группируются одним индексным запросом, без рекурсии по цепочке.
+  // Это ПОДСКАЗКА, а не склейка личностей: ничего не копируется, студент не
+  // привязывается, менеджер сбрасывает флаг в null одной кнопкой.
+  repeatOfId String?
+  repeatOf   Application?  @relation("ApplicationRepeat", fields: [repeatOfId], references: [id], onDelete: SetNull)
+  repeats    Application[] @relation("ApplicationRepeat")
+
+  // ТЗ 3.2 — таймлайн консультаций в карточке заявки.
+  consultations Consultation[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([status])
   @@index([direction])
@@ -117,8 +179,23 @@ model Application {
   @@index([chinaManagerId])
   @@index([programId])
   @@index([deletedAt])
-  // Composite для главного списка заявок (WHERE deletedAt IS NULL ORDER BY createdAt DESC)
+  // Старый индекс НЕ удаляем: db push сделает реальный DROP INDEX, а он всё
+  // ещё обслуживает stats() и любые запросы, которые про архив не знают.
   @@index([deletedAt, createdAt(sort: Desc)])
+  // ГЛАВНЫЙ индекс вкладок «Все» / «Новые» / «В работе»:
+  // deletedAt IS NULL AND archivedAt IS NULL [AND status=?] ORDER BY createdAt DESC.
+  // Обе ведущие колонки зафиксированы условием IS NULL, поэтому порядок по
+  // createdAt DESC берётся прямо из индекса — сортировки не будет. Он же
+  // обслуживает фильтр по датам (createdAt BETWEEN — range по последней колонке).
+  @@index([deletedAt, archivedAt, createdAt(sort: Desc)])
+  // Вкладка + фильтр по источнику: «сколько лидов дал Instagram за март».
+  // Отдельный индекс, потому что source встаёт МЕЖДУ archivedAt и createdAt,
+  // а значит из индекса выше сортировка бы не вышла.
+  @@index([deletedAt, archivedAt, source, createdAt(sort: Desc)])
+  // «Этот человек уже обращался?» — на каждое создание заявки.
+  @@index([phoneNormalized])
+  // Цепочка обращений одного человека + вкладка «Ранее зарегистрированные».
+  @@index([repeatOfId])
 }
 
 model Student {
@@ -147,6 +224,8 @@ model Student {
   applications    Application[]
   payments        Payment[]
   paymentSchedule PaymentSchedule[]
+  // Раздел 3.2 ТЗ — таймлайн консультаций/собеседований в карточке студента.
+  consultations   Consultation[]
 
   @@index([direction])
   @@index([cabinet])
@@ -203,17 +282,48 @@ model Task {
   assignedTo   User       @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
   createdById  String?
   createdBy    User?      @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+
+  // ТЗ 3.2 — дата И ВРЕМЯ повторного звонка. Опционально: у существующих
+  // и у всех ручных задач срока нет. Хранится в UTC, как все DateTime схемы.
+  // Фронт вводит через <input type="datetime-local"> и шлёт new Date(v).toISOString():
+  // JS трактует datetime-local как ЛОКАЛЬНОЕ время браузера, а браузер менеджера
+  // стоит по Душанбе — «10:00» само превращается в 05:00Z, TZ-математики на
+  // сервере для этого пути не нужно вообще.
+  dueDate DateTime?
+
+  // КЛЮЧ ИДЕМПОТЕНТНОСТИ автосозданных задач. Формат '<тип>:<id источника>':
+  //   'consultation-followup:<consultationId>'  — волна 3
+  //   'academic-year:<studentId>:<год>'         — волна 4 (Multi-Grant)
+  // @unique — защита живёт в БД, а не в коде: два инстанса Railway, повторный
+  // прогон крона и рестарт контейнера ФИЗИЧЕСКИ не могут создать дубль,
+  // второй INSERT падает с P2002, сервис его молча глотает.
+  // Nullable: у ручных задач ключа нет, а в Postgres NULL'ы в unique-индексе
+  // между собой не конфликтуют — существующие строки проходят как есть.
+  // Следствие, которое надо знать: если менеджер soft-delete'нул автозадачу,
+  // планировщик её НЕ воскресит (ключ занят) — это правильное поведение.
+  // Поэтому пересинхронизация (перенос даты звонка) обязана искать задачу по
+  // originKey ВКЛЮЧАЯ deletedAt != null и явно решать, воскрешать или нет.
+  originKey String? @unique
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   // Проблема 11 аудита волны 1: раньше tasks.service.remove() делал
   // prisma.task.delete() — единственное физическое удаление в проекте,
   // прямое нарушение правила №1. Поле опциональное — безопасно для
   // `prisma db push --accept-data-loss` на боевой БД с существующими задачами.
   deletedAt DateTime?
 
+  // Обратная сторона 1:1 связи с консультацией (FK живёт на Consultation).
+  consultation Consultation? @relation("ConsultationFollowUpTask")
+
   @@index([assignedToId])
   @@index([status])
   @@index([deletedAt])
+  // «Мои задачи по срокам» + красный бейдж «просрочено» на странице Задачи.
+  @@index([assignedToId, status, dueDate])
+  // Планировщик и общий список «ближайшие сроки»:
+  // WHERE deletedAt IS NULL AND dueDate <= ? ORDER BY dueDate.
+  @@index([deletedAt, dueDate])
 }
 
 model Program {
@@ -495,4 +605,168 @@ model PaymentSchedule {
   @@index([studentId, deletedAt, stageOrder])
   @@index([deletedAt, dueDate])
   @@index([contractId])
+}
+
+// =====================================================================
+// Раздел 3 ТЗ (волна 3): база консультаций/собеседований + планировщик.
+// =====================================================================
+
+// ТЗ 3.2 различает «очную консультацию» и «собеседование»: разные события,
+// разная длительность, разный смысл в отчётности.
+// Здесь enum, а НЕ String (в отличие от Application.source): набор закрыт
+// самим ТЗ и меняться не будет, а таблица НОВАЯ — создание типа с нуля не
+// трогает ни одной живой строки, значит риск `db push` нулевой.
+enum ConsultationKind {
+  CONSULTATION
+  INTERVIEW
+}
+
+// «Решение клиента», которое менеджер фиксирует ПОСЛЕ повторного звонка —
+// ради этого ТЗ 3.2 и требует автозадачу («для уточнения решения клиента»).
+// null = решение ещё не зафиксировано, звонок не состоялся.
+enum ConsultationOutcome {
+  THINKING // думает, нужен ещё один контакт
+  AGREED // согласен, оформляем заявку
+  REFUSED // отказ
+  UNREACHABLE // не дозвонились
+}
+
+// ТЗ 3.2 — «База данных консультаций и собеседований».
+// ОТДЕЛЬНАЯ модель, а не статус у Application. Три причины:
+//  1) Application — позиция в ВОРОНКЕ (NEW→…→ENROLLED). На каждую смену
+//     статуса applications.service шлёт клиенту SMS и считает STAGE_ORDER;
+//     фиктивный статус CONSULTATION сломал бы и рассылку, и аналитику.
+//  2) Консультация — СОБЫТИЕ, их у одного человека несколько: до заявки,
+//     между этапами и после зачисления. «Одна консультация = одна заявка»
+//     раздула бы список заявок и все существующие счётчики.
+//  3) У Application поле `direction` ОБЯЗАТЕЛЬНОЕ, а пришедший в офис человек
+//     направление ещё не выбрал. Пришлось бы либо писать фиктивное значение,
+//     либо ослаблять обязательное поле на 229 живых строках.
+model Consultation {
+  id String @id @default(uuid())
+
+  // Три поля, которые ТЗ 3.2 требует фиксировать явно.
+  fullName String
+  phone    String
+  purpose  String // «цель обращения» — свободный текст, менеджер пишет как сказал клиент
+
+  // Тот же нормализованный ключ, что у Application.phoneNormalized. По нему
+  // собирается история обращений человека, у которого ещё нет ни заявки,
+  // ни карточки студента. Только для ЧТЕНИЯ истории — автосклейки по нему нет.
+  phoneNormalized String?
+
+  kind      ConsultationKind     @default(CONSULTATION)
+  outcome   ConsultationOutcome?
+  // Источник привлечения — тот же справочник, что у заявки (common/lead-source.ts).
+  source    String?
+  sourceDetail String?
+  // Направление, если человек уже определился. Опционально — на консультации
+  // его часто ещё нет; при конвертации в заявку переносится как есть.
+  direction Direction?
+  comment   String?
+
+  // Когда консультация ФАКТИЧЕСКИ проведена. Отдельно от createdAt: менеджер
+  // вносит вчерашнюю встречу сегодня, а отчёт «сколько консультаций за неделю»
+  // обязан считаться по факту, а не по моменту ввода в CRM. Та же причина,
+  // по которой у Payment есть paidAt отдельно от createdAt.
+  heldAt DateTime @default(now())
+
+  // Ответственный менеджер — ЕМУ уходит автозадача на повторный звонок.
+  managerId   String?
+  manager     User?   @relation("ConsultationManager", fields: [managerId], references: [id], onDelete: SetNull)
+  // Кто внёс запись: администратор может зафиксировать встречу за менеджера.
+  // Тот же раздельный учёт «исполнитель/автор», что у Payment.createdBy/submittedBy.
+  createdById String?
+  createdBy   User?   @relation("ConsultationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Обе связи ОПЦИОНАЛЬНЫ и обе могут быть заполнены одновременно.
+  // Человек «с улицы» не имеет ни заявки, ни студента — это нормальное
+  // состояние данных, а не дефект. Связь ставится ТОЛЬКО явным действием
+  // («Создать заявку из консультации») либо переносится там, где она уже
+  // доказана (заявка получила studentId → её консультации получают тот же).
+  // По совпадению телефона связь не проставляется НИКОГДА: в Таджикистане
+  // один номер регулярно принадлежит семье, автосклейка объединила бы брата
+  // с сестрой и увела бы чужую карточку не тому менеджеру.
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  studentId     String?
+  student       Student?     @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  // ТЗ 3.2 — дата и время ПОВТОРНОГО ЗВОНКА.
+  followUpAt     DateTime?
+  // Автозадача, созданная СИНХРОННО при сохранении консультации. Связь 1:1,
+  // поэтому FK помечен @unique. FK живёт здесь, а не на Task: Task — общая
+  // таблица всего проекта, навешивать на неё по FK под каждую будущую
+  // сущность-источник нельзя, у неё один универсальный ключ — originKey.
+  followUpTaskId String?   @unique
+  followUpTask   Task?     @relation("ConsultationFollowUpTask", fields: [followUpTaskId], references: [id], onDelete: SetNull)
+  // Флаг идемпотентности для планировщика: напоминание «сегодня звонок»
+  // уходит РОВНО ОДИН РАЗ. Джоба сначала атомарно занимает строку
+  // (updateMany where { id, reminderSentAt: null } → count === 1 значит «моё»),
+  // и только потом шлёт уведомление. Два инстанса не отправят его дважды.
+  reminderSentAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Главный список раздела: WHERE deletedAt IS NULL ORDER BY heldAt DESC
+  // (+ фильтр по датам heldAt BETWEEN — range по последней колонке).
+  @@index([deletedAt, heldAt(sort: Desc)])
+  // Вкладка «Мои» и фильтр по ответственному менеджеру (ТЗ 3.1, тот же набор).
+  @@index([deletedAt, managerId, heldAt(sort: Desc)])
+  // История обращений по номеру — блок в карточке заявки/студента.
+  @@index([phoneNormalized, heldAt(sort: Desc)])
+  // Таймлайн консультаций внутри карточки заявки/студента.
+  @@index([applicationId])
+  @@index([studentId])
+  // Планировщик, джоба напоминаний:
+  // WHERE deletedAt IS NULL AND reminderSentAt IS NULL AND followUpAt <= ?
+  @@index([deletedAt, reminderSentAt, followUpAt])
+}
+
+// Состояние планировщика (@nestjs/schedule). Одна строка на джобу, 3–5 строк
+// всего. Таблица нужна НЕ для корректности — идемпотентность обеспечена на
+// уровне данных (Task.originKey @unique, Consultation.reminderSentAt,
+// updateMany с условием) — а для двух вещей:
+//  1) ЗАХВАТ РАБОТЫ между несколькими инстансами Railway БЕЗ Redis. Атомарный
+//     compare-and-swap одним запросом:
+//       updateMany({ where: { job, OR: [{ running: false },
+//                                       { lockedAt: { lt: staleCutoff } }] },
+//                    data:  { running: true, lockedAt: now, lockedBy: instanceId } })
+//     Под READ COMMITTED второй инстанс блокируется на той же строке,
+//     после коммита первого перечитывает её, не проходит по WHERE и получает
+//     count = 0 → тихо выходит. Никаких advisory-локов и raw SQL.
+//  2) НАБЛЮДАЕМОСТЬ: Основатель видит на GET /scheduler/status, что планировщик
+//     жив, когда был последний успешный прогон и какая была последняя ошибка.
+// lockedAt + порог протухания решают падение контейнера посреди прогона:
+// running останется true, но через STALE_LOCK_MS работу можно перезахватить.
+// deletedAt тут нет намеренно: это операционное состояние процесса, а не
+// бизнес-данные; строки только upsert'ятся и никогда не удаляются.
+model SchedulerRun {
+  id String @id @default(uuid())
+
+  // ScheduledJob.name — стабильный идентификатор джобы в коде.
+  job String @unique
+
+  running  Boolean   @default(false)
+  lockedAt DateTime?
+  // Кто держит работу: RAILWAY_REPLICA_ID либо hostname+pid. Нужен, чтобы в
+  // логах было видно, какой инстанс подвис.
+  lockedBy String?
+
+  lastRunAt DateTime?
+  lastOkAt  DateTime?
+  lastError String?
+
+  // Счётчики последнего прогона — отдаются в /scheduler/status.
+  lastCreated Int @default(0)
+  lastSkipped Int @default(0)
+  runs        Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Индексов кроме @unique(job) нет НАМЕРЕННО: в таблице 3–5 строк, любой
+  // дополнительный индекс здесь только замедлил бы запись при каждом тике.
 }

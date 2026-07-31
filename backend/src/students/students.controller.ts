@@ -26,6 +26,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { fixFilenameEncoding } from '../common/upload-utils';
 import { assertUploadableDocumentType } from '../common/documents';
+import { parsePage, parsePageSize } from '../common/pagination';
 
 const uploadStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -95,8 +96,8 @@ export class StudentsController {
       currentUserId: user?.id,
       currentUserRole: user?.role,
       stage: stage || undefined,
-      page: page ? parseInt(page, 10) : undefined,
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+      page: parsePage(page),
+      pageSize: parsePageSize(pageSize),
     });
   }
 

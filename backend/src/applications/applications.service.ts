@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException, OnModuleInit } from '@nestjs/common';
 import { ApplicationStatus, Direction, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
@@ -15,6 +15,9 @@ import { canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
+import { normalizePhone } from '../common/phone';
+import { normalizeSource } from '../common/lead-source';
+import { findRepeatOfId } from '../common/application-repeat';
 
 const CABINET_BY_DIRECTION: Record<Direction, number> = {
   BACHELOR: 1,
@@ -52,6 +55,10 @@ const MANAGER_INCLUDE = {
   manager: { select: { id: true, fullName: true, email: true } },
   chinaManager: { select: { id: true, fullName: true, email: true } },
   program: true,
+  // Раздел 3.1 ТЗ: банер «в архиве» в карточке заявки должен показывать, кто
+  // и когда её архивировал — без этого include пришлось бы делать второй
+  // запрос на каждое открытие карточки.
+  archivedBy: { select: { id: true, fullName: true } },
 };
 
 // Облегчённый include для СПИСКА заявок: только то, что нужно в таблице.
@@ -63,10 +70,35 @@ const APPLICATION_LIST_INCLUDE = {
   chinaManager: { select: { id: true, fullName: true } },
 };
 
+/** ТЗ 3.1 — вкладки раздела «Заявки». 'all' — дефолт. */
+export type ApplicationTab = 'all' | 'new' | 'in_work' | 'archive';
+
+export interface ApplicationListFilters {
+  status?: ApplicationStatus;
+  direction?: Direction;
+  search?: string;
+  mine?: boolean;
+  managerUserId?: string;
+  currentUserId?: string;
+  currentUserRole?: Role;
+  /** ТЗ 3.1 — источник привлечения. 'NONE' — отдельный пункт «Не указан» (source: null). */
+  source?: string;
+  /** ТЗ 3.1 — фильтр по датам (createdAt), копия подхода activity.service.ts. */
+  from?: Date;
+  to?: Date;
+  /** true — только заявки с repeatOfId (повторные обращения). */
+  repeat?: boolean;
+  /** Серверная пагинация. Если не передано — возвращаем массив (бэк-совместимость). */
+  page?: number;
+  pageSize?: number;
+}
+
 type CurrentUser = { id: string; role: Role };
 
 @Injectable()
-export class ApplicationsService {
+export class ApplicationsService implements OnModuleInit {
+  private readonly logger = new Logger(ApplicationsService.name);
+
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
@@ -77,6 +109,56 @@ export class ApplicationsService {
     private realtime: RealtimeGateway,
     private fileResolver: FileResolverService,
   ) {}
+
+  /**
+   * Раздел 3.1 ТЗ: разовый идемпотентный бэкфилл phoneNormalized для заявок,
+   * созданных до появления этого поля (229 исторических строк). Условие
+   * `phoneNormalized: null` в WHERE делает вызов идемпотентным — уже
+   * обработанные строки не попадут в выборку на следующем старте. Батч
+   * ограничен (с большим запасом на вырост) — на текущем объёме это один
+   * проход, при 10x данных не блокирует бесконечно.
+   * Запускается в фоне (промис не awaited внутри onModuleInit), чтобы не
+   * задерживать старт приложения.
+   */
+  async onModuleInit(): Promise<void> {
+    // .catch() ОБЯЗАТЕЛЕН. Без него любая транзиентная ошибка БД на старте
+    // (Railway поднимает Postgres дольше приложения, обрыв пула, таймаут
+    // первого коннекта) превращается в unhandled rejection, а Node с
+    // дефолтными настройками валит на этом процесс — контейнер уходит
+    // в рестарт-луп из-за необязательного фонового бэкфилла.
+    // Не страшно, если он не отработал: условие `phoneNormalized: null`
+    // делает его идемпотентным, следующий старт просто повторит.
+    void this.backfillPhoneNormalized().catch((e) => {
+      this.logger.warn(
+        `Бэкфилл phoneNormalized не выполнен (повторится при следующем старте): ${e?.message ?? e}`,
+      );
+    });
+  }
+
+  private async backfillPhoneNormalized(): Promise<void> {
+    const BATCH = 1000;
+    const rows = await this.prisma.application.findMany({
+      where: { phoneNormalized: null, deletedAt: null },
+      select: { id: true, phone: true },
+      take: BATCH,
+    });
+    if (!rows.length) return;
+
+    let filled = 0;
+    for (const row of rows) {
+      // Заявки без распознаваемого телефона (легаси из students.service,
+      // `phones[0] || ''`) останутся null и будут перечитываться на каждом
+      // старте — это ожидаемо (см. common/phone.ts) и безопасно: их всего
+      // ~1000 максимум за проход, и они физически не могут дать корректный ключ.
+      const normalized = normalizePhone(row.phone);
+      if (!normalized) continue;
+      await this.prisma.application
+        .update({ where: { id: row.id }, data: { phoneNormalized: normalized } })
+        .catch(() => undefined);
+      filled += 1;
+    }
+    this.logger.log(`Бэкфилл phoneNormalized: просмотрено ${rows.length}, заполнено ${filled}`);
+  }
 
   // Порядок этапов воронки — для определения, "понизили" или "продвинули" заявку
   private static STAGE_ORDER: ApplicationStatus[] = [
@@ -132,14 +214,33 @@ export class ApplicationsService {
   };
 
   async create(dto: CreateApplicationDto) {
+    const phone = dto.phone.trim();
+    const email = dto.email?.trim() || null;
+    const phoneNormalized = normalizePhone(phone);
+    // POST /applications/public — единственный путь, где источник по
+    // умолчанию проставляется на сервере (это форма сайта в буквальном
+    // смысле). Остальные пути создания заявок (students.service.ts) не
+    // должны наследовать этот дефолт — иначе офисные визиты помечались бы
+    // "Сайт". @IsIn(LEAD_SOURCE_VALUES) в DTO уже отсеял мусор до сюда.
+    const source = normalizeSource(dto.source) ?? 'WEBSITE';
+    const sourceDetail = dto.sourceDetail?.trim() || null;
+    // ТЗ 3.1 — «повторное обращение»: раньше телефон/email этого человека
+    // уже встречались? Раньше самой заявки её ещё нет в БД, поэтому исключать
+    // self здесь не нужно.
+    const repeatOfId = await findRepeatOfId(this.prisma, phoneNormalized, email);
+
     const app = await this.prisma.application.create({
       data: {
         fullName: dto.fullName.trim(),
-        phone: dto.phone.trim(),
-        email: dto.email?.trim() || null,
+        phone,
+        email,
         direction: dto.direction,
         comment: dto.comment?.trim() || null,
         programId: dto.programId || null,
+        source,
+        sourceDetail,
+        phoneNormalized,
+        repeatOfId,
       },
     });
 
@@ -187,26 +288,36 @@ export class ApplicationsService {
     // перезапрашивает список по HTTP, где авторизация уже проверена;
     // сама заявка ещё не содержит studentId/PII на этом этапе).
     this.realtime.emitAllStaff('application:new', { id: app.id });
-    return app;
+
+    // ЭТОТ ОТВЕТ УХОДИТ АНОНИМУ (POST /applications/public с лендинга).
+    // Возвращать весь ряд нельзя: волна 3 добавила в Application поля
+    // repeatOfId и phoneNormalized. repeatOfId — это UUID ЧУЖОЙ, ранее
+    // созданной заявки того же человека, то есть любой желающий мог бы
+    // отправить форму с чужим номером телефона и узнать (а) что этот человек
+    // уже обращался в агентство, и (б) реальный UUID его заявки.
+    // До волны 3 в ответе не было ни одного поля, ссылающегося на другие
+    // записи, поэтому проблема новая. Отдаём ровно то, что нужно лендингу
+    // для показа «спасибо, заявка принята».
+    return {
+      id: app.id,
+      fullName: app.fullName,
+      direction: app.direction,
+      status: app.status,
+      createdAt: app.createdAt,
+    };
   }
 
-  async findAll(filters: {
-    status?: ApplicationStatus;
-    direction?: Direction;
-    search?: string;
-    mine?: boolean;
-    managerUserId?: string;
-    currentUserId?: string;
-    currentUserRole?: Role;
-    /** Серверная пагинация. Если не передано — возвращаем массив (бэк-совместимость). */
-    page?: number;
-    pageSize?: number;
-  }) {
-    // Soft-delete: всегда исключаем удалённые заявки
-    const where: Prisma.ApplicationWhereInput = { deletedAt: null };
+  /**
+   * Общие условия фильтрации, ОБЩИЕ для findAll() и tabCounts() — без этого
+   * счётчики вкладок разъехались бы со списком при любой правке одного из
+   * двух мест (см. риск 6 проекта архитектора: список vs дашборд).
+   */
+  private buildFilterConditions(
+    filters: Omit<ApplicationListFilters, 'page' | 'pageSize'>,
+  ): Prisma.ApplicationWhereInput[] {
     const and: Prisma.ApplicationWhereInput[] = [];
-    if (filters.status) where.status = filters.status;
-    if (filters.direction) where.direction = filters.direction;
+    if (filters.status) and.push({ status: filters.status });
+    if (filters.direction) and.push({ direction: filters.direction });
     // EMPLOYEE всегда видит только свои заявки (даже если mine=false на фронте).
     const restrictToMine =
       (filters.mine && filters.currentUserId) ||
@@ -229,6 +340,18 @@ export class ApplicationsService {
         ],
       });
     }
+    // 'NONE' — обязательный пункт фильтра: без него 229 исторических заявок
+    // без источника недостижимы ни одним значением фильтра.
+    if (filters.source !== undefined) {
+      and.push({ source: filters.source === 'NONE' ? null : filters.source });
+    }
+    if (filters.from || filters.to) {
+      const createdAt: Prisma.DateTimeFilter = {};
+      if (filters.from) createdAt.gte = filters.from;
+      if (filters.to) createdAt.lte = filters.to;
+      and.push({ createdAt });
+    }
+    if (filters.repeat) and.push({ repeatOfId: { not: null } });
     if (filters.search) {
       and.push({
         OR: [
@@ -238,7 +361,35 @@ export class ApplicationsService {
         ],
       });
     }
-    if (and.length) where.AND = and;
+    return and;
+  }
+
+  /**
+   * ТЗ 3.1 — условие конкретной вкладки. Пересечение 'new'/'in_work' с
+   * 'archive' для НЕархивированных повторных обращений НАМЕРЕННОЕ (см.
+   * archiveRule проекта архитектора): свежий повтор обязан остаться в
+   * очереди «Новые», а во вкладке «Архив» виден под другим углом.
+   */
+  private tabCondition(tab: ApplicationTab | undefined): Prisma.ApplicationWhereInput {
+    switch (tab) {
+      case 'new':
+        return { archivedAt: null, status: 'NEW' };
+      case 'in_work':
+        return { archivedAt: null, status: { not: 'NEW' } };
+      case 'archive':
+        return { OR: [{ archivedAt: { not: null } }, { repeatOfId: { not: null } }] };
+      case 'all':
+      default:
+        return { archivedAt: null };
+    }
+  }
+
+  async findAll(filters: ApplicationListFilters & { tab?: ApplicationTab }) {
+    // Soft-delete: всегда исключаем удалённые заявки
+    const where: Prisma.ApplicationWhereInput = { deletedAt: null };
+    const and = this.buildFilterConditions(filters);
+    and.push(this.tabCondition(filters.tab));
+    where.AND = and;
 
     if (!filters.page || !filters.pageSize) {
       return this.prisma.application.findMany({
@@ -262,6 +413,28 @@ export class ApplicationsService {
       this.prisma.application.count({ where }),
     ]);
     return { items, total, page, pageSize };
+  }
+
+  /**
+   * ТЗ 3.1 — счётчики вкладок с учётом ВСЕХ текущих фильтров, КРОМЕ tab
+   * (иначе переключение вкладки туда-обратно теряло бы контекст фильтра).
+   * 4 count() в одном $transaction — на объёме проекта (229 заявок) это
+   * ничто; при кратном росте базы (~100k+) заменить на один GROUP BY —
+   * см. риск 15 проекта архитектора.
+   */
+  async tabCounts(filters: ApplicationListFilters) {
+    const baseAnd = this.buildFilterConditions(filters);
+    const withTab = (tab: ApplicationTab): Prisma.ApplicationWhereInput => ({
+      deletedAt: null,
+      AND: [...baseAnd, this.tabCondition(tab)],
+    });
+    const [all, newCount, inWork, archive] = await this.prisma.$transaction([
+      this.prisma.application.count({ where: withTab('all') }),
+      this.prisma.application.count({ where: withTab('new') }),
+      this.prisma.application.count({ where: withTab('in_work') }),
+      this.prisma.application.count({ where: withTab('archive') }),
+    ]);
+    return { all, new: newCount, in_work: inWork, archive };
   }
 
   /**
@@ -309,9 +482,32 @@ export class ApplicationsService {
     );
   }
 
+  /** ActivityLog при ручной правке источника через карточку заявки (ТЗ 3.1). */
+  private logSourceChange(existing: { source: string | null }, dto: UpdateApplicationDto, updated: { studentId: string | null; fullName: string }, user: CurrentUser) {
+    if (dto.source === undefined || dto.source === existing.source) return;
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'APPLICATION_SOURCE_CHANGE',
+        studentId: updated.studentId,
+        studentName: updated.fullName,
+        details: `Источник: ${existing.source ?? 'не указан'} → ${dto.source}`,
+      })
+      .catch(() => undefined);
+  }
+
   async update(id: string, dto: UpdateApplicationDto, user: CurrentUser) {
     const existing = await this.findOne(id);
     this.ensureCanEdit(existing, user);
+
+    // Ручная правка телефона обязана держать phoneNormalized (ключ поиска
+    // повторных обращений) в актуальном состоянии — иначе денормализованная
+    // колонка тихо разъедется с исходным полем после первого же PATCH.
+    const updateData: Prisma.ApplicationUncheckedUpdateInput = { ...dto };
+    if (dto.phone !== undefined) {
+      updateData.phoneNormalized = normalizePhone(dto.phone);
+    }
 
     // Авто-создание студента при переходе NEW → DOCS_REVIEW (если ещё не создан)
     if (
@@ -350,7 +546,7 @@ export class ApplicationsService {
       }
       const updated = await this.prisma.application.update({
         where: { id },
-        data: { ...dto, ...(studentId ? { studentId } : {}) },
+        data: { ...updateData, ...(studentId ? { studentId } : {}) },
         include: MANAGER_INCLUDE,
       });
       // Проблема B аудита: раньше сюда летел весь `updated` с MANAGER_INCLUDE
@@ -380,6 +576,7 @@ export class ApplicationsService {
           details: `Статус: ${existing.status} → ${updated.status}`,
         })
         .catch(() => undefined);
+      this.logSourceChange(existing, dto, updated, user);
       return updated;
     }
 
@@ -391,7 +588,7 @@ export class ApplicationsService {
 
     const updated = await this.prisma.application.update({
       where: { id },
-      data: dto,
+      data: updateData,
       include: MANAGER_INCLUDE,
     });
     // Проблема B аудита: было {application: updated} с полными данными
@@ -431,6 +628,7 @@ export class ApplicationsService {
         .catch(() => undefined);
     }
 
+    this.logSourceChange(existing, dto, updated, user);
     return updated;
   }
 
@@ -526,6 +724,195 @@ export class ApplicationsService {
     return updated;
   }
 
+  /**
+   * ТЗ 3.1 — ручной архив. Архив НЕ удаление: deletedAt не трогаем, данные
+   * остаются полностью на месте и доступны через вкладку «Архив» / GET по id.
+   * Права — те же, что на редактирование заявки (назначенные менеджеры +
+   * FOUNDER/ADMIN): операция полностью обратима, злоупотребление ловится
+   * журналом активности.
+   */
+  async archive(id: string, reason: string | undefined, user: CurrentUser) {
+    const existing = await this.findOne(id);
+    this.ensureCanEdit(existing, user);
+    if (existing.archivedAt) {
+      throw new ConflictException('Заявка уже в архиве');
+    }
+    const trimmedReason = reason?.trim() || '';
+    const updated = await this.prisma.application.update({
+      where: { id },
+      data: {
+        archivedAt: new Date(),
+        archivedById: user.id,
+        archiveReason: trimmedReason ? `MANUAL: ${trimmedReason}` : 'MANUAL',
+      },
+      include: MANAGER_INCLUDE,
+    });
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'APPLICATION_ARCHIVE',
+        studentId: updated.studentId,
+        studentName: updated.fullName,
+        details: trimmedReason ? `Заявка отправлена в архив: ${trimmedReason}` : 'Заявка отправлена в архив',
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(
+      updated,
+      'application:updated',
+      { id: updated.id, studentId: updated.studentId },
+      updated.studentId ? { studentId: updated.studentId } : undefined,
+    );
+    return updated;
+  }
+
+  /** ТЗ 3.1 — «Вернуть из архива»: archivedAt = null, данные не трогаются. */
+  async unarchive(id: string, user: CurrentUser) {
+    const existing = await this.findOne(id);
+    this.ensureCanEdit(existing, user);
+    if (!existing.archivedAt) {
+      throw new ConflictException('Заявка не в архиве');
+    }
+    const updated = await this.prisma.application.update({
+      where: { id },
+      data: { archivedAt: null, archivedById: null, archiveReason: null },
+      include: MANAGER_INCLUDE,
+    });
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'APPLICATION_UNARCHIVE',
+        studentId: updated.studentId,
+        studentName: updated.fullName,
+        details: 'Заявка возвращена из архива',
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(
+      updated,
+      'application:updated',
+      { id: updated.id, studentId: updated.studentId },
+      updated.studentId ? { studentId: updated.studentId } : undefined,
+    );
+    return updated;
+  }
+
+  /**
+   * ТЗ 3.1 — эвристика по телефону/email ГАРАНТИРОВАННО даёт ложные
+   * срабатывания (общий номер на семью). «Не повторное» — обязательный
+   * элемент: сбрасывает repeatOfId без каких-либо иных последствий.
+   */
+  async clearRepeat(id: string, user: CurrentUser) {
+    const existing = await this.findOne(id);
+    this.ensureCanEdit(existing, user);
+    if (!existing.repeatOfId) return existing;
+    const updated = await this.prisma.application.update({
+      where: { id },
+      data: { repeatOfId: null },
+      include: MANAGER_INCLUDE,
+    });
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'APPLICATION_CLEAR_REPEAT',
+        studentId: updated.studentId,
+        studentName: updated.fullName,
+        details: 'Снята пометка «повторное обращение»',
+      })
+      .catch(() => undefined);
+    return updated;
+  }
+
+  /**
+   * ТЗ 3.1 — «Обращения с этого номера»: заявки с тем же phoneNormalized
+   * (или тем же email, регистронезависимо), кроме самой заявки. IDOR-защита:
+   * каждый элемент цепочки прогоняется через canAccessStudentRecord — те, на
+   * которые у EMPLOYEE нет прав, схлопываются в hiddenCount БЕЗ ФИО и id.
+   */
+  async history(id: string, user: CurrentUser) {
+    const app = await this.findOne(id, user);
+    const or: Prisma.ApplicationWhereInput[] = [];
+    if (app.phoneNormalized) or.push({ phoneNormalized: app.phoneNormalized });
+    if (app.email) or.push({ email: { equals: app.email, mode: 'insensitive' } });
+    if (!or.length) return { items: [], hiddenCount: 0 };
+
+    const [chain, consultations] = await Promise.all([
+      this.prisma.application.findMany({
+        where: { deletedAt: null, id: { not: id }, OR: or },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          fullName: true,
+          status: true,
+          createdAt: true,
+          source: true,
+          managerId: true,
+          chinaManagerId: true,
+        },
+      }),
+      app.phoneNormalized
+        ? this.prisma.consultation.findMany({
+            where: { deletedAt: null, phoneNormalized: app.phoneNormalized, applicationId: { not: id } },
+            orderBy: { heldAt: 'desc' },
+            select: {
+              id: true,
+              fullName: true,
+              kind: true,
+              heldAt: true,
+              source: true,
+              managerId: true,
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    type HistoryItem = {
+      id: string;
+      kind: 'application' | 'consultation';
+      fullName: string;
+      status: string | null;
+      createdAt: Date;
+      source: string | null;
+    };
+    const items: HistoryItem[] = [];
+    let hiddenCount = 0;
+
+    for (const c of chain) {
+      if (canAccessStudentRecord(c, user)) {
+        items.push({
+          id: c.id,
+          kind: 'application',
+          fullName: c.fullName,
+          status: c.status,
+          createdAt: c.createdAt,
+          source: c.source,
+        });
+      } else {
+        hiddenCount += 1;
+      }
+    }
+    for (const c of consultations) {
+      if (canAccessStudentRecord({ managerId: c.managerId }, user)) {
+        items.push({
+          id: c.id,
+          kind: 'consultation',
+          fullName: c.fullName,
+          // У консультации нет статуса заявки — вместо него отдаём тип
+          // (консультация/собеседование), UI различает по kind.
+          status: c.kind,
+          createdAt: c.heldAt,
+          source: c.source,
+        });
+      } else {
+        hiddenCount += 1;
+      }
+    }
+    items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    return { items, hiddenCount };
+  }
+
   private async missingRequiredDocs(studentId: string): Promise<string[]> {
     const docs = await this.prisma.document.findMany({
       where: { studentId },
@@ -572,19 +959,20 @@ export class ApplicationsService {
   }
 
   async stats(user?: { id: string; role: Role }) {
-    // Soft-delete: считаем только активные заявки. EMPLOYEE видит только свои.
-    const where: Prisma.ApplicationWhereInput =
+    // Soft-delete + не в архиве: список по умолчанию (вкладка «Все») тоже
+    // исключает архивные (см. tabCondition('all')) — если дашборд считать
+    // иначе, числа между ним и списком разойдутся (риск 6 проекта архитектора).
+    const scope: Prisma.ApplicationWhereInput =
       user && user.role === 'EMPLOYEE'
-        ? {
-            deletedAt: null,
-            OR: [{ managerId: user.id }, { chinaManagerId: user.id }],
-          }
-        : { deletedAt: null };
-    const [total, byStatus, byDirection] = await Promise.all([
+        ? { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] }
+        : {};
+    const where: Prisma.ApplicationWhereInput = { deletedAt: null, archivedAt: null, ...scope };
+    const [total, byStatus, byDirection, archived] = await Promise.all([
       this.prisma.application.count({ where }),
       this.prisma.application.groupBy({ by: ['status'], _count: true, where }),
       this.prisma.application.groupBy({ by: ['direction'], _count: true, where }),
+      this.prisma.application.count({ where: { deletedAt: null, archivedAt: { not: null }, ...scope } }),
     ]);
-    return { total, byStatus, byDirection };
+    return { total, byStatus, byDirection, archived };
   }
 }

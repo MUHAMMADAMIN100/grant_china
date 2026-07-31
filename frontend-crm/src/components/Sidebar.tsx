@@ -35,6 +35,7 @@ export default function Sidebar() {
   const links = [
     { to: '/dashboard', icon: 'dashboard', label: 'Дашборд' },
     { to: '/applications', icon: 'assignment', label: 'Заявки' },
+    { to: '/consultations', icon: 'record_voice_over', label: 'Консультации' },
     { to: '/students', icon: 'school', label: 'Студенты' },
     { to: '/finance', icon: 'payments', label: 'Финансы', badge: isPriv ? pendingCount : 0 },
     { to: '/programs', icon: 'menu_book', label: 'Программы' },

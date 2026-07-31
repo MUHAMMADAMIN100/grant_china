@@ -28,6 +28,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { fixFilenameEncoding } from '../common/upload-utils';
+import { parsePage, parsePageSize } from '../common/pagination';
 
 const receiptStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -118,8 +119,8 @@ export class PaymentsController {
         from: parseDateParam(from),
         to: parseDateParam(to),
         search,
-        page: page ? parseInt(page, 10) : undefined,
-        pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+        page: parsePage(page),
+        pageSize: parsePageSize(pageSize),
       },
       user,
     );
@@ -129,8 +130,8 @@ export class PaymentsController {
   @Roles(Role.FOUNDER, Role.ADMIN)
   pending(@Query('page') page?: string, @Query('pageSize') pageSize?: string) {
     return this.payments.findPending({
-      page: page ? parseInt(page, 10) : undefined,
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+      page: parsePage(page),
+      pageSize: parsePageSize(pageSize),
     });
   }
 

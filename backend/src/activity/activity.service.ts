@@ -29,7 +29,26 @@ export type ActivityAction =
   // @Roles(FOUNDER) в users.controller.ts).
   | 'USER_CREATE'
   | 'USER_ROLE_CHANGE'
-  | 'USER_DELETE';
+  | 'USER_DELETE'
+  // Раздел 3 ТЗ (волна 3) — заявки: архив/источник. Пишутся из
+  // applications.service.ts.
+  | 'APPLICATION_ARCHIVE'
+  | 'APPLICATION_UNARCHIVE'
+  | 'APPLICATION_SOURCE_CHANGE'
+  | 'APPLICATION_CLEAR_REPEAT'
+  // Раздел 3.2 ТЗ — консультации/собеседования. Пишутся из
+  // consultations.service.ts. actorId может быть null (планировщик/системные
+  // действия — см. jobs/application-auto-archive.job.ts, которая переиспользует
+  // APPLICATION_ARCHIVE выше с actorId: null).
+  | 'CONSULTATION_CREATE'
+  | 'CONSULTATION_UPDATE'
+  | 'CONSULTATION_DELETE'
+  | 'CONSULTATION_CONVERT'
+  // Системная (авто-созданная) задача — TasksService.createSystemTask().
+  // Единая точка входа для ВСЕХ автозадач: сейчас это консультации (ТЗ 3.2),
+  // волна 4 добавит сюда же напоминания о начале учебного года — оба случая
+  // логируются этим же action без правок в местах вызова.
+  | 'TASK_AUTO_CREATE';
 
 @Injectable()
 export class ActivityService {

@@ -11,12 +11,20 @@ import {
 } from '@nestjs/common';
 import { ApplicationStatus, Direction } from '@prisma/client';
 import { Throttle } from '@nestjs/throttler';
-import { ApplicationsService } from './applications.service';
+import { ApplicationsService, ApplicationTab } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { parsePage, parsePageSize } from '../common/pagination';
+
+/** ТЗ 3.1 — фильтр по датам: копия подхода activity.controller.ts (from/to как ISO-строки, верхнюю границу нормализует фронт). */
+function parseDateParam(raw: string | undefined): Date | undefined {
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
 
 // 2.2 аудита волны 2: RolesGuard навешен ПОМЕТОДНО (не на класс), как и был
 // JwtAuthGuard раньше — POST /applications/public должен остаться доступен
@@ -44,6 +52,11 @@ export class ApplicationsController {
     @Query('search') search?: string,
     @Query('mine') mine?: string,
     @Query('manager') manager?: string,
+    @Query('tab') tab?: ApplicationTab,
+    @Query('source') source?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('repeat') repeat?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -55,8 +68,13 @@ export class ApplicationsController {
       managerUserId: manager || undefined,
       currentUserId: user?.id,
       currentUserRole: user?.role,
-      page: page ? parseInt(page, 10) : undefined,
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+      tab,
+      source,
+      from: parseDateParam(from),
+      to: parseDateParam(to),
+      repeat: repeat === 'true',
+      page: parsePage(page),
+      pageSize: parsePageSize(pageSize),
     });
   }
 
@@ -66,10 +84,47 @@ export class ApplicationsController {
     return this.apps.stats(user);
   }
 
+  // ТЗ 3.1 — счётчики вкладок «Все» / «Новые» / «В работе» / «Архив» с учётом
+  // всех текущих фильтров кроме tab. Тот же набор query-параметров, что и list().
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('tab-counts')
+  tabCounts(
+    @CurrentUser() user: any,
+    @Query('status') status?: ApplicationStatus,
+    @Query('direction') direction?: Direction,
+    @Query('search') search?: string,
+    @Query('mine') mine?: string,
+    @Query('manager') manager?: string,
+    @Query('source') source?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('repeat') repeat?: string,
+  ) {
+    return this.apps.tabCounts({
+      status,
+      direction,
+      search,
+      mine: mine === 'true',
+      managerUserId: manager || undefined,
+      currentUserId: user?.id,
+      currentUserRole: user?.role,
+      source,
+      from: parseDateParam(from),
+      to: parseDateParam(to),
+      repeat: repeat === 'true',
+    });
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id')
   one(@Param('id') id: string, @CurrentUser() user: any) {
     return this.apps.findOne(id, user);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/history')
+  history(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.apps.history(id, user);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -90,6 +145,24 @@ export class ApplicationsController {
     @CurrentUser() user: any,
   ) {
     return this.apps.assignManager(id, body, user);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/archive')
+  archive(@Param('id') id: string, @Body() body: { reason?: string }, @CurrentUser() user: any) {
+    return this.apps.archive(id, body?.reason, user);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/unarchive')
+  unarchive(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.apps.unarchive(id, user);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/clear-repeat')
+  clearRepeat(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.apps.clearRepeat(id, user);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

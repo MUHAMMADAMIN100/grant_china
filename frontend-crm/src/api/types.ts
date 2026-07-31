@@ -98,6 +98,43 @@ export interface ManagerInfo {
   email: string;
 }
 
+// ============================================================================
+// ТЗ раздел 3.1 — источник привлечения. Единственный источник истины по
+// значениям — backend/src/common/lead-source.ts, этот массив его зеркалит
+// (порядок для UI задаётся здесь же). String, а не enum — см. обоснование
+// в backend-схеме: список каналов будет расти (волна 7, Chat Place).
+// ============================================================================
+export interface LeadSourceOption {
+  value: string;
+  label: string;
+}
+
+export const LEAD_SOURCES: readonly LeadSourceOption[] = [
+  { value: 'WEBSITE', label: 'Сайт' },
+  { value: 'INSTAGRAM', label: 'Instagram' },
+  { value: 'TELEGRAM', label: 'Telegram' },
+  { value: 'FACEBOOK', label: 'Facebook' },
+  { value: 'WHATSAPP', label: 'WhatsApp' },
+  { value: 'TIKTOK', label: 'TikTok' },
+  { value: 'REFERRAL', label: 'Рекомендация (сарафан)' },
+  { value: 'OFFICE_VISIT', label: 'Визит в офис' },
+  { value: 'ADS', label: 'Реклама' },
+  { value: 'OTHER', label: 'Другое' },
+] as const;
+
+export const LEAD_SOURCE_LABEL: Record<string, string> = Object.fromEntries(
+  LEAD_SOURCES.map((s) => [s.value, s.label]),
+);
+
+/** Для старых заявок (229 исторических) и консультаций без источника — честное «Не указан», а не пустота. */
+export function leadSourceLabel(source: string | null | undefined): string {
+  if (!source) return 'Не указан';
+  return LEAD_SOURCE_LABEL[source] ?? source;
+}
+
+/** ТЗ 3.1 — вкладки раздела «Заявки». 'all' — дефолт (см. applications.service.ts ApplicationTab). */
+export type ApplicationTab = 'all' | 'new' | 'in_work' | 'archive';
+
 export interface Application {
   id: string;
   fullName: string;
@@ -112,7 +149,19 @@ export interface Application {
   manager?: ManagerInfo | null;
   chinaManagerId: string | null;
   chinaManager?: ManagerInfo | null;
+  /** ТЗ 3.1 — источник привлечения. null у исторических заявок ("Не указан"). */
+  source: string | null;
+  sourceDetail: string | null;
+  /** ТЗ 3.1 — ручной/авто архив. Признак архивности — ЕДИНСТВЕННЫЙ: archivedAt !== null. */
+  archivedAt: string | null;
+  archivedById: string | null;
+  archivedBy?: { id: string; fullName: string } | null;
+  archiveReason: string | null;
+  /** ТЗ 3.1 — «повторное обращение»: ссылка на первую заявку с тем же телефоном/email. */
+  repeatOfId: string | null;
+  phoneNormalized?: string | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Document {
@@ -167,6 +216,10 @@ export interface Task {
   assignedTo?: { id: string; fullName: string; email: string };
   createdById: string | null;
   createdBy?: { id: string; fullName: string; email: string } | null;
+  /** ТЗ 3.2 — дата и время повторного звонка / срок задачи. null — срок не задан. */
+  dueDate: string | null;
+  /** Ключ идемпотентности автозадач ('consultation-followup:<id>' и т.п.). null у ручных задач. */
+  originKey: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -238,6 +291,77 @@ export const STUDENT_STATUS_BADGE: Record<StudentStatus, string> = {
   GRADUATED: 'badge-info',
   ARCHIVED: 'badge-gray',
 };
+
+// ============================================================================
+// ТЗ раздел 3.2 — «база данных консультаций и собеседований». Контракт
+// зеркалит backend/src/consultations/ (CONSULTATION_INCLUDE в
+// consultations.service.ts) — GET/POST/PATCH /consultations.
+// ============================================================================
+
+export type ConsultationKind = 'CONSULTATION' | 'INTERVIEW';
+
+/** «Решение клиента», фиксируется ПОСЛЕ повторного звонка. null — звонок ещё не состоялся/не обработан. */
+export type ConsultationOutcome = 'THINKING' | 'AGREED' | 'REFUSED' | 'UNREACHABLE';
+
+export const CONSULTATION_KIND_LABEL: Record<ConsultationKind, string> = {
+  CONSULTATION: 'Консультация',
+  INTERVIEW: 'Собеседование',
+};
+
+export const CONSULTATION_OUTCOME_LABEL: Record<ConsultationOutcome, string> = {
+  THINKING: 'Думает',
+  AGREED: 'Согласен',
+  REFUSED: 'Отказ',
+  UNREACHABLE: 'Не дозвонились',
+};
+
+export const CONSULTATION_OUTCOME_BADGE: Record<ConsultationOutcome, string> = {
+  THINKING: 'badge-warning',
+  AGREED: 'badge-success',
+  REFUSED: 'badge-danger',
+  UNREACHABLE: 'badge-gray',
+};
+
+export interface ConsultationLinkedApplication {
+  id: string;
+  status: ApplicationStatus;
+  fullName: string;
+}
+
+export interface ConsultationLinkedStudent {
+  id: string;
+  fullName: string;
+}
+
+export interface Consultation {
+  id: string;
+  fullName: string;
+  phone: string;
+  phoneNormalized: string | null;
+  purpose: string;
+  kind: ConsultationKind;
+  outcome: ConsultationOutcome | null;
+  source: string | null;
+  sourceDetail: string | null;
+  direction: Direction | null;
+  comment: string | null;
+  /** Когда консультация ФАКТИЧЕСКИ проведена (не момент ввода в CRM). */
+  heldAt: string;
+  managerId: string | null;
+  manager?: ManagerInfo | null;
+  createdById: string | null;
+  createdBy?: { id: string; fullName: string } | null;
+  applicationId: string | null;
+  application?: ConsultationLinkedApplication | null;
+  studentId: string | null;
+  student?: ConsultationLinkedStudent | null;
+  /** ТЗ 3.2 — дата и время повторного звонка. При заполнении синхронно создаётся задача (Task.originKey). */
+  followUpAt: string | null;
+  followUpTaskId: string | null;
+  reminderSentAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // ============================================================================
 // Финансы (ТЗ раздел 1): двухстороннее подтверждение платежей + поэтапная

@@ -7,6 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
 import Applications from './pages/Applications';
 import ApplicationDetail from './pages/ApplicationDetail';
+import Consultations from './pages/Consultations';
 import Students from './pages/Students';
 import StudentDetail from './pages/StudentDetail';
 import StudentNew from './pages/StudentNew';
@@ -39,6 +40,9 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/applications" element={<Applications />} />
         <Route path="/applications/:id" element={<ApplicationDetail />} />
+        {/* ТЗ 3.2 — доступна всем ролям, видимость (свои/все консультации)
+            режется внутри ConsultationsService, как /finance и /dashboard. */}
+        <Route path="/consultations" element={<Consultations />} />
         <Route path="/students" element={<Students />} />
         <Route path="/students/new" element={<StudentNew />} />
         <Route path="/students/:id" element={<StudentDetail />} />

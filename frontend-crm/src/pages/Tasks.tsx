@@ -9,8 +9,22 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import { compose, hasErrors, maxLen, minLen, required, validateAll } from '../utils/validators';
+import { formatDateTimeRu, toDatetimeLocalValue } from '../utils/datetime';
 
 type Scope = 'all' | 'mine';
+type DueFilter = '' | 'overdue' | 'today';
+
+/** true — срок прошёл и задача ещё не закрыта (ТЗ 3.2 — «мои задачи по срокам»). */
+function isOverdue(t: Task): boolean {
+  return !!t.dueDate && t.status !== 'DONE' && new Date(t.dueDate).getTime() < Date.now();
+}
+
+function isDueToday(t: Task): boolean {
+  if (!t.dueDate || t.status === 'DONE') return false;
+  const d = new Date(t.dueDate);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
 
 export default function Tasks() {
   const me = useAuth((s) => s.user);
@@ -20,15 +34,36 @@ export default function Tasks() {
   const [users, setUsers] = useState<User[]>([]);
   const [scope, setScope] = useState<Scope>(isAdmin ? 'all' : 'mine');
   const [search, setSearch] = useState('');
+  const [dueFilter, setDueFilter] = useState<DueFilter>('');
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', assignedToId: '' });
+  const [form, setForm] = useState({ title: '', description: '', assignedToId: '', dueDate: '' });
   const [submitting, setSubmitting] = useState(false);
+
+  // Инлайн-редактирование срока у уже существующей задачи (ТЗ 3.2 — перенос
+  // даты повторного звонка/срока). Отдельный маленький стейт вместо полноценной
+  // формы редактирования — так же лаконично, как переключатель статуса ниже.
+  const [dueEditId, setDueEditId] = useState<string | null>(null);
+  const [dueDraft, setDueDraft] = useState('');
+  const [dueSaving, setDueSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await listTasks(scope === 'mine', search || undefined);
+      let dueFrom: string | undefined;
+      let dueTo: string | undefined;
+      let overdue: boolean | undefined;
+      if (dueFilter === 'overdue') {
+        overdue = true;
+      } else if (dueFilter === 'today') {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date();
+        end.setHours(23, 59, 59, 999);
+        dueFrom = start.toISOString();
+        dueTo = end.toISOString();
+      }
+      const data = await listTasks({ mine: scope === 'mine', search: search || undefined, dueFrom, dueTo, overdue });
       setItems(data);
     } catch (e: any) {
       toast(e?.response?.data?.message || 'Ошибка загрузки', 'error');
@@ -41,7 +76,7 @@ export default function Tasks() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, search]);
+  }, [scope, search, dueFilter]);
 
   useRealtime({
     'task:new': () => load(),
@@ -77,9 +112,10 @@ export default function Tasks() {
         title: form.title.trim(),
         description: form.description.trim(),
         assignedToId: form.assignedToId,
+        dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : undefined,
       });
       toast('Задача создана. Сотрудник получит email и уведомление.', 'success');
-      setForm({ title: '', description: '', assignedToId: '' });
+      setForm({ title: '', description: '', assignedToId: '', dueDate: '' });
       setCreating(false);
       await load();
     } catch (err: any) {
@@ -116,6 +152,30 @@ export default function Tasks() {
       await load();
     } catch (e: any) {
       toast(e?.response?.data?.message || 'Ошибка удаления', 'error');
+    }
+  };
+
+  const openDueEdit = (t: Task) => {
+    setDueEditId(t.id);
+    setDueDraft(toDatetimeLocalValue(t.dueDate));
+  };
+
+  const cancelDueEdit = () => {
+    setDueEditId(null);
+    setDueDraft('');
+  };
+
+  const saveDueEdit = async (t: Task) => {
+    setDueSaving(true);
+    try {
+      await updateTask(t.id, { dueDate: dueDraft ? new Date(dueDraft).toISOString() : null });
+      toast(dueDraft ? 'Срок обновлён' : 'Срок снят', 'success');
+      cancelDueEdit();
+      await load();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка сохранения срока', 'error');
+    } finally {
+      setDueSaving(false);
     }
   };
 
@@ -168,6 +228,11 @@ export default function Tasks() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value as DueFilter)} title="Фильтр по сроку">
+            <option value="">Все сроки</option>
+            <option value="today">На сегодня</option>
+            <option value="overdue">Просроченные</option>
+          </select>
         </div>
         <AnimatePresence>
           {creating && isAdmin && (
@@ -220,11 +285,19 @@ export default function Tasks() {
                   ))}
                 </select>
               </div>
+              <div className="form-group">
+                <label>Срок (необязательно)</label>
+                <input
+                  type="datetime-local"
+                  value={form.dueDate}
+                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                />
+              </div>
               <div className="form-actions">
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => { setCreating(false); setForm({ title: '', description: '', assignedToId: '' }); }}
+                  onClick={() => { setCreating(false); setForm({ title: '', description: '', assignedToId: '', dueDate: '' }); }}
                 >
                   Отмена
                 </button>
@@ -262,6 +335,9 @@ export default function Tasks() {
               {items.map((t) => {
                 const isOwner = t.assignedToId === me?.id;
                 const canChange = isAdmin || isOwner;
+                const overdue = isOverdue(t);
+                const dueToday = !overdue && isDueToday(t);
+                const isAuto = t.createdById === null;
                 const statuses: { value: TaskStatus; icon: string; label: string }[] = [
                   { value: 'TODO', icon: 'radio_button_unchecked', label: 'К выполнению' },
                   { value: 'IN_PROGRESS', icon: 'autorenew', label: 'В работе' },
@@ -278,7 +354,14 @@ export default function Tasks() {
                     layout
                   >
                     <div className="task-content">
-                      <div className="task-title">{t.title}</div>
+                      <div className="task-title">
+                        {t.title}
+                        {isAuto && (
+                          <span className="badge badge-gray" style={{ marginLeft: 8 }} title="Создана автоматически системой">
+                            Авто
+                          </span>
+                        )}
+                      </div>
                       <div className="task-desc">{t.description}</div>
                       <div className="task-meta">
                         <span className={`badge ${TASK_STATUS_BADGE[t.status]}`}>{TASK_STATUS_LABEL[t.status]}</span>
@@ -297,7 +380,38 @@ export default function Tasks() {
                           <Icon name="schedule" size={14} />
                           {new Date(t.createdAt).toLocaleDateString('ru-RU')}
                         </span>
+                        {t.dueDate && dueEditId !== t.id && (
+                          <span className="task-meta-item" style={overdue ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
+                            <Icon name="event" size={14} />
+                            Срок: {formatDateTimeRu(t.dueDate)}
+                            {overdue && <span className="badge badge-danger" style={{ marginLeft: 6 }}>Просрочено</span>}
+                            {dueToday && <span className="badge badge-warning" style={{ marginLeft: 6 }}>Сегодня</span>}
+                          </span>
+                        )}
+                        {canChange && dueEditId !== t.id && (
+                          <button className="btn btn-sm btn-secondary" onClick={() => openDueEdit(t)} title="Изменить срок">
+                            <Icon name={t.dueDate ? 'edit_calendar' : 'event'} size={14} style={{ marginRight: 4 }} />
+                            {t.dueDate ? 'Срок' : 'Задать срок'}
+                          </button>
+                        )}
                       </div>
+
+                      {dueEditId === t.id && (
+                        <div className="task-meta" style={{ marginTop: 8 }}>
+                          <input
+                            type="datetime-local"
+                            value={dueDraft}
+                            onChange={(e) => setDueDraft(e.target.value)}
+                            disabled={dueSaving}
+                          />
+                          <button className="btn btn-sm btn-primary" onClick={() => saveDueEdit(t)} disabled={dueSaving}>
+                            Сохранить
+                          </button>
+                          <button className="btn btn-sm btn-secondary" onClick={cancelDueEdit} disabled={dueSaving}>
+                            Отмена
+                          </button>
+                        </div>
+                      )}
 
                       <div className="task-status-switch">
                         {statuses.map((s) => (

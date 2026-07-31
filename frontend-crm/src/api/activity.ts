@@ -23,7 +23,20 @@ export type ActivityAction =
   // backend/src/users/users.service.ts, видны только в журнале FOUNDER/ADMIN.
   | 'USER_CREATE'
   | 'USER_ROLE_CHANGE'
-  | 'USER_DELETE';
+  | 'USER_DELETE'
+  // ТЗ раздел 3 (волна 3) — заявки: архив/источник/повторные обращения.
+  // Пишутся из applications.service.ts.
+  | 'APPLICATION_ARCHIVE'
+  | 'APPLICATION_UNARCHIVE'
+  | 'APPLICATION_SOURCE_CHANGE'
+  | 'APPLICATION_CLEAR_REPEAT'
+  // ТЗ 3.2 — консультации/собеседования. Пишутся из consultations.service.ts.
+  | 'CONSULTATION_CREATE'
+  | 'CONSULTATION_UPDATE'
+  | 'CONSULTATION_DELETE'
+  | 'CONSULTATION_CONVERT'
+  // Системная (авто-созданная) задача — TasksService.createSystemTask().
+  | 'TASK_AUTO_CREATE';
 
 export interface ActivityEntry {
   id: string;
@@ -69,4 +82,13 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   USER_CREATE: 'Создан сотрудник',
   USER_ROLE_CHANGE: 'Изменена роль сотрудника',
   USER_DELETE: 'Удалён сотрудник',
+  APPLICATION_ARCHIVE: 'Заявка отправлена в архив',
+  APPLICATION_UNARCHIVE: 'Заявка возвращена из архива',
+  APPLICATION_SOURCE_CHANGE: 'Изменён источник заявки',
+  APPLICATION_CLEAR_REPEAT: 'Снята пометка «повторное обращение»',
+  CONSULTATION_CREATE: 'Записана консультация',
+  CONSULTATION_UPDATE: 'Изменена консультация',
+  CONSULTATION_DELETE: 'Удалена консультация',
+  CONSULTATION_CONVERT: 'Создана заявка из консультации',
+  TASK_AUTO_CREATE: 'Автоматически создана задача',
 };

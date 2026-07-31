@@ -9,5 +9,9 @@ import { MailModule } from '../mail/mail.module';
   imports: [NotificationsModule, MailModule],
   controllers: [TasksController],
   providers: [TasksService, PrismaService],
+  // ТЗ 3.2: ConsultationsModule (и волна 4 — SchedulerModule) переиспользуют
+  // TasksService.createSystemTask()/upsertSystemTask()/softDeleteSystemTaskIfPending()
+  // вместо прямого доступа к prisma.task — экспортируем сервис для DI.
+  exports: [TasksService],
 })
 export class TasksModule {}

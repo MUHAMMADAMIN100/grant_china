@@ -4,6 +4,7 @@ import { listActivity, ACTIVITY_LABEL, type ActivityAction, type ActivityEntry }
 import { ROLE_LABEL, type Role } from '../api/types';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
+import { toPeriodRange } from '../utils/datetime';
 
 const ACTION_BADGE: Record<ActivityAction, string> = {
   STATUS_CHANGE: 'badge-info',
@@ -24,6 +25,15 @@ const ACTION_BADGE: Record<ActivityAction, string> = {
   USER_CREATE: 'badge-success',
   USER_ROLE_CHANGE: 'badge-warning',
   USER_DELETE: 'badge-danger',
+  APPLICATION_ARCHIVE: 'badge-gray',
+  APPLICATION_UNARCHIVE: 'badge-info',
+  APPLICATION_SOURCE_CHANGE: 'badge-info',
+  APPLICATION_CLEAR_REPEAT: 'badge-gray',
+  CONSULTATION_CREATE: 'badge-success',
+  CONSULTATION_UPDATE: 'badge-warning',
+  CONSULTATION_DELETE: 'badge-gray',
+  CONSULTATION_CONVERT: 'badge-success',
+  TASK_AUTO_CREATE: 'badge-info',
 };
 
 export default function Activity() {
@@ -39,8 +49,7 @@ export default function Activity() {
     setError(null);
     listActivity({
       action: action || undefined,
-      from: from ? new Date(from).toISOString() : undefined,
-      to: to ? new Date(to + 'T23:59:59').toISOString() : undefined,
+      ...toPeriodRange(from, to),
     })
       .then(setItems)
       .catch((e: any) => {

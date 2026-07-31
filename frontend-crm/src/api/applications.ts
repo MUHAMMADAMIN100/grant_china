@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { Application, ApplicationStatus, Direction, Student } from './types';
+import type { Application, ApplicationStatus, ApplicationTab, Direction } from './types';
 
 export interface AppFilters {
   status?: ApplicationStatus;
@@ -8,6 +8,15 @@ export interface AppFilters {
   mine?: boolean;
   /** Фильтр по конкретному менеджеру (TJ или CN) — userId */
   manager?: string;
+  /** ТЗ 3.1 — вкладки «Все» / «Новые» / «В работе» / «Архив». */
+  tab?: ApplicationTab;
+  /** Значение справочника источников либо 'NONE' — отдельный пункт «Не указан». */
+  source?: string;
+  /** ISO-строки, верхняя граница нормализуется вызывающим кодом (см. Activity.tsx). */
+  from?: string;
+  to?: string;
+  /** true — только заявки с repeatOfId (повторные обращения). */
+  repeat?: boolean;
   page?: number;
   pageSize?: number;
 }
@@ -19,6 +28,14 @@ export interface ApplicationsPage {
   pageSize: number;
 }
 
+/** ТЗ 3.1 — счётчики вкладок с учётом всех текущих фильтров, кроме tab. */
+export interface ApplicationTabCounts {
+  all: number;
+  new: number;
+  in_work: number;
+  archive: number;
+}
+
 export async function listApplications(filters: AppFilters = {}) {
   const { data } = await api.get<Application[]>('/applications', { params: filters });
   return data;
@@ -26,6 +43,11 @@ export async function listApplications(filters: AppFilters = {}) {
 
 export async function listApplicationsPaged(filters: AppFilters & { page: number; pageSize: number }) {
   const { data } = await api.get<ApplicationsPage>('/applications', { params: filters });
+  return data;
+}
+
+export async function applicationTabCounts(filters: Omit<AppFilters, 'tab' | 'page' | 'pageSize'> = {}) {
+  const { data } = await api.get<ApplicationTabCounts>('/applications/tab-counts', { params: filters });
   return data;
 }
 
@@ -47,8 +69,14 @@ export async function assignApplicationManager(
   return data;
 }
 
-export async function convertApplication(id: string) {
-  const { data } = await api.post<Student>(`/applications/${id}/convert`);
+/** ТЗ 3.1 — ручной архив. Обратимо: не трогает deletedAt. */
+export async function archiveApplication(id: string, reason?: string) {
+  const { data } = await api.post<Application>(`/applications/${id}/archive`, { reason });
+  return data;
+}
+
+export async function unarchiveApplication(id: string) {
+  const { data } = await api.post<Application>(`/applications/${id}/unarchive`);
   return data;
 }
 
