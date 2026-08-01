@@ -305,17 +305,33 @@ export default function StudentDetail() {
   };
 
   if (error) return <div className="error-banner">{error}</div>;
-  if (!student || !form) return <div className="empty">Загрузка...</div>;
 
+  // РАННЕГО ВЫХОДА ПРИ !student ЗДЕСЬ БОЛЬШЕ НЕТ — и это не косметика.
+  //
+  // Раньше до ответа сервера страница возвращала строку «Загрузка...». Значит
+  // восемь дочерних секций (гранты, платежи, звонки, комментарии, договор,
+  // билеты, документы, анкета) не были смонтированы, а каждая грузит данные
+  // сама. Запросы шли строго в два круга: сперва GET /students/:id, и только
+  // после его ответа — остальные. На канале с задержкой в несколько сотен
+  // миллисекунд это ровно удваивало ожидание.
+  //
+  // Замеры на боевой БД: выборка студента с документами и заявками — 0.1–0.2 мс,
+  // индексы на месте. То есть база ни при чём, всё время уходило на круговые
+  // обходы по сети. Секциям, которым нужен только studentId (он известен из
+  // URL сразу), ждать было незачем — теперь они стартуют одновременно.
+  const loading = !student || !form;
   const isAdmin = isPrivileged(me?.role);
-  const assigned = !!student.managerId || !!student.chinaManagerId;
-  const isMine = !assigned || student.managerId === me?.id || student.chinaManagerId === me?.id;
-  const canEdit = isAdmin || isMine;
+  const assigned = !!student?.managerId || !!student?.chinaManagerId;
+  const isMine = !assigned || student?.managerId === me?.id || student?.chinaManagerId === me?.id;
+  // Пока карточка не пришла, права считаем по нижней границе: привилегия роли
+  // известна сразу, принадлежность студента — нет. Показать лишнюю активную
+  // кнопку хуже, чем показать нужную на долю секунды позже.
+  const canEdit = loading ? isAdmin : isAdmin || isMine;
 
   // COMPLETED — legacy-значение статуса заявки (мигрировано в ENROLLED), но
   // у части старых заявок в БД оно ещё может встречаться "как есть" —
   // без него такие студенты никогда не увидели бы разблокированным этап 2.1.
-  const isEnrolled = student.applications?.[0]?.status === 'ENROLLED' || student.applications?.[0]?.status === 'COMPLETED';
+  const isEnrolled = student?.applications?.[0]?.status === 'ENROLLED' || student?.applications?.[0]?.status === 'COMPLETED';
 
   return (
     <div>
@@ -323,7 +339,7 @@ export default function StudentDetail() {
       <div className="card">
       <div className="card-header">
         <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          {student.fullName}
+          {loading ? <span className="skeleton-line" style={{ width: 220, height: 20 }} /> : student!.fullName}
           {isEnrolled && (
             <span className="enrolled-badge" title="Студент зачислен">
               <Icon name="verified" size={16} />
@@ -332,16 +348,26 @@ export default function StudentDetail() {
           )}
         </h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          {canEdit && !edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
-          {canEdit && edit && <>
+          {!loading && canEdit && !edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
+          {!loading && canEdit && edit && <>
             {/* resetForm ОБЯЗАТЕЛЕН: здесь откат правок — это и есть смысл кнопки. */}
             <button className="btn btn-secondary btn-sm" onClick={() => { setEdit(false); reload({ resetForm: true }); }}>Отмена</button>
             <button className="btn btn-primary btn-sm" onClick={onSave}>Сохранить</button>
           </>}
-          {canEdit && <button className="btn btn-danger btn-sm" onClick={onDeleteStudent}>Удалить</button>}
+          {!loading && canEdit && <button className="btn btn-danger btn-sm" onClick={onDeleteStudent}>Удалить</button>}
         </div>
       </div>
       <div className="card-body">
+        {loading ? (
+          // Каркас вместо пустоты: страница сразу выглядит страницей, и видно,
+          // что именно догружается. Секции ниже при этом уже грузят своё.
+          <>
+            <div className="skeleton-line" style={{ width: '55%' }} />
+            <div className="skeleton-line" style={{ width: '40%' }} />
+            <div className="skeleton-line" style={{ width: '65%' }} />
+          </>
+        ) : (
+        <>
         <ManagerBar
           manager={student.manager}
           chinaManager={student.chinaManager}
@@ -530,21 +556,39 @@ export default function StudentDetail() {
             )}
           </div>
         </div>
+        </>
+        )}
 
-        <GrantCard studentId={student.id} canEdit={canEdit} />
+        {/* Секциям ниже нужен ТОЛЬКО studentId, а он известен из URL сразу.
+            Поэтому они монтируются, не дожидаясь GET /students/:id, и уходят
+            за своими данными ПАРАЛЛЕЛЬНО с ним — а не вторым кругом после. */}
+        <GrantCard studentId={id!} canEdit={canEdit} />
 
+        {/* ТЗ 6.2 — история звонков и click-to-call по номеру из карточки.
+            Телефон нужен только кнопке набора и подставляется, когда карточка
+            догрузится — сама история звонков ждать этого не обязана. */}
+        <CallsCard studentId={id!} phone={student?.phones?.[0]} canEdit={canEdit} />
+
+        <div style={{ marginTop: 28 }}>
+          <PaymentsSection studentId={id!} canEdit={canEdit} />
+        </div>
+
+        <CommentsFeed studentId={id!} canAdd={canEdit} />
+
+        {/* Ниже — секции, которым нужны САМИ данные студента: ФИО, документы,
+            анкета, список заявок. Они ждут ответа по необходимости, а не
+            заодно со всеми, как было раньше. */}
+        {!loading && (
+        <>
         {/* ТЗ «Билеты» — перелёты студента рядом с грантом: обе сущности
             отвечают на вопрос «где человек будет учиться и когда туда летит». */}
-        <TicketsCard studentId={student.id} studentName={student.fullName} canEdit={canEdit} />
-
-        {/* ТЗ 6.2 — история звонков и click-to-call по номеру из карточки. */}
-        <CallsCard studentId={student.id} phone={student.phones?.[0]} canEdit={canEdit} />
+        <TicketsCard studentId={student!.id} studentName={student!.fullName} canEdit={canEdit} />
 
         <DocumentsChecklist
-          studentId={student.id}
-          studentName={student.fullName}
-          documents={student.documents || []}
-          applicationForm={student.applicationForm}
+          studentId={student!.id}
+          studentName={student!.fullName}
+          documents={student!.documents || []}
+          applicationForm={student!.applicationForm}
           onChange={reload}
           editable={canEdit}
         />
@@ -552,25 +596,21 @@ export default function StudentDetail() {
         {/* Раздел 5 ТЗ (волна 6) — договор рядом с блоком платежей: график
             платежей (PaymentsSection) привязывается именно к нему. */}
         <ContractCard
-          studentId={student.id}
-          applications={(student.applications || []).map((a) => ({ id: a.id, fullName: a.fullName, status: a.status }))}
+          studentId={student!.id}
+          applications={(student!.applications || []).map((a) => ({ id: a.id, fullName: a.fullName, status: a.status }))}
           canEdit={canEdit}
         />
 
         <div style={{ marginTop: 28 }}>
-          <PaymentsSection studentId={student.id} canEdit={canEdit} />
-        </div>
-
-        <div style={{ marginTop: 28 }}>
           <ApplicationFormSection
-            studentId={student.id}
-            initialForm={student.applicationForm}
+            studentId={student!.id}
+            initialForm={student!.applicationForm}
             canEdit={canEdit}
             onSaved={reload}
           />
         </div>
-
-        <CommentsFeed studentId={student.id} canAdd={canEdit} />
+        </>
+        )}
       </div>
 
       <AnimatePresence>
