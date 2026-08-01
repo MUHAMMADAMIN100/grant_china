@@ -6,6 +6,7 @@ import {
   TICKET_STATUS_LABEL,
   TICKET_STATUS_OPTIONS,
   deleteTicket,
+  deleteTicketDocument,
   listChinaCities,
   listTickets,
   ticketStats,
@@ -29,8 +30,14 @@ import Icon from '../Icon';
 import { fadeUp, staggerContainer } from '../motion';
 
 const PAGE_SIZE = 20;
-/** Потолок выгрузки — совпадает с pageSize по умолчанию на бэкенде. */
-const EXPORT_LIMIT = 1000;
+/**
+ * Размер страницы выгрузки. Ровно MAX_PAGE_SIZE бэкенда: больший pageSize он
+ * молча урезает до 100, поэтому «выгрузить всё одним запросом» невозможно —
+ * страницы склеиваются циклом в onExport.
+ */
+const EXPORT_PAGE_SIZE = 100;
+/** Потолок выгрузки в страницах (2000 строк) — чтобы экспорт не превратился в DDoS собственного API. */
+const EXPORT_MAX_PAGES = 20;
 
 /**
  * ТЗ «Билеты» — раздел учёта авиабилетов студентов.
@@ -208,6 +215,33 @@ export default function Tickets() {
     }
   };
 
+  /**
+   * Удаление приложенного файла. Без этой кнопки ошибочно прикреплённую чужую
+   * квитанцию исправить нечем: общий эндпоинт документов удалять файлы билета
+   * не даёт, а замены «поверх» бэкенд не делает.
+   */
+  const onDeleteDoc = async (t: Ticket) => {
+    const doc = t.documents[0];
+    if (!doc) return;
+    const ok = await confirm({
+      title: 'Удалить файл билета',
+      message: `Файл «${doc.originalName}» будет удалён из билета ${t.flightNumber}. Данные рейса останутся, файл можно приложить заново.`,
+      confirmText: 'Удалить файл',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusyId(t.id);
+    try {
+      await deleteTicketDocument(doc.id);
+      toast('Файл билета удалён', 'success');
+      load();
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Не удалось удалить файл', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   /** Прикрепление файла к билету, заведённому без него. */
   const onPickFile = (ticketId: string) => {
     uploadForRef.current = ticketId;
@@ -240,17 +274,29 @@ export default function Tickets() {
   const onExport = async () => {
     setExporting(true);
     try {
-      const res = await listTickets({ ...queryFilters, page: 1, pageSize: EXPORT_LIMIT });
-      if (!res.items.length) {
+      // Собираем срез постранично: бэкенд режет pageSize до MAX_PAGE_SIZE = 100
+      // (эта защита общая для всех списков проекта и поднимать её нельзя), а
+      // одной страницей администратор получал бы 100 строк из тысячи.
+      const rows: Ticket[] = [];
+      let total = 0;
+      let truncated = false;
+      for (let p = 1; p <= EXPORT_MAX_PAGES; p++) {
+        const res = await listTickets({ ...queryFilters, page: p, pageSize: EXPORT_PAGE_SIZE });
+        total = res.total;
+        rows.push(...res.items);
+        if (!res.items.length || rows.length >= res.total) break;
+        // Страницы кончились раньше, чем данные — честно помечаем обрезание.
+        if (p === EXPORT_MAX_PAGES) truncated = true;
+      }
+      if (!rows.length) {
         toast('По текущим фильтрам билетов нет', 'info');
         return;
       }
-      const truncated = res.total > res.items.length;
-      exportTicketsCsv(res.items, { truncated });
+      exportTicketsCsv(rows, { truncated });
       toast(
         truncated
-          ? `Выгружено ${res.items.length} из ${res.total} — сузьте фильтр и повторите`
-          : `Выгружено билетов: ${res.items.length}`,
+          ? `Выгружено ${rows.length} из ${total} — сузьте фильтр и повторите`
+          : `Выгружено билетов: ${rows.length}`,
         truncated ? 'info' : 'success',
       );
     } catch {
@@ -430,14 +476,26 @@ export default function Tickets() {
                                 <Icon name="edit" size={16} />
                               </button>
                               {doc ? (
-                                <button
-                                  className="btn btn-sm btn-secondary"
-                                  onClick={() => onDownload(t)}
-                                  disabled={busy}
-                                  title={`Скачать файл билета (${doc.originalName})`}
-                                >
-                                  <Icon name="download" size={16} />
-                                </button>
+                                <>
+                                  <button
+                                    className="btn btn-sm btn-secondary"
+                                    onClick={() => onDownload(t)}
+                                    disabled={busy}
+                                    title={`Скачать файл билета (${doc.originalName})`}
+                                  >
+                                    <Icon name="download" size={16} />
+                                  </button>
+                                  {/* Условие видимости то же, что у «Редактировать»: кто правит
+                                      билет, тот и исправляет ошибочно приложенный файл. */}
+                                  <button
+                                    className="btn btn-sm btn-secondary"
+                                    onClick={() => onDeleteDoc(t)}
+                                    disabled={busy}
+                                    title={`Удалить файл билета (${doc.originalName})`}
+                                  >
+                                    <Icon name="delete" size={16} />
+                                  </button>
+                                </>
                               ) : (
                                 <button
                                   className="btn btn-sm btn-secondary"

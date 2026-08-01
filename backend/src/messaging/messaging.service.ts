@@ -310,6 +310,8 @@ export class MessagingService {
    * ИДЕМПОТЕНТНОСТЬ: @@unique([conversationId, externalId]) в схеме. Telegram
    * (как и любой провайдер) повторяет доставку при сетевой ошибке — второй
    * INSERT падает с P2002, мы его молча глотаем (паттерн A из job.contract.ts).
+   * Глотаем ИМЕННО этот индекс: любое другое нарушение уникальности — ошибка,
+   * и её надо отдать провайдеру, чтобы он повторил доставку (см. catch ниже).
    */
   async ingestInbound(input: {
     channel: string;
@@ -324,48 +326,85 @@ export class MessagingService {
   }) {
     const phoneNormalized = input.phone ? normalizePhone(input.phone) : null;
 
-    // Диалог: создаём при первом сообщении, дальше только обновляем «шапку».
-    const conversation = await this.prisma.conversation.upsert({
-      where: { channel_externalId: { channel: input.channel, externalId: input.externalChatId } },
-      create: {
-        channel: input.channel,
-        externalId: input.externalChatId,
-        title: input.title ?? null,
-        username: input.username ?? null,
-        phone: input.phone ?? null,
-        phoneNormalized,
-        lastMessageAt: input.sentAt,
-        lastMessageText: input.text ? preview(input.text) : '[вложение]',
-        unreadCount: 1,
-      },
-      update: {
-        // Имя/ник могли смениться у клиента — подтягиваем, но не затираем
-        // ранее известный телефон пустым значением.
-        ...(input.title ? { title: input.title } : {}),
-        ...(input.username ? { username: input.username } : {}),
-        ...(input.phone ? { phone: input.phone, phoneNormalized } : {}),
-        lastMessageAt: input.sentAt,
-        lastMessageText: input.text ? preview(input.text) : '[вложение]',
-        unreadCount: { increment: 1 },
-      },
-      include: CONVERSATION_INCLUDE,
-    });
-
+    // Диалог и сообщение пишутся ОДНОЙ транзакцией. Переставить их местами
+    // нельзя — create требует conversation.id, — а upsert уже инкрементирует
+    // unreadCount и переписывает шапку, то есть побочный эффект наступал бы
+    // ДО арбитража дубля (нарушение паттерна A из job.contract.ts). Telegram
+    // ретраит доставку при любом потерянном ответе (таймаут прокси, рестарт
+    // при деплое, 429 от throttler): без транзакции в ленте одно сообщение,
+    // а в бейдже «Диалоги» — три непрочитанных, которых нет. Внутри
+    // транзакции P2002 откатывает инкремент вместе с дублем.
+    let conversation: ConversationRow;
     try {
-      await this.prisma.channelMessage.create({
-        data: {
-          conversationId: conversation.id,
-          direction: MessageDirection.INBOUND,
-          text: input.text,
-          attachments: (input.attachments ?? undefined) as Prisma.InputJsonValue | undefined,
-          externalId: input.externalMessageId,
-          sentAt: input.sentAt,
-        },
+      conversation = await this.prisma.$transaction(async (tx) => {
+        // Диалог: создаём при первом сообщении, дальше только обновляем «шапку».
+        const conv = await tx.conversation.upsert({
+          where: { channel_externalId: { channel: input.channel, externalId: input.externalChatId } },
+          create: {
+            channel: input.channel,
+            externalId: input.externalChatId,
+            title: input.title ?? null,
+            username: input.username ?? null,
+            phone: input.phone ?? null,
+            phoneNormalized,
+            lastMessageAt: input.sentAt,
+            lastMessageText: input.text ? preview(input.text) : '[вложение]',
+            unreadCount: 1,
+          },
+          update: {
+            // Имя/ник могли смениться у клиента — подтягиваем, но не затираем
+            // ранее известный телефон пустым значением.
+            ...(input.title ? { title: input.title } : {}),
+            ...(input.username ? { username: input.username } : {}),
+            ...(input.phone ? { phone: input.phone, phoneNormalized } : {}),
+            lastMessageAt: input.sentAt,
+            lastMessageText: input.text ? preview(input.text) : '[вложение]',
+            unreadCount: { increment: 1 },
+          },
+          include: CONVERSATION_INCLUDE,
+        });
+
+        await tx.channelMessage.create({
+          data: {
+            conversationId: conv.id,
+            direction: MessageDirection.INBOUND,
+            text: input.text,
+            attachments: (input.attachments ?? undefined) as Prisma.InputJsonValue | undefined,
+            externalId: input.externalMessageId,
+            sentAt: input.sentAt,
+          },
+        });
+
+        return conv;
       });
     } catch (e) {
       // P2002 = повторная доставка того же сообщения. Это ожидаемо и не ошибка.
+      // Но ТОЛЬКО по индексу ChannelMessage(conversationId, externalId): из-за
+      // include Prisma выполняет upsert как SELECT + INSERT, поэтому на ПЕРВОМ
+      // сообщении чата два параллельных обработчика (перекрывающийся ретрай
+      // Telegram) оба не находят диалог и оба делают INSERT — второй падает
+      // P2002 по Conversation(channel, externalId). Считать его дублём нельзя:
+      // мы ответили бы «доставлено», а сообщение клиента не сохранилось бы
+      // нигде и повтора провайдер больше не пришлёт. Такой P2002 пробрасываем.
+      // Postgres отдаёт target то массивом полей, то именем индекса —
+      // упоминание conversationId различает оба представления.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        return { ok: true, duplicate: true, conversationId: conversation.id };
+        const target = e.meta?.target;
+        const targetText = Array.isArray(target) ? target.join(',') : String(target ?? '');
+        if (!targetText.includes('conversationId')) {
+          this.logger.error(
+            `Неожиданный P2002 при приёме сообщения ${input.channel}/${input.externalChatId} (${targetText || 'без target'}) — доставку должен повторить провайдер`,
+          );
+          throw e;
+        }
+        // id диалога из откатившейся транзакции возвращать нельзя — читаем
+        // сохранённую строку заново (она существует: раз сообщение уже
+        // лежит в БД, значит диалог был создан предыдущей доставкой).
+        const existing = await this.prisma.conversation.findUnique({
+          where: { channel_externalId: { channel: input.channel, externalId: input.externalChatId } },
+          select: { id: true },
+        });
+        return { ok: true, duplicate: true, conversationId: existing?.id ?? null };
       }
       throw e;
     }

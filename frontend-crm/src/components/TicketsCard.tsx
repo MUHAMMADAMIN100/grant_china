@@ -4,6 +4,7 @@ import {
   TICKET_STATUS_BADGE,
   TICKET_STATUS_LABEL,
   deleteTicket,
+  deleteTicketDocument,
   listTickets,
   uploadTicketDocument,
   type Ticket,
@@ -97,6 +98,33 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
     }
   };
 
+  /**
+   * Удаление приложенного файла. Без этой кнопки ошибочно прикреплённую чужую
+   * квитанцию исправить нечем: общий эндпоинт документов удалять файлы билета
+   * не даёт, а замены «поверх» бэкенд не делает.
+   */
+  const onDeleteDoc = async (t: Ticket) => {
+    const doc = t.documents[0];
+    if (!doc) return;
+    const ok = await confirm({
+      title: 'Удалить файл билета',
+      message: `Файл «${doc.originalName}» будет удалён из билета ${t.flightNumber}. Данные рейса останутся, файл можно приложить заново.`,
+      confirmText: 'Удалить файл',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusyId(t.id);
+    try {
+      await deleteTicketDocument(doc.id);
+      toast('Файл билета удалён', 'success');
+      load();
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Не удалось удалить файл', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     const ticketId = uploadForRef.current;
@@ -164,10 +192,20 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
 
                 <div className="sub-item-actions">
                   {doc ? (
-                    <button className="btn btn-sm btn-secondary" onClick={() => onDownload(t)} disabled={busy}>
-                      <Icon name="download" size={15} style={{ marginRight: 4 }} />
-                      Скачать билет
-                    </button>
+                    <>
+                      <button className="btn btn-sm btn-secondary" onClick={() => onDownload(t)} disabled={busy}>
+                        <Icon name="download" size={15} style={{ marginRight: 4 }} />
+                        Скачать билет
+                      </button>
+                      {/* Условие видимости то же, что у «Изменить»: кто правит билет,
+                          тот и исправляет ошибочно приложенный файл. */}
+                      {canEdit && (
+                        <button className="btn btn-sm btn-secondary" onClick={() => onDeleteDoc(t)} disabled={busy}>
+                          <Icon name="delete" size={15} style={{ marginRight: 4 }} />
+                          Удалить файл
+                        </button>
+                      )}
+                    </>
                   ) : (
                     canEdit && (
                       <button

@@ -14,6 +14,7 @@ import ContractStatusBadge from './ContractStatusBadge';
 import ContractFormModal from './ContractFormModal';
 import PaymentReasonPrompt from './PaymentReasonPrompt';
 import Icon from '../Icon';
+import { todayInputValue } from '../utils/datetime';
 
 type ApplicationOption = { id: string; fullName: string; status: string };
 
@@ -28,7 +29,11 @@ const fmtDate = (iso: string | null): string => (iso ? new Date(iso).toLocaleDat
 
 /** Небольшая модалка выбора даты подписания — тот же визуальный каркас, что у PaymentReasonPrompt. */
 function SignDatePrompt({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: (date: string) => void }) {
-  const today = new Date().toISOString().slice(0, 10);
+  // Локальная дата, а не UTC: в Душанбе (UTC+5) до 05:00 toISOString() отдаёт
+  // вчерашний день, и max гасил бы сегодняшнее число в календаре — договор,
+  // подписанный сегодня утром, отметить было бы нечем. От signedAt считаются
+  // все метрики раздела 5 ТЗ, поэтому подмена даты здесь не косметика.
+  const today = todayInputValue();
   const [date, setDate] = useState(today);
   const valid = !!date && date <= today;
 
@@ -204,7 +209,10 @@ export default function ContractCard({ studentId, applications = [], canEdit }: 
 
         {canEdit && (
           <div className="grant-item-actions">
-            {c.status === 'DRAFT' && (
+            {/* isPriv, как у «Расторгнуть»/«Исполнен» ниже: POST /contracts/:id/sign
+                закрыт @Roles(FOUNDER, ADMIN), и менеджер читал 403 как сбой — дата
+                подписания, от которой считаются KPI и бонус, фиксировалась с опозданием. */}
+            {c.status === 'DRAFT' && isPriv && (
               <button className="btn btn-sm btn-primary" onClick={() => setModal({ kind: 'sign', contract: c })} disabled={busyId === c.id}>
                 <Icon name="draw" size={15} style={{ marginRight: 4 }} />
                 Отметить подписанным

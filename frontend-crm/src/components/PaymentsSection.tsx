@@ -48,6 +48,10 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
   const { confirm, toast } = useUI();
   const [summary, setSummary] = useState<PaymentSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  // HTTP-код неудачной загрузки (null — сети/ответа не было). Нужен именно
+  // код: 404 здесь штатный ответ сотруднику по студенту без назначенного
+  // менеджера (чужой ресурс = 404), и объяснять его надо иначе, чем сбой.
+  const [loadError, setLoadError] = useState<{ status: number | null } | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
   const [onSiteExpanded, setOnSiteExpanded] = useState(false);
 
@@ -56,8 +60,8 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
 
   const load = () => {
     getPaymentsSummary(studentId)
-      .then(setSummary)
-      .catch(() => {})
+      .then((s) => { setSummary(s); setLoadError(null); })
+      .catch((e: any) => { setLoadError({ status: e?.response?.status ?? null }); })
       .finally(() => setLoading(false));
   };
 
@@ -192,7 +196,26 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
       </div>
     );
   }
-  if (!summary) return null;
+  // Молчаливый return null читался пользователем как «у студента нет
+  // финансов»: блок исчезал целиком, без заголовка и без причины.
+  if (!summary) {
+    const forbidden = loadError?.status === 404;
+    return (
+      <div className="payments-section">
+        <div className="payments-section-title">Финансы</div>
+        <div className="empty" style={{ padding: 24 }}>
+          {forbidden ? 'Финансы этого студента доступны администратору' : 'Не удалось загрузить финансы'}
+          {!forbidden && (
+            <div style={{ marginTop: 12 }}>
+              <button className="btn btn-sm btn-secondary" onClick={() => { setLoading(true); load(); }}>
+                Повторить
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const renderPaymentRow = (p: Payment) => {
     const canMutate = isPriv || p.createdById === me?.id;

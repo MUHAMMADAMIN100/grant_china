@@ -54,11 +54,21 @@ export default function Consultations() {
   const [total, setTotal] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Consultation | null>(null);
 
+  // Счётчик поколений запросов списка. debounce откладывает СТАРТ, но уже
+  // улетевший запрос не отменяет: медленный ответ по прошлому фильтру
+  // приходил после свежего и перерисовывал таблицу чужими консультациями,
+  // а пагинация считалась по чужому total. Ответ с устаревшим номером
+  // отбрасываем — это же снимает гонку с realtime-перезагрузкой.
+  const reqRef = useRef(0);
+
   const load = () => {
+    const my = ++reqRef.current;
     setLoading(true);
+    setError(null);
     listConsultations({
       search: search || undefined,
       ...toPeriodRange(from, to),
@@ -71,10 +81,23 @@ export default function Consultations() {
       pageSize: PAGE_SIZE,
     })
       .then((res) => {
+        if (my !== reqRef.current) return;
         setItems(res.items);
         setTotal(res.total);
       })
-      .finally(() => setLoading(false));
+      .catch((e: any) => {
+        if (my !== reqRef.current) return;
+        // Без сброса items/total на экране осталась бы выборка ПРОШЛОГО
+        // фильтра, а сброшенный loading выдал бы её за успешно применённый.
+        // Пустая таблица без баннера читалась бы как «ничего не найдено».
+        setItems([]);
+        setTotal(0);
+        setError(e?.response?.data?.message || 'Не удалось загрузить список консультаций');
+      })
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -199,6 +222,8 @@ export default function Consultations() {
           <input type="date" value={from} onChange={(e) => onFilterChange('from', e.target.value)} title="Дата проведения от" />
           <input type="date" value={to} onChange={(e) => onFilterChange('to', e.target.value)} title="Дата проведения до" />
         </div>
+
+        {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 
         <AnimatePresence mode="wait">
           {loading ? (

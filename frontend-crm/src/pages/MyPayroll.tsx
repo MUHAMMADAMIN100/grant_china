@@ -7,6 +7,7 @@ import { useRealtime } from '../realtime';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import { currentMonthKey } from '../utils/datetime';
 import { formatMoney, formatPercent } from '../utils/money';
+import { payslipBase } from '../utils/payrollReport';
 import Pagination from '../components/Pagination';
 import PayslipStatusBadge from '../components/PayslipStatusBadge';
 import PayslipDetailModal from '../components/PayslipDetailModal';
@@ -321,7 +322,15 @@ export default function MyPayroll() {
                   {payslips.map((p) => (
                     <tr key={p.id} onClick={() => setDetail(p)} style={{ cursor: 'pointer', opacity: p.status === 'VOID' ? 0.6 : 1 }}>
                       <td>{p.periodKey}</td>
-                      <td data-label="Оклад" style={p.status === 'VOID' ? { textDecoration: 'line-through' } : undefined}>{formatMoney(p.baseAmount)}</td>
+                      {/* Именно payslipBase, а не baseAmount: иначе строка сотрудника не сходится со своим «Итого» — он считан от заменённого оклада.
+                          Пометку про замену показываем здесь же: в карточке этой строки под «Окладом (реестр)» стоит договорная сумма, и молчаливое
+                          расхождение двух чисел сотрудник читает как ошибку начисления. */}
+                      <td data-label="Оклад" style={p.status === 'VOID' ? { textDecoration: 'line-through' } : undefined}>
+                        {formatMoney(payslipBase(p))}
+                        {p.baseOverride !== null && (
+                          <span className="mgr-you" title="Оклад за этот период заменён вручную; договорная сумма — в карточке листа, строка «Оклад (реестр)»"> · замена</span>
+                        )}
+                      </td>
                       <td data-label="Бонус" style={p.status === 'VOID' ? { textDecoration: 'line-through' } : undefined}>{formatMoney(p.bonusAmount)}</td>
                       <td data-label="Премия KPI" style={p.status === 'VOID' ? { textDecoration: 'line-through' } : undefined}>{formatMoney(p.kpiBonusAmount)}</td>
                       <td data-label="Итого" style={p.status === 'VOID' ? { textDecoration: 'line-through' } : undefined}><strong>{formatMoney(p.totalAmount)}</strong></td>

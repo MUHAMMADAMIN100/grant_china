@@ -29,3 +29,16 @@ export function parsePageSize(raw: string | undefined): number | undefined {
   if (!Number.isFinite(n) || n < 1) return undefined;
   return Math.min(n, MAX_PAGE_SIZE);
 }
+
+/**
+ * То же для разделов без постраничности, где вместо page/pageSize отдаётся
+ * плоский `take` со СВОИМ потолком (журнал активности — 200). Отдельная
+ * функция, а не parsePageSize: та режет по MAX_PAGE_SIZE = 100 и молча
+ * урезала бы выдачу журнала вдвое.
+ */
+export function parseTake(raw: string | undefined, max: number): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return Math.min(n, max);
+}

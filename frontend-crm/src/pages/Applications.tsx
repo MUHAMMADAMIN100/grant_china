@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   applicationTabCounts,
   archiveApplication,
+  clearRepeatApplication,
   listApplicationsPaged,
   unarchiveApplication,
   type ApplicationTabCounts,
@@ -83,7 +84,14 @@ export default function Applications() {
   const [total, setTotal] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [tabCounts, setTabCounts] = useState<ApplicationTabCounts>(EMPTY_COUNTS);
+
+  // Счётчик поколений запросов списка. debounce откладывает СТАРТ, но уже
+  // улетевший запрос не отменяет: медленный ответ по «Ива» приходил после
+  // быстрого по «Иванов» и перерисовывал таблицу чужими заявками, а пагинация
+  // считалась по чужому total. Ответ с устаревшим номером просто отбрасываем.
+  const reqRef = useRef(0);
 
   // Общая часть параметров для списка и для счётчиков вкладок — без этого
   // они бы разъехались при правке только одного из двух мест (см. риск 6
@@ -103,7 +111,9 @@ export default function Applications() {
   });
 
   const load = () => {
+    const my = ++reqRef.current;
     setLoading(true);
+    setError(null);
     listApplicationsPaged({
       ...commonParams(),
       tab,
@@ -111,10 +121,23 @@ export default function Applications() {
       pageSize: PAGE_SIZE,
     })
       .then((res) => {
+        if (my !== reqRef.current) return;
         setItems(res.items);
         setTotal(res.total);
       })
-      .finally(() => setLoading(false));
+      .catch((e: any) => {
+        if (my !== reqRef.current) return;
+        // Без сброса items/total на экране осталась бы выборка ПРОШЛОГО
+        // фильтра, а сброшенный loading выдал бы её за успешно применённый.
+        // Пустая таблица без баннера читалась бы как «ничего не найдено».
+        setItems([]);
+        setTotal(0);
+        setError(e?.response?.data?.message || 'Не удалось загрузить список заявок');
+      })
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   const loadCounts = () => {
@@ -211,6 +234,22 @@ export default function Applications() {
       loadCounts();
     } catch (err: any) {
       toast(err?.response?.data?.message || 'Ошибка архивации', 'error');
+    }
+  };
+
+  // ТЗ 3.1 — эвристика «повторного обращения» по телефону ложно срабатывает на
+  // общем семейном номере (брат и сестра). Без снятия пометки вторая заявка
+  // навсегда остаётся во вкладке «Архив» и искажает её счётчик — поэтому
+  // перезагружаем и список, и счётчики вкладок.
+  const onClearRepeat = async (a: Application, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await clearRepeatApplication(a.id);
+      toast('Пометка «Повторное обращение» снята', 'success');
+      load();
+      loadCounts();
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Ошибка', 'error');
     }
   };
 
@@ -320,6 +359,8 @@ export default function Applications() {
           />
         </div>
 
+        {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
+
         <AnimatePresence mode="wait">
           {loading ? (
             <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -357,13 +398,25 @@ export default function Applications() {
                       <td>
                         <strong>{a.fullName}</strong>
                         {a.repeatOfId && (
-                          <span
-                            className="badge badge-warning"
-                            style={{ marginLeft: 6 }}
-                            title="По телефону/email похоже на повторное обращение"
-                          >
-                            Повторное
-                          </span>
+                          <>
+                            <span
+                              className="badge badge-warning"
+                              style={{ marginLeft: 6 }}
+                              title="По телефону/email похоже на повторное обращение"
+                            >
+                              Повторное
+                            </span>
+                            {canEditRow(a) && (
+                              <button
+                                className="btn btn-sm btn-secondary"
+                                style={{ marginLeft: 6 }}
+                                onClick={(e) => onClearRepeat(a, e)}
+                                title="Снять пометку «Повторное обращение»"
+                              >
+                                Не повторное
+                              </button>
+                            )}
+                          </>
                         )}
                         {a.archivedAt && (
                           <span className="badge badge-gray" style={{ marginLeft: 6 }}>В архиве</span>

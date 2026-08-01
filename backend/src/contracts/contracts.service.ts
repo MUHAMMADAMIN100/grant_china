@@ -225,6 +225,15 @@ export class ContractsService {
     if (existing.status !== 'DRAFT' && touchesFrozenField && !isFounder(user.role)) {
       throw new ForbiddenException('После подписания сумму, заявку и ответственного может менять только Основатель');
     }
+    // Смена ответственного — привилегированное действие НЕЗАВИСИМО от статуса
+    // (тот же запрет, что в create()). Раньше проверка жила только под
+    // условием «договор подписан», и в черновике рядовой сотрудник переписывал
+    // managerId на себя: по этому полю kpi.service.ts считает договоры и бонус,
+    // администратор потом штатно подписывал договор — и деньги уходили не тому,
+    // а в журнале это выглядело обычной сменой ответственного.
+    if (dto.managerId !== undefined && !isPrivileged(user.role)) {
+      throw new ForbiddenException('Только Основатель или администратор может назначить другого ответственного за договор');
+    }
 
     const data: Prisma.ContractUpdateInput = {};
     const changes: string[] = [];

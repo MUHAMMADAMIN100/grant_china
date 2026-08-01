@@ -72,7 +72,12 @@ export class RulesService {
   async activeSetFor(periodStart: Date) {
     return this.prisma.bonusRuleSet.findFirst({
       where: { deletedAt: null, status: BonusRuleSetStatus.ACTIVE, effectiveFrom: { lte: periodStart } },
-      orderBy: { effectiveFrom: 'desc' },
+      // Вторичный ключ version desc обязателен: при одинаковом effectiveFrom
+      // сортировка только по нему неустойчива, Postgres вправе вернуть любую
+      // из строк — и два вызова расчёта одного и того же листа могли давать
+      // РАЗНЫЕ деньги. Активация набора-двойника заблокирована в activate(),
+      // но исторические данные тоже должны читаться детерминированно.
+      orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
       include: RULE_INCLUDE,
     });
   }
@@ -198,6 +203,30 @@ export class RulesService {
     if (!set) throw new NotFoundException('Набор правил не найден');
     if (set.status !== BonusRuleSetStatus.DRAFT) {
       throw new ConflictException('Активировать можно только черновик');
+    }
+    // Два ACTIVE-набора с ОДНОЙ датой начала действия делают выбор
+    // действующего набора неоднозначным (см. activeSetFor): «действующая
+    // формула» переставала быть одна, и расчёт зарплаты зависел бы от того,
+    // какую строку вернула БД. Ловим это здесь, при необратимом шаге, а не
+    // потом на расхождении сумм в утверждённых листах.
+    const clash = await this.prisma.bonusRuleSet.findFirst({
+      where: { deletedAt: null, status: BonusRuleSetStatus.ACTIVE, effectiveFrom: set.effectiveFrom, id: { not: set.id } },
+      select: { version: true, title: true },
+    });
+    if (clash) {
+      // Подсказка ведёт именно к архивации, а не к сдвигу даты: типичный
+      // сценарий здесь — исправление опечатки в ставке уже действующего
+      // набора. Сдвиг даты вперёд оставил бы ошибочную формулу в силе на
+      // текущий период, то есть текст сообщения толкал бы Основателя
+      // посчитать месяц по формуле, которую он и пришёл исправить.
+      // Архивация действующего набора поддержана: POST
+      // /payroll/rules/sets/:id/archive (кнопка «Архивировать» в карточке
+      // набора, @Roles(FOUNDER)) — после неё активация на ту же дату проходит.
+      throw new ConflictException(
+        `С ${formatDateRuShort(set.effectiveFrom)} уже действует набор v${clash.version} «${clash.title}». ` +
+          `Чтобы выпустить исправление на ту же дату, сначала архивируйте набор v${clash.version} (кнопка «Архивировать» в его карточке), затем повторите активацию. ` +
+          `Сдвигать дату черновика вперёд стоит только если действующая формула верна для уже начавшегося периода.`,
+      );
     }
     const now = new Date();
     const result = await this.prisma.bonusRuleSet.updateMany({

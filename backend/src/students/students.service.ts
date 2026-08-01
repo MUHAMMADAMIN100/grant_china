@@ -460,6 +460,28 @@ export class StudentsService {
       data,
       select: STUDENT_SELECT,
     });
+
+    // Application.phoneNormalized — рабочий ключ определения звонящего
+    // (calls.service.ts) и поиска повторных обращений; он проставляется ОДИН
+    // раз при создании заявки. Симметричный путь applications.service.update()
+    // пересчитывает его явно, а здесь этого не было: после исправления
+    // опечатки в номере студента входящий звонок с ВЕРНОГО номера карточку не
+    // открывал, а со старого, неверного — открывал. Сравниваем со старым
+    // первым номером, чтобы не переписывать заявки при правке одного ФИО.
+    const prevPhone = existing.phones[0] ?? null;
+    const nextPhone = dto.phones !== undefined ? (updated.phones[0] ?? null) : null;
+    if (nextPhone && nextPhone !== prevPhone) {
+      const normalized = normalizePhone(nextPhone);
+      await this.prisma.application.updateMany({
+        where: { studentId: id, deletedAt: null },
+        // normalizePhone вернул null (номер нераспознаваем) — ключ НЕ трогаем:
+        // пустое/обнулённое значение склеило бы такие заявки в одну «семью»
+        // повторных обращений (см. common/phone.ts). repeatOfId не
+        // пересчитываем — это исторический факт первого обращения.
+        data: normalized ? { phone: nextPhone, phoneNormalized: normalized } : { phone: nextPhone },
+      });
+    }
+
     this.realtime.emitForStudent(updated, 'student:updated', { studentId: id }, { studentId: id });
 
     // Логируем и уведомляем менеджеров студента о каждом изменённом поле

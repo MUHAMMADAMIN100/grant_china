@@ -331,7 +331,10 @@ export class ConsultationsService {
     if (dto.studentId !== undefined) data.studentId = dto.studentId || null;
 
     let followUpAtChanged = false;
-    let nextFollowUpAt: Date | null = null;
+    // Стартуем от ТЕКУЩЕГО срока: при смене только ответственного (без
+    // dto.followUpAt) задачу всё равно надо пересадить на нового менеджера,
+    // и делать это нужно по уже назначенной дате звонка.
+    let nextFollowUpAt: Date | null = existing.followUpAt;
     if (dto.followUpAt !== undefined) {
       nextFollowUpAt = dto.followUpAt ? this.parseDate(dto.followUpAt, 'Некорректная дата повторного звонка') : null;
       data.followUpAt = nextFollowUpAt;
@@ -345,6 +348,23 @@ export class ConsultationsService {
       // Новый срок = новое напоминание.
       data.reminderSentAt = null;
     }
+    const managerChanged = dto.managerId !== undefined && managerId !== existing.managerId;
+
+    // Исполнителя автозадачи выбираем ДО записи консультации. Увольнение
+    // (soft-delete) не обнуляет managerId, а upsertSystemTask на удалённого
+    // исполнителя бросает NotFoundException — консультация к этому моменту уже
+    // закоммичена, задача нет, и повтор действия даёт ровно ту же ошибку.
+    // Транзакцией это не закрыть: TasksService — граница модуля (prisma.task
+    // отсюда недоступна) и по ходу шлёт письма/realtime, которые откатить
+    // нельзя. Живого ответственного нет → задачу ведёт тот, кто правит запись.
+    let taskAssigneeId = managerId;
+    if (nextFollowUpAt && (followUpAtChanged || managerChanged)) {
+      const alive = await this.prisma.user.findFirst({
+        where: { id: taskAssigneeId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!alive) taskAssigneeId = user.id;
+    }
 
     await this.prisma.consultation.update({ where: { id }, data });
     // Раздел 5 ТЗ (волна 6) — «привязка первой консультации к заявке» (см. create()).
@@ -357,18 +377,24 @@ export class ConsultationsService {
     // ОБЯЗАНА держать автозадачу в консистентном состоянии — иначе менеджер
     // либо молча остаётся без напоминания, либо получает фантомную задачу
     // «позвонить» после того, как звонок уже отменён.
-    if (followUpAtChanged) {
+    // Смена ОТВЕТСТВЕННОГО — такое же основание для пересинхронизации: раньше
+    // задача оставалась на прежнем сотруднике, у которого доступ к
+    // консультации уже отобран, а FollowUpReminderJob слала напоминание новому
+    // менеджеру — задача и напоминание расходились по разным людям, и звонок
+    // не делал никто.
+    if (followUpAtChanged || managerChanged) {
       const originKey = `consultation-followup:${id}`;
       if (nextFollowUpAt) {
-        const assignedToId = updated.managerId ?? user.id;
         const task = await this.tasks.upsertSystemTask(
-          this.followUpTaskInput(updated, assignedToId, nextFollowUpAt),
+          this.followUpTaskInput(updated, taskAssigneeId, nextFollowUpAt),
         );
         if (updated.followUpTaskId !== task.id) {
           await this.prisma.consultation.update({ where: { id }, data: { followUpTaskId: task.id } });
           updated = await this.refetch(id);
         }
-      } else {
+      } else if (followUpAtChanged) {
+        // Гасим задачу только при ЯВНОЙ отмене звонка. Смена менеджера у
+        // консультации без назначенного повторного звонка гасить нечего.
         await this.tasks.softDeleteSystemTaskIfPending(originKey);
       }
     }

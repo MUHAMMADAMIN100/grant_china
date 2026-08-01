@@ -293,7 +293,16 @@ export default function Payroll() {
                   const canApprove = p.status === 'DRAFT' && p.userId !== me?.id && (isFdr || p.user.role === 'EMPLOYEE');
                   return (
                     <tr key={p.id} className={p.needsReview ? 'payroll-row-review' : undefined} onClick={() => setDetail(p)} style={{ cursor: 'pointer' }}>
-                      <td><strong>{p.user.fullName}</strong>{p.revision > 1 && <span className="mgr-you"> · ред. {p.revision}</span>}</td>
+                      <td>
+                        <strong>{p.user.fullName}</strong>
+                        {/* Номер ревизии сам по себе НЕ доказывает переиздания: после
+                            удаления ошибочного черновика следующий лист за тот же
+                            период тоже получает revision = 2. Поэтому метка нейтральная
+                            («ред. N» = номер версии), а факт сторно-цепочки показывает
+                            отдельная метка по replacedById. */}
+                        {p.revision > 1 && <span className="mgr-you" title="Номер версии листа за период"> · ред. {p.revision}</span>}
+                        {p.replacedById && <span className="mgr-you" title="Взамен этого листа выпущен новый"> · переиздан</span>}
+                      </td>
                       <td data-label="Оклад">{formatMoney(p.baseOverride ?? p.baseAmount)}</td>
                       <td data-label="Бонус">{formatMoney(p.bonusAmount)}</td>
                       <td data-label="Премия KPI">{formatMoney(p.kpiBonusAmount)}</td>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { BonusRule, BonusRuleSet } from '../api/types';
 import {
@@ -26,7 +26,7 @@ import {
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useUrlFilter } from '../hooks/useUrlFilter';
-import { currentMonthKey } from '../utils/datetime';
+import { currentMonthKey, toDateInputValue } from '../utils/datetime';
 import { formatMoney, formatPercent } from '../utils/money';
 import BonusRuleFormModal from '../components/BonusRuleFormModal';
 import Icon from '../Icon';
@@ -38,7 +38,11 @@ function RuleSetFormModal({ mode, onClose, onSaved }: { mode: RuleSetFormMode; o
   const { toast } = useUI();
   const isEdit = mode.kind === 'edit';
   const [title, setTitle] = useState(isEdit ? mode.set.title : '');
-  const [effectiveFrom, setEffectiveFrom] = useState(isEdit ? mode.set.effectiveFrom.slice(0, 10) : '');
+  // effectiveFrom бэкенд разбирает через parseCalendarDate (rules.service.ts),
+  // то есть хранит полночь ПО ДУШАНБЕ = 19:00 предыдущих суток UTC. Срез
+  // ISO-строки показал бы в форме день назад и при каждом сохранении сдвигал
+  // дату начала действия набора формул на сутки — см. toDateInputValue.
+  const [effectiveFrom, setEffectiveFrom] = useState(isEdit ? toDateInputValue(mode.set.effectiveFrom) : '');
   const [saving, setSaving] = useState(false);
 
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom);
@@ -139,6 +143,7 @@ export default function PayrollRules() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<BonusRuleSet | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [setModal, setSetModal] = useState<RuleSetFormMode | null>(null);
   const [ruleModal, setRuleModal] = useState<{ kind: 'create' } | { kind: 'edit'; rule: BonusRule } | null>(null);
 
@@ -147,17 +152,36 @@ export default function PayrollRules() {
   const [simResult, setSimResult] = useState<BonusRuleSimulateResult | null>(null);
   const [simLoading, setSimLoading] = useState(false);
 
+  // Счётчик поколений: loadSets() дёргается после активации/архивации, и
+  // медленный ответ предыдущего вызова мог перетереть свежий список версий
+  // (а вместе с ним и выбранную версию — Основатель правил бы не тот набор).
+  const reqRef = useRef(0);
+
   const loadSets = (keepSelection = true) => {
+    const my = ++reqRef.current;
     setLoading(true);
+    setError(null);
     listRuleSets()
       .then((rows) => {
+        if (my !== reqRef.current) return;
         setSets(rows);
         if (!keepSelection || !rows.find((r) => r.id === selectedId)) {
           const active = rows.find((r) => r.status === 'ACTIVE');
           setSelectedId(rows[0] ? (active?.id ?? rows[0].id) : null);
         }
       })
-      .finally(() => setLoading(false));
+      .catch((e: any) => {
+        if (my !== reqRef.current) return;
+        // Без сброса на экране остался бы прошлый список версий формул, и
+        // отказ запроса выглядел бы как успешная загрузка; пустой список без
+        // баннера читался бы как «наборов формул ещё нет».
+        setSets([]);
+        setError(e?.response?.data?.message || 'Не удалось загрузить версии формул');
+      })
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   useEffect(() => { loadSets(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
@@ -239,6 +263,7 @@ export default function PayrollRules() {
             <Icon name="add" size={15} style={{ marginRight: 4 }} />
             Новый черновик
           </button>
+          {error && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
           {loading ? (
             <div className="empty" style={{ padding: 12 }}>Загрузка...</div>
           ) : sets.length === 0 ? (

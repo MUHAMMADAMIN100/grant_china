@@ -19,9 +19,21 @@ export function parseCalendarDate(raw: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
   if (!m) throw new Error(`Некорректная дата: "${raw}", ожидается YYYY-MM-DD`);
   const [, y, mo, d] = m;
-  const utcMidnight = Date.UTC(Number(y), Number(mo) - 1, Number(d), 0, 0, 0);
+  const year = Number(y);
+  const month = Number(mo);
+  const day = Number(d);
+  const utcMidnight = Date.UTC(year, month - 1, day, 0, 0, 0);
   const local = new Date(utcMidnight - APP_TZ_OFFSET_MINUTES * 60_000);
   if (Number.isNaN(local.getTime())) throw new Error(`Некорректная дата: "${raw}"`);
+  // Регулярка проверяет только ФОРМУ строки, а Date.UTC переполнение не
+  // отвергает, а ПЕРЕНОСИТ: '2026-02-30' стало бы 2 марта, а '2026-13-01' —
+  // 1 января 2027-го, то есть дата старта гранта молча уехала бы на год.
+  // NaN при этом не возникает, поэтому единственная надёжная проверка —
+  // обратный разбор собранного момента (round-trip).
+  const check = new Date(utcMidnight);
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() + 1 !== month || check.getUTCDate() !== day) {
+    throw new Error(`Некорректная дата: "${raw}"`);
+  }
   return local;
 }
 
@@ -51,6 +63,20 @@ export function detectIntake(startDate: Date): GrantIntake {
   if (month === 8 || month === 9) return GrantIntake.SEPTEMBER;
   if (month >= 1 && month <= 3) return GrantIntake.FEBRUARY;
   return GrantIntake.OTHER;
+}
+
+/**
+ * Ключ идемпотентности (Task.originKey) напоминания «Новый учебный год».
+ * Живёт ЗДЕСЬ, а не в джобе, потому что стороны две: задачу создаёт
+ * AcademicYearReminderJob, а GrantsService.update() обязан пересинхронизировать
+ * её при переносе даты — и оба должны считать ключ ОДИНАКОВО. Разъехавшийся
+ * формат означал бы, что сервис правит несуществующую задачу, а менеджер
+ * остаётся со старой датой. Про выбор компонентов ключа (календарный год, а не
+ * номер курса; id гранта, а не только студента) — см. комментарии в джобе.
+ */
+export function academicYearOriginKey(studentId: string, grantId: string, nextYearStartsAt: Date): string {
+  const calendarYear = toLocal(nextYearStartsAt).getUTCFullYear();
+  return `academic-year:${studentId}:${grantId}:${calendarYear}`;
 }
 
 /** 'DD.MM.YYYY' по Душанбе — единый формат для details в ActivityLog. */

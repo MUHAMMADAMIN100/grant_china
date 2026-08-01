@@ -24,8 +24,12 @@ import { compose, hasErrors, maxLen, minLen, phoneRule, required, validateAll } 
 import DirectionOptions from '../components/DirectionOptions';
 import PhoneInput from '../components/PhoneInput';
 import Icon from '../Icon';
+import { todayInputValue } from '../utils/datetime';
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// Локальная дата, а не UTC: в Душанбе до 05:00 toISOString() подставил бы в
+// heldAt вчерашний день, и консультация ушла бы в предыдущий расчётный период
+// (KPI считает consultationsHeld по этой дате).
+const todayStr = todayInputValue;
 
 type Props = {
   /** Если передан — форма в режиме редактирования уже существующей консультации. */

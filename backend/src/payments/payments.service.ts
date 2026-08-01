@@ -174,6 +174,45 @@ export class PaymentsService {
     return d;
   }
 
+  /**
+   * ГРАНИЦЫ даты фактического поступления. Вынесены отдельно от разбора
+   * (parseDate) намеренно: update() обязан разобрать присланную дату, но
+   * проверять окно только при её РЕАЛЬНОМ изменении — см. комментарий там.
+   *
+   * Зачем границы вообще: по paidAt строится вся отчётность за период и база
+   * премий менеджера (kpi.service считает одобренные платежи по paidAt внутри
+   * расчётного месяца), поэтому свободная дата — это возможность перенести
+   * поступление в нужный расчётный месяц: например в тот, где до порога премии
+   * не хватало пары платежей, или в уже закрытый период, чтобы вызвать
+   * пересчёт. Тот же инвариант и тот же люфт, что у Contract.signedAt
+   * (contracts.service.sign).
+   *
+   * ОБЕ границы считаются от календарных суток по Душанбе, а не от Date.now():
+   * в форме менеджер выбирает календарную дату, и она приходит как полночь.
+   * Для верхней границы иначе отбивалась бы сегодняшняя дата весь день; для
+   * нижней окно фактически сжималось бы до 29 суток и плавало внутри дня —
+   * платёж ровно 30-дневной давности отвергался бы после 00:00 UTC+5, хотя
+   * текст ошибки обещает именно 30 дней.
+   */
+  private assertPaidAtWithinWindow(paidAt: Date): void {
+    const todayLocalStart = localDayStart(new Date()).getTime();
+    const tomorrowLocalStart = todayLocalStart + 24 * 60 * 60 * 1000;
+    if (paidAt.getTime() >= tomorrowLocalStart) {
+      throw new BadRequestException('Дата поступления не может быть в будущем');
+    }
+    // Разумный люфт: деньги пришли, а внесли их в CRM с задержкой в несколько
+    // дней — это нормальная работа. Месяцами — нет.
+    const BACKDATE_LIMIT_DAYS = 30;
+    const earliest = todayLocalStart - BACKDATE_LIMIT_DAYS * 24 * 60 * 60 * 1000;
+    if (paidAt.getTime() < earliest) {
+      // Исключений по ролям здесь нет (FOUNDER получает тот же отказ) —
+      // поэтому текст не обещает обходного пути, которого не существует.
+      throw new BadRequestException(
+        `Дата поступления не может быть раньше, чем ${BACKDATE_LIMIT_DAYS} дней назад — проверьте дату.`,
+      );
+    }
+  }
+
   /** true, если у студента есть хотя бы одна НЕудалённая заявка со статусом «Зачислен» (или legacy COMPLETED). */
   private async isEnrollmentUnlocked(studentId: string): Promise<boolean> {
     const count = await this.prisma.application.count({
@@ -472,6 +511,7 @@ export class PaymentsService {
     let totalPlanned = new Prisma.Decimal(0);
     let totalPaid = new Prisma.Decimal(0);
     let totalPending = new Prisma.Decimal(0);
+    let totalRemaining = new Prisma.Decimal(0);
     let overdueAmount = new Prisma.Decimal(0);
 
     const stages = SCHEDULE_STAGES.map((stage) => {
@@ -479,7 +519,13 @@ export class PaymentsService {
       const planned = new Prisma.Decimal(sched?.plannedAmount ?? 0);
       const paid = paidByStage.get(stage) ?? new Prisma.Decimal(0);
       const pending = pendingByStage.get(stage) ?? new Prisma.Decimal(0);
-      const remaining = planned.minus(paid);
+      // Остаток не уходит в минус. Отрицательным он становится в ШТАТНОЙ
+      // работе, а не только при переплате: строка графика заводится с
+      // plannedAmount = 0 («сумма ещё не согласована»), а первичную оплату
+      // вносят до согласования плана. Без клампа такой этап уменьшал остаток
+      // по остальным, и карточка показывала долг меньше реального.
+      // Аналитика (finance-analytics) считает ту же величину через GREATEST(...,0).
+      const remaining = Prisma.Decimal.max(planned.minus(paid), 0);
       // Этап 2.1 заблокирован до зачисления — нельзя считать просроченным
       // то, что физически ещё нельзя оплатить (см. stageActivation проекта).
       const locked = stage === 'ENROLLMENT' && !enrollmentUnlocked;
@@ -489,6 +535,7 @@ export class PaymentsService {
       totalPlanned = totalPlanned.plus(planned);
       totalPaid = totalPaid.plus(paid);
       totalPending = totalPending.plus(pending);
+      totalRemaining = totalRemaining.plus(remaining);
       if (overdue) overdueAmount = overdueAmount.plus(remaining);
 
       return {
@@ -497,6 +544,11 @@ export class PaymentsService {
         stageOrder: STAGE_ORDER[stage],
         plannedAmount: this.money(planned),
         dueDate,
+        // Комментарий строки графика возвращаем в сводку, потому что именно
+        // из неё модалка «План этапа» подставляет текущие значения в форму.
+        // Без него поле открывалось пустым и сохранённый комментарий стирался
+        // при любом повторном сохранении плана (setSchedule).
+        comment: sched?.comment ?? null,
         paidAmount: this.money(paid),
         pendingAmount: this.money(pending),
         remainingAmount: this.money(remaining),
@@ -539,7 +591,12 @@ export class PaymentsService {
         planned: this.money(totalPlanned),
         paid: this.money(totalPaid),
         pending: this.money(totalPending),
-        remaining: this.money(totalPlanned.minus(totalPaid)),
+        // Сумма УЖЕ склампленных остатков этапов, а не totalPlanned - totalPaid:
+        // иначе переплата одного этапа снова «съедала» долг по остальным —
+        // ровно то расхождение, от которого клампится remaining выше.
+        // planned/paid при этом остаются фактическими, чтобы переплата была
+        // видна расхождением «Оплачено» и «План».
+        remaining: this.money(totalRemaining),
         overdueAmount: this.money(overdueAmount),
       },
     };
@@ -581,7 +638,11 @@ export class PaymentsService {
     }
 
     const amount = this.parseAmount(dto.amount);
+    // На СОЗДАНИИ окно проверяется всегда: новую запись задним числом заводят
+    // только вручную, и подменить ею закрытый расчётный период нельзя.
+    // Фолбэк new Date() в границы укладывается заведомо — проверять его незачем.
     const paidAt = dto.paidAt ? this.parseDate(dto.paidAt, 'Некорректная дата поступления') : new Date();
+    if (dto.paidAt) this.assertPaidAtWithinWindow(paidAt);
     const kind = STAGE_KIND[dto.stage];
     const stageOrder = STAGE_ORDER[dto.stage];
     const dueDate = await this.getScheduleDueDate(dto.studentId, dto.stage);
@@ -723,7 +784,18 @@ export class PaymentsService {
     if (dto.purpose !== undefined) data.purpose = dto.purpose;
     if (dto.method !== undefined) data.method = dto.method;
     if (dto.amount !== undefined) data.amount = this.parseAmount(dto.amount);
-    if (dto.paidAt !== undefined) data.paidAt = this.parseDate(dto.paidAt, 'Некорректная дата поступления');
+    if (dto.paidAt !== undefined) {
+      const nextPaidAt = this.parseDate(dto.paidAt, 'Некорректная дата поступления');
+      // Форма редактирования шлёт paidAt ВСЕГДА, даже если менеджер дату не
+      // трогал (PaymentFormModal.doSaveEdit). Проверять окно бэкдейта на
+      // каждой правке нельзя: отклонённый два месяца назад платёж стало бы
+      // невозможно ни исправить, ни подать повторно, а единственным способом
+      // его сохранить была бы подстановка ложной свежей даты — ровно то
+      // искажение отчётности, от которого окно и защищает. Границы важны
+      // только при РЕАЛЬНОМ переносе даты в другой расчётный период.
+      if (nextPaidAt.getTime() !== payment.paidAt.getTime()) this.assertPaidAtWithinWindow(nextPaidAt);
+      data.paidAt = nextPaidAt;
+    }
     if (dto.reference !== undefined) data.reference = dto.reference?.trim() || null;
     if (dto.comment !== undefined) data.comment = dto.comment?.trim() || null;
 
@@ -1193,15 +1265,22 @@ export class PaymentsService {
     const plannedAmount = this.parseAmount(dto.plannedAmount, { allowZero: true });
     const dueDate = dto.dueDate ? this.parseDate(dto.dueDate, 'Некорректная дата срока оплаты') : null;
 
+    // Комментарий обновляем ТОЛЬКО если поле реально передали — по образцу
+    // update() платежа. Безусловная запись стирала сохранённый комментарий
+    // при каждом повторном сохранении плана: клиент, который поле не
+    // редактирует, шлёт undefined, и `dto.comment?.trim() || null` превращало
+    // это в затирание null.
+    const scheduleUpdate: Prisma.PaymentScheduleUncheckedUpdateInput = {
+      plannedAmount,
+      dueDate,
+      updatedById: user.id,
+      deletedAt: null,
+    };
+    if (dto.comment !== undefined) scheduleUpdate.comment = dto.comment?.trim() || null;
+
     const row = await this.prisma.paymentSchedule.upsert({
       where: { studentId_stage: { studentId: dto.studentId, stage: dto.stage } },
-      update: {
-        plannedAmount,
-        dueDate,
-        comment: dto.comment?.trim() || null,
-        updatedById: user.id,
-        deletedAt: null,
-      },
+      update: scheduleUpdate,
       create: {
         studentId: dto.studentId,
         stage: dto.stage,

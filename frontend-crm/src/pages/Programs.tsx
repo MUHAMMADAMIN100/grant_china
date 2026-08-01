@@ -40,6 +40,7 @@ export default function Programs() {
   const major = filters.major;
   const direction = filters.direction as Direction | '';
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Partial<Program> | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -68,15 +69,37 @@ export default function Programs() {
     }
   };
 
+  // Счётчик поколений запросов списка. debounce откладывает СТАРТ, но уже
+  // улетевший запрос не отменяет: медленный ответ по прошлому фильтру
+  // приходил после свежего и перерисовывал сетку чужими программами. Ответ с
+  // устаревшим номером отбрасываем — это же снимает гонку с realtime.
+  const reqRef = useRef(0);
+
   const load = () => {
+    const my = ++reqRef.current;
     setLoading(true);
+    setError(null);
     listPrograms({
       city: city || undefined,
       major: major || undefined,
       direction: direction || undefined,
     })
-      .then(setItems)
-      .finally(() => setLoading(false));
+      .then((rows) => {
+        if (my !== reqRef.current) return;
+        setItems(rows);
+      })
+      .catch((e: any) => {
+        if (my !== reqRef.current) return;
+        // Без сброса items на экране остался бы результат ПРОШЛОГО фильтра, а
+        // сброшенный loading выдал бы его за успешно применённый. Пустая
+        // сетка без баннера читалась бы как «программ по фильтру нет».
+        setItems([]);
+        setError(e?.response?.data?.message || 'Не удалось загрузить список программ');
+      })
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -207,6 +230,8 @@ export default function Programs() {
             <DirectionOptions />
           </select>
         </div>
+
+        {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 
         <AnimatePresence mode="wait">
           {loading ? (

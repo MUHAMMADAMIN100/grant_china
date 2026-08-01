@@ -8,12 +8,25 @@ import { canAccessStudentRecord } from '../common/access';
 import { CreateGrantDto } from './dto/create-grant.dto';
 import { UpdateGrantDto } from './dto/update-grant.dto';
 import { AdvanceGrantDto } from './dto/advance-grant.dto';
-import { addYears, detectIntake, formatDateRuShort, ordinalYearRu, parseCalendarDate } from './grant-year';
+import { TasksService } from '../tasks/tasks.service';
+import {
+  academicYearOriginKey,
+  addYears,
+  detectIntake,
+  formatDateRuShort,
+  ordinalYearRu,
+  parseCalendarDate,
+} from './grant-year';
 
 export type CurrentUser = { id: string; role: Role };
 
 const GRANT_INCLUDE = {
-  student: { select: { id: true, fullName: true, managerId: true, chinaManagerId: true, status: true } },
+  // phones нужен reminderTaskInput(): джоба кладёт телефон в описание задачи, и
+  // без него пересинхронизация при переносе даты СТИРАЛА бы строку с телефоном
+  // (prisma.task.update перезаписывает description целиком).
+  student: {
+    select: { id: true, fullName: true, phones: true, managerId: true, chinaManagerId: true, status: true },
+  },
   createdBy: { select: { id: true, fullName: true } },
 } as const;
 
@@ -33,9 +46,28 @@ export interface GrantListFilters {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Строка гранта в том виде, в каком её отдаёт любой метод сервиса. */
+type GrantRow = Prisma.StudentGrantGetPayload<{ include: typeof GRANT_INCLUDE }>;
+
+// dueDate напоминания «Новый учебный год» — те же цифры, что у джобы
+// (DUE_LEAD_MS/MIN_DUE_LEAD_MS в academic-year-reminder.job.ts): за 30 дней до
+// старта, но не в прошлом. Расходиться им нельзя — иначе после переноса даты
+// у той же задачи оказался бы срок, посчитанный по другому правилу.
+const REMINDER_DUE_LEAD_MS = 30 * DAY_MS;
+const REMINDER_MIN_DUE_LEAD_MS = DAY_MS;
+
 @Injectable()
 export class GrantsService {
-  constructor(private prisma: PrismaService, private activity: ActivityService, private realtime: RealtimeGateway) {}
+  constructor(
+    private prisma: PrismaService,
+    private activity: ActivityService,
+    private realtime: RealtimeGateway,
+    // Единственная зависимость модуля: автозадачу «Новый учебный год» создаёт
+    // планировщик, но ДЕРЖАТЬ её в согласии с датой обязан тот, кто дату
+    // меняет. Прямой доступ к prisma.task отсюда запрещён архитектурой —
+    // только через TasksService (тот же приём, что в consultations.service.ts).
+    private tasks: TasksService,
+  ) {}
 
   /**
    * Условие доступа к студенту, к которому привязан грант — тот же принцип,
@@ -217,6 +249,53 @@ export class GrantsService {
     return grant;
   }
 
+  /**
+   * Исполнитель напоминания — та же цепочка, что у джобы (менеджер студента →
+   * китайский менеджер), но с фолбэком на того, кто правит грант прямо сейчас.
+   * Уволенных (soft-delete) пропускаем осознанно: TasksService на них бросает
+   * NotFoundException, и правка гранта упала бы с 404 из-за побочного эффекта,
+   * к которому пользователь отношения не имеет.
+   */
+  private async pickReminderAssignee(grant: GrantRow, user: CurrentUser): Promise<string> {
+    const candidates = [grant.student.managerId, grant.student.chinaManagerId].filter((v): v is string => !!v);
+    if (candidates.length) {
+      const alive = await this.prisma.user.findMany({
+        where: { id: { in: candidates }, deletedAt: null },
+        select: { id: true },
+      });
+      const aliveIds = new Set(alive.map((u) => u.id));
+      const found = candidates.find((cid) => aliveIds.has(cid));
+      if (found) return found;
+    }
+    return user.id;
+  }
+
+  /** Данные для TasksService.upsertSystemTask() — та же задача, что создаёт AcademicYearReminderJob. */
+  private reminderTaskInput(grant: GrantRow, assignedToId: string, startsAt: Date) {
+    const n = grant.currentYear + 1; // год, который скоро начнётся
+    const lines = [
+      `Позвонить студенту ${grant.student.fullName} и проинформировать о начале ${ordinalYearRu(n)} года обучения по гранту.`,
+    ];
+    // Порядок и формулировки строк — ровно как в academic-year-reminder.job.ts:
+    // описание задачи здесь ПЕРЕЗАПИСЫВАЕТСЯ целиком, и любая недостающая строка
+    // (телефон) просто исчезает — задача перестаёт быть самодостаточной, менеджер
+    // идёт искать номер в карточке студента.
+    if (grant.student.phones.length) lines.push(`Телефон: ${grant.student.phones.join(', ')}`);
+    const grantLabel = [grant.name, grant.university].filter(Boolean).join(' — ');
+    if (grantLabel) lines.push(`Грант: ${grantLabel}`);
+    lines.push(`Начало учебного года: ${formatDateRuShort(startsAt)}`);
+    lines.push(`Год ${n} из ${grant.totalYears}`);
+    return {
+      title: `Новый учебный год по гранту: ${grant.student.fullName}`,
+      description: lines.join('\n'),
+      assignedToId,
+      dueDate: new Date(
+        Math.max(startsAt.getTime() - REMINDER_DUE_LEAD_MS, Date.now() + REMINDER_MIN_DUE_LEAD_MS),
+      ),
+      originKey: academicYearOriginKey(grant.studentId, grant.id, startsAt),
+    };
+  }
+
   async update(id: string, dto: UpdateGrantDto, user: CurrentUser) {
     const existing = await this.loadForMutation(id, user);
 
@@ -295,6 +374,47 @@ export class GrantsService {
       include: GRANT_INCLUDE,
     });
 
+    // Сброса reminderSentAt выше МАЛО. originKey напоминания содержит
+    // КАЛЕНДАРНЫЙ год старта (так задумано, см. комментарий в
+    // academic-year-reminder.job.ts), поэтому перенос даты внутри того же года
+    // ключ не меняет: джоба на следующем прогоне позовёт createSystemTask,
+    // получит P2002 и вернёт СТАРУЮ (возможно уже закрытую) задачу со старой
+    // датой — ни уведомления, ни верного срока менеджер не увидит. Разрыв
+    // закрываем здесь, со стороны того, кто дату и меняет.
+    //
+    // Признак «задача уже существует» — заполненный ДО правки reminderSentAt:
+    // джоба ставит его ровно в тот момент, когда создаёт задачу. Без этого
+    // условия upsert породил бы задачу за годы до окна напоминания.
+    if (nextYearChanged && existing.reminderSentAt && existing.nextYearStartsAt) {
+      const previousKey = academicYearOriginKey(existing.studentId, existing.id, existing.nextYearStartsAt);
+      const input = nextNextYearStartsAt
+        ? this.reminderTaskInput(updated, await this.pickReminderAssignee(updated, user), nextNextYearStartsAt)
+        : null;
+      if (input && input.originKey === previousKey) {
+        // Тот же ключ — задачу нужно не создавать заново, а пересинхронизировать
+        // (обновит описание и срок, воскресит soft-удалённую).
+        await this.tasks.upsertSystemTask(input);
+        // И ВЕРНУТЬ ФЛАГ. Инвариант «reminderSentAt заполнен ⟺ задача создана»
+        // держит и это условие, и гашение в remove(). Сброс выше выполнен ради
+        // джобы, но задача-то осталась жива — оставив null, мы получили бы
+        // состояние «флага нет, задача есть», в котором следующая правка даты
+        // не погасит призрак, а remove() оставит фантомную задачу по
+        // удалённому гранту. Джобе повторно отправлять нечего: задача уже
+        // синхронизирована с новой датой.
+        await this.prisma.studentGrant.update({
+          where: { id },
+          data: { reminderSentAt: existing.reminderSentAt },
+        });
+        updated.reminderSentAt = existing.reminderSentAt;
+      } else {
+        // Дата обнулена (академотпуск/завершение) или уехала в другой
+        // календарный год — по старому ключу висит призрак, зовущий звонить к
+        // неверной дате. Гасим, если менеджер её ещё не взял в работу; новый
+        // ключ свободен, и джоба создаст по нему честно новую задачу.
+        await this.tasks.softDeleteSystemTaskIfPending(previousKey);
+      }
+    }
+
     const FIELD_LABELS: Record<string, [any, any, (v: any) => string]> = {
       name: [existing.name, updated.name, (v) => v ?? '—'],
       university: [existing.university, updated.university, (v) => v ?? '—'],
@@ -351,6 +471,16 @@ export class GrantsService {
    */
   async advance(id: string, dto: AdvanceGrantDto, user: CurrentUser) {
     const existing = await this.loadForMutation(id, user);
+    // ИНВАРИАНТ schema.prisma: nextYearStartsAt IS NOT NULL ⟺ status = ACTIVE
+    // И currentYear < totalYears. Проверка статуса — вторая его половина,
+    // симметричная проверке на последний год ниже. Без неё перевод гранта в
+    // SUSPENDED (академотпуск), TERMINATED или COMPLETED проставлял бы ему
+    // плановую дату: строка попадает в реестр, но не в счётчик stats и не в
+    // выборку джобы — плитка и таблица на ОДНОМ экране показывают разные
+    // числа, а обещанного звонка так никто и не получает.
+    if (existing.status !== GrantStatus.ACTIVE) {
+      throw new ConflictException('Перевод на следующий год доступен только для действующего гранта');
+    }
     if (existing.currentYear >= existing.totalYears) {
       throw new ConflictException('Грант уже на последнем году обучения');
     }
@@ -381,6 +511,17 @@ export class GrantsService {
       include: GRANT_INCLUDE,
     });
 
+    // Задача «позвонить и проинформировать о начале учебного года» относилась
+    // именно к тому году, который только что начался: перевод и есть отметка
+    // «год стартовал». Если менеджер её не закрыл, она превращается в призрак
+    // с прошлогодней датой — гасим по старому ключу. Новый год получит свою
+    // задачу от джобы, когда подойдёт окно напоминания.
+    if (existing.nextYearStartsAt) {
+      await this.tasks.softDeleteSystemTaskIfPending(
+        academicYearOriginKey(existing.studentId, existing.id, existing.nextYearStartsAt),
+      );
+    }
+
     this.activity
       .log({
         actorId: user.id,
@@ -405,6 +546,22 @@ export class GrantsService {
   async remove(id: string, user: CurrentUser) {
     const existing = await this.loadForMutation(id, user);
     await this.prisma.studentGrant.update({ where: { id }, data: { deletedAt: new Date() } });
+    // Гранта в системе больше нет — автозадача «Новый учебный год» иначе в срок
+    // потребует позвонить студенту про несуществующий грант (тот же призрак,
+    // ради которого гашение добавлено в update(), и то же, что делает
+    // consultations.service.remove()).
+    //
+    // По reminderSentAt здесь НЕ фильтруем: гашение должно быть безусловным.
+    // Флаг живёт своей жизнью (update() его сбрасывает при переносе даты), и
+    // сверка с ним давала дыру «флага нет, а задача есть» — грант удаляли, а
+    // напоминание оставалось. softDeleteSystemTaskIfPending на свободный ключ
+    // и так безопасный no-op, а условие «менеджер ещё не взял задачу в работу»
+    // он проверяет сам.
+    if (existing.nextYearStartsAt) {
+      await this.tasks.softDeleteSystemTaskIfPending(
+        academicYearOriginKey(existing.studentId, existing.id, existing.nextYearStartsAt),
+      );
+    }
     this.activity
       .log({
         actorId: user.id,

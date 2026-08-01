@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PaymentMethod, PaymentPurpose, PaymentStage, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { localDayStart } from '../scheduler/time';
 import { PaymentsService } from './payments.service';
 import { METHOD_LABEL, PURPOSE_LABEL, STAGE_LABEL } from './payment-rules';
 
@@ -79,6 +80,13 @@ export class FinanceAnalyticsService {
 
     const monthlyWhere = this.buildMonthlyWhereSql(period);
 
+    // Граница «сегодня» для просрочки — та же, что в карточке студента
+    // (payments.service.summary): начало календарных суток ПО ДУШАНБЕ.
+    // NOW() здесь означало бы полночь UTC, то есть 05:00 по Душанбе — этап
+    // со сроком «сегодня» попадал бы в просрочку уже утром того же дня, и
+    // сводка Основателя расходилась бы с карточкой, которую видит менеджер.
+    const todayLocalStart = localDayStart(new Date());
+
     // Основные агрегаты идут одним батчем в $transaction — единый снимок
     // портфеля и один сетевой раунд-трип вместо 7 последовательных запросов.
     // pendingCount() — отдельный вызов сервиса (внутри у него свой
@@ -138,7 +146,18 @@ export class FinanceAnalyticsService {
           remaining AS (
             SELECT
               ps."dueDate" AS due_date,
-              GREATEST(ps."plannedAmount" - COALESCE(paid.total, 0), 0) AS remaining
+              ps."stage" AS stage,
+              GREATEST(ps."plannedAmount" - COALESCE(paid.total, 0), 0) AS remaining,
+              -- Признак «этап 2.1 уже разблокирован» тащим В SELECT, а не в
+              -- WHERE: эта CTE питает ОБА показателя. В WHERE он вычёркивал
+              -- план 2.1 непройденного пайплайна и из просрочки (это верно), и
+              -- из «Остатка по плану» (это ошибка) — плитка Основателя
+              -- занижалась, а карточка студента (payments.service.summary)
+              -- продолжала включать заблокированный этап в totals.remaining.
+              EXISTS (
+                SELECT 1 FROM "Application" a WHERE a."studentId" = ps."studentId"
+                  AND a."deletedAt" IS NULL AND a."status" IN ('ENROLLED', 'COMPLETED')
+              ) AS is_enrolled
             FROM "PaymentSchedule" ps
             -- JOIN на Student обязателен: soft-delete студента НЕ трогает его
             -- строки в PaymentSchedule (данные не удаляем), и без этого условия
@@ -148,10 +167,22 @@ export class FinanceAnalyticsService {
             LEFT JOIN paid ON paid."studentId" = ps."studentId" AND paid."stage" = ps."stage"
             WHERE ps."deletedAt" IS NULL AND ps."plannedAmount" > 0
           )
+          -- Гейт «этап 2.1 только у зачисленных» стоит ТОЛЬКО в фильтрах
+          -- просрочки: create() отвечает 409 на попытку оплатить 2.1 до
+          -- зачисления, значит закрыть такую просрочку физически нечем.
+          -- Карточка студента (payments.service.summary, locked) и метрика
+          -- своевременности (kpi.service) исключают его ровно так же — из
+          -- просрочки, но не из плана.
           SELECT
             COALESCE(SUM(remaining), 0) AS planned_remaining,
-            COUNT(*) FILTER (WHERE due_date IS NOT NULL AND due_date < NOW() AND remaining > 0) AS overdue_count,
-            COALESCE(SUM(remaining) FILTER (WHERE due_date IS NOT NULL AND due_date < NOW() AND remaining > 0), 0) AS overdue_amount
+            COUNT(*) FILTER (
+              WHERE due_date IS NOT NULL AND due_date < ${todayLocalStart} AND remaining > 0
+                AND (stage <> 'ENROLLMENT' OR is_enrolled)
+            ) AS overdue_count,
+            COALESCE(SUM(remaining) FILTER (
+              WHERE due_date IS NOT NULL AND due_date < ${todayLocalStart} AND remaining > 0
+                AND (stage <> 'ENROLLMENT' OR is_enrolled)
+            ), 0) AS overdue_amount
           FROM remaining
         `,
       ]),

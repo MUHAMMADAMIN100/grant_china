@@ -80,6 +80,17 @@ export async function unarchiveApplication(id: string) {
   return data;
 }
 
+/**
+ * ТЗ 3.1 — снять ложную пометку «Повторное обращение». Эвристика по телефону
+ * гарантированно ошибается на общем семейном номере (брат и сестра), и без
+ * этой кнопки вторая заявка навсегда остаётся во вкладке «Архив» и искажает
+ * её счётчик. Сбрасывает только repeatOfId, других последствий нет.
+ */
+export async function clearRepeatApplication(id: string) {
+  const { data } = await api.post<Application>(`/applications/${id}/clear-repeat`);
+  return data;
+}
+
 export async function deleteApplication(id: string) {
   const { data } = await api.delete(`/applications/${id}`);
   return data;

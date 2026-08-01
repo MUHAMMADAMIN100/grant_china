@@ -13,12 +13,29 @@ function csvCell(value: string | number): string {
   return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/**
+ * Оклад, от которого реально посчитан итог листа (payslips.service.ts:
+ * baseOverride ?? baseAmount). Показывать в строке штатный baseAmount при
+ * заданной замене нельзя — строка перестаёт сходиться со своим же «Итого».
+ */
+export function payslipBase(p: Payslip): string {
+  return p.baseOverride ?? p.baseAmount;
+}
+
 export function exportPayrollCsv(items: Payslip[], period: string) {
-  const header = ['ФИО', 'Роль', 'Оклад', 'Бонус', 'Премия KPI', 'Корректировка', 'Итого', 'Статус'];
+  const header = [
+    'ФИО', 'Роль', 'Оклад (реестр)', 'Оклад (замена)', 'Оклад к расчёту',
+    'Бонус', 'Премия KPI', 'Корректировка', 'Итого', 'Статус',
+  ];
   const rows = items.map((p) => [
     p.user.fullName,
     ROLE_LABEL[p.user.role] ?? p.user.role,
+    // Три отдельные колонки, а не одна: иначе выгрузка теряет, С ЧЕГО
+    // заменили оклад, и по ней нельзя проверить сам факт ручной замены.
+    // «Оклад к расчёту» — единственная, которая сходится с «Итого».
     p.baseAmount,
+    p.baseOverride ?? '',
+    payslipBase(p),
     p.bonusAmount,
     p.kpiBonusAmount,
     p.adjustmentAmount,

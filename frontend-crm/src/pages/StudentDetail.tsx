@@ -49,6 +49,31 @@ function CredRow({ label, value }: { label: string; value: string }) {
 
 import { buildFileUrl } from '../utils/fileUrl';
 
+/**
+ * Изменились ли поля, которыми владеет форма редактирования.
+ *
+ * RealtimeGateway не исключает отправителя и не кладёт в payload автора
+ * (backend/src/realtime/realtime.gateway.ts шлёт только { studentId }), так что
+ * назначенный менеджер получает эхо и СВОИХ действий: правит телефон, не
+ * сохраняя грузит фото — document:uploaded возвращается ему же. Без этой
+ * проверки он видел бы «обновлено другим пользователем», хотя никто другой
+ * ничего не менял, и быстро научился бы игнорировать подсказку.
+ * Сравниваем ровно те поля, из-за которых подсказка нужна: если ни одно не
+ * изменилось, конфликта с несохранёнными правками нет — молчим.
+ */
+function cardFieldsDiffer(prev: Student | null, next: Student): boolean {
+  if (!prev) return false;
+  return (
+    prev.fullName !== next.fullName ||
+    prev.phones.join(',') !== next.phones.join(',') ||
+    (prev.email || '') !== (next.email || '') ||
+    prev.direction !== next.direction ||
+    prev.cabinet !== next.cabinet ||
+    prev.status !== next.status ||
+    (prev.comment || '') !== (next.comment || '')
+  );
+}
+
 export default function StudentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -57,6 +82,18 @@ export default function StudentDetail() {
   const [student, setStudent] = useState<Student | null>(null);
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState<any>(null);
+  // reload() асинхронный, и решение «переливать ли форму» принимается уже
+  // ПОСЛЕ await — к этому моменту значения edit/form из замыкания того рендера,
+  // в котором reload был создан (realtime-подписка, onChange у
+  // DocumentsChecklist), успевают устареть. Рефы всегда отдают актуальное.
+  const editRef = useRef(false);
+  editRef.current = edit;
+  const formRef = useRef<any>(null);
+  formRef.current = form;
+  // Прошлый серверный снимок карточки — по той же причине через реф: сравнение
+  // происходит после await, где `student` из замыкания уже устарел.
+  const studentRef = useRef<Student | null>(null);
+  studentRef.current = student;
   const photoRef = useRef<HTMLInputElement>(null);
   const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
   const [regenerating, setRegenerating] = useState(false);
@@ -87,7 +124,31 @@ export default function StudentDetail() {
     : {};
   const showErr = (k: string) => touched[k] && (formErrors as any)[k];
 
-  const reload = async () => {
+  /**
+   * Окно подавления подсказки «обновлено другим пользователем».
+   *
+   * RealtimeGateway намеренно не исключает отправителя из рассылки, поэтому
+   * автор изменения получает эхо СВОЕГО же действия. Сравнения полей (prev vs
+   * s) для отсечения эха недостаточно: собственное сохранение как раз и меняет
+   * поля, то есть упрёк в чужой правке приходил ровно после своей. Взводим
+   * окно перед каждой своей мутацией — 5 секунд с запасом покрывают путь
+   * «HTTP-ответ → сокет → reload», а чужая правка в этот момент маловероятна
+   * и в худшем случае стоит одной непоказанной подсказки.
+   */
+  const selfMutationUntilRef = useRef(0);
+  const markSelfMutation = () => {
+    selfMutationUntilRef.current = Date.now() + 5000;
+  };
+
+  /**
+   * opts.resetForm — ЯВНОЕ разрешение перезалить форму данными сервера.
+   * Передаётся только там, где сброс задуман: первичная загрузка по id,
+   * успешное сохранение и кнопка «Отмена».
+   * opts.external — вызов пришёл от realtime-события, а не напрямую от
+   * действия пользователя. Само по себе это НЕ значит «правил кто-то другой»
+   * (см. cardFieldsDiffer), нужно только чтобы решить, показывать ли подсказку.
+   */
+  const reload = async (opts?: { resetForm?: boolean; external?: boolean }) => {
     if (!id) return;
     // ПРОБЛЕМА F аудита: раньше error не сбрасывался на успешном пути, и после
     // одной ошибки (например realtime дёрнул reload() для карточки, доступ к
@@ -98,16 +159,27 @@ export default function StudentDetail() {
     setError(null);
     try {
       const s = await getStudent(id);
+      const prev = studentRef.current;
+      // Данные карточки обновляем ВСЕГДА (иначе загруженный документ не
+      // появится в чек-листе), а форму переливаем только когда это задумано.
+      // Раньше setForm был безусловным: менеджер правил ФИО и телефон, не
+      // закрывая режим редактирования грузил скан паспорта — DocumentsChecklist
+      // дёргал onChange={reload}, введённое молча заменялось серверным, и
+      // «Сохранить» записывал обратно старые значения.
       setStudent(s);
-      setForm({
-        fullName: s.fullName,
-        phones: s.phones.join(', '),
-        email: s.email || '',
-        direction: s.direction,
-        cabinet: s.cabinet,
-        status: s.status,
-        comment: s.comment || '',
-      });
+      if (opts?.resetForm || !formRef.current || !editRef.current) {
+        setForm({
+          fullName: s.fullName,
+          phones: s.phones.join(', '),
+          email: s.email || '',
+          direction: s.direction,
+          cabinet: s.cabinet,
+          status: s.status,
+          comment: s.comment || '',
+        });
+      } else if (opts?.external && Date.now() > selfMutationUntilRef.current && cardFieldsDiffer(prev, s)) {
+        toast('Карточка обновлена другим пользователем — ваши правки сохранены', 'info');
+      }
     } catch (e: any) {
       // БАГ 2 аудита: после закрытия доступа к чужим карточкам EMPLOYEE
       // с чужим UUID должен увидеть понятную ошибку, а не вечную «Загрузка...».
@@ -116,13 +188,15 @@ export default function StudentDetail() {
     }
   };
 
-  useEffect(() => { reload(); }, [id]);
+  // Смена :id — единственный случай, когда форму обязательно перезалить:
+  // иначе в ней остались бы данные предыдущего студента.
+  useEffect(() => { reload({ resetForm: true }); }, [id]);
 
   useRealtime({
-    'student:updated': (data: any) => { if (data?.studentId === id) reload(); },
-    'document:uploaded': (data: any) => { if (data?.studentId === id) reload(); },
-    'document:deleted': (data: any) => { if (data?.studentId === id) reload(); },
-    'form:updated': (data: any) => { if (data?.studentId === id) reload(); },
+    'student:updated': (data: any) => { if (data?.studentId === id) reload({ external: true }); },
+    'document:uploaded': (data: any) => { if (data?.studentId === id) reload({ external: true }); },
+    'document:deleted': (data: any) => { if (data?.studentId === id) reload({ external: true }); },
+    'form:updated': (data: any) => { if (data?.studentId === id) reload({ external: true }); },
     'application:updated': (data: any) => {
       // Бэкенд переходит на «тонкие» realtime-события: вместо всего объекта
       // { application: {...} } может прийти { studentId } / { applicationId }
@@ -130,7 +204,7 @@ export default function StudentDetail() {
       // событие вообще не сообщает, кого коснулось изменение — перезагружаем
       // в любом случае (reload() дешёвый, а доступ всё равно перепроверит backend).
       const studentId = data?.studentId ?? data?.application?.studentId;
-      if (studentId === undefined || studentId === id) reload();
+      if (studentId === undefined || studentId === id) reload({ external: true });
     },
   });
 
@@ -143,6 +217,7 @@ export default function StudentDetail() {
     }
     const phones = form.phones.split(',').map((p: string) => p.trim()).filter(Boolean);
     try {
+      markSelfMutation();
       await updateStudent(id, {
         fullName: form.fullName.trim(),
         phones,
@@ -153,7 +228,7 @@ export default function StudentDetail() {
         comment: form.comment?.trim() || undefined,
       });
       toast('Данные сохранены', 'success');
-      await reload();
+      await reload({ resetForm: true });
       setEdit(false);
       setTouched({});
     } catch (e: any) {
@@ -165,6 +240,7 @@ export default function StudentDetail() {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     try {
+      markSelfMutation();
       await uploadPhoto(id, file);
       toast('Фото загружено', 'success');
       await reload();
@@ -258,7 +334,8 @@ export default function StudentDetail() {
         <div style={{ display: 'flex', gap: 8 }}>
           {canEdit && !edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
           {canEdit && edit && <>
-            <button className="btn btn-secondary btn-sm" onClick={() => { setEdit(false); reload(); }}>Отмена</button>
+            {/* resetForm ОБЯЗАТЕЛЕН: здесь откат правок — это и есть смысл кнопки. */}
+            <button className="btn btn-secondary btn-sm" onClick={() => { setEdit(false); reload({ resetForm: true }); }}>Отмена</button>
             <button className="btn btn-primary btn-sm" onClick={onSave}>Сохранить</button>
           </>}
           {canEdit && <button className="btn btn-danger btn-sm" onClick={onDeleteStudent}>Удалить</button>}

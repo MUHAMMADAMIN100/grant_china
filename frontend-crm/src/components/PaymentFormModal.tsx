@@ -17,8 +17,18 @@ import { useUI } from '../ui/Dialogs';
 import { buildFileUrl } from '../utils/fileUrl';
 import ReceiptDropzone from './ReceiptDropzone';
 import Icon from '../Icon';
+import { todayInputValue } from '../utils/datetime';
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+/**
+ * Сегодняшняя дата ЛОКАЛЬНЫМИ компонентами, а не через toISOString():
+ * toISOString() отдаёт сутки по UTC, и в Душанбе (UTC+5) с 00:00 до 05:00
+ * это вчерашнее число. Ночью первого числа месяца календарь гасил бы
+ * сегодняшний день, а поле по умолчанию подставляло предыдущий месяц —
+ * платёж уезжал в уже закрываемый расчётный период и раздувал базу бонуса.
+ * Бэкенд такую дату принимает (его верхняя граница считается по суткам
+ * Душанбе), то есть интерфейс запрещал бы то, что сервер считает корректным.
+ */
+const todayStr = todayInputValue;
 
 type Props = {
   studentId: string;
@@ -216,7 +226,10 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
           </div>
           <div className="form-group">
             <label>Дата поступления *</label>
-            <input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} disabled={busy} />
+            {/* max — подсказка интерфейса: на этой дате строится отчётность и
+                база премий, будущая дата искажает и то, и другое (жёсткая
+                проверка стоит на бэкенде). */}
+            <input type="date" value={paidAt} max={todayStr()} onChange={(e) => setPaidAt(e.target.value)} disabled={busy} />
           </div>
         </div>
 

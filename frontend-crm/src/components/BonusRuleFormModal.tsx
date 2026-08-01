@@ -103,7 +103,11 @@ export default function BonusRuleFormModal({ setId, rule, onClose, onSaved }: Pr
 
   const needsRate = kind === 'PERCENT_OF_CONTRACTS' || kind === 'PERCENT_OF_PAYMENTS';
   const needsAmount = kind !== 'PERCENT_OF_CONTRACTS' && kind !== 'PERCENT_OF_PAYMENTS' && kind !== 'KPI_THRESHOLD_BONUS';
-  const needsCap = needsRate || kind === 'FIXED_PER_CONSULTATION';
+  // Потолок обязателен у ВСЕХ счётных правил — ровно как в validateFields
+  // (rules.service.ts). Пока условие было уже, для FIXED_PER_CONTRACT /
+  // _ENROLLMENT / _RELOCATION / _STAGE поле не рендерилось вовсе: форма
+  // отправляла запрос без cap и получала 400 на поле, которого в ней нет.
+  const needsCap = kind !== 'KPI_THRESHOLD_BONUS';
   const needsStage = kind === 'FIXED_PER_STAGE' || kind === 'PERCENT_OF_PAYMENTS';
   const stageRequired = kind === 'FIXED_PER_STAGE';
   const isThreshold = kind === 'KPI_THRESHOLD_BONUS';
@@ -217,30 +221,16 @@ export default function BonusRuleFormModal({ setId, rule, onClose, onSaved }: Pr
         </div>
 
         {needsRate && (
-          <div className="form-grid-2">
-            <div className="form-group">
-              <label>Процент (%) *</label>
-              <input
-                value={ratePercent}
-                onChange={(e) => setRatePercent(e.target.value.replace(/[^\d.]/g, ''))}
-                onBlur={() => setTouched(true)}
-                className={touched && !rateValid ? 'input-error' : ''}
-                placeholder="3"
-                disabled={saving}
-              />
-            </div>
-            <div className="form-group">
-              <label>Потолок вклада правила, сомони *</label>
-              <input
-                value={cap}
-                onChange={(e) => setCap(e.target.value.replace(/[^\d.]/g, ''))}
-                onBlur={() => setTouched(true)}
-                className={touched && !capValid ? 'input-error' : ''}
-                placeholder="1000"
-                disabled={saving}
-              />
-              <div className="receipt-dropzone-hint">Предохранитель от опечатки в проценте — обязателен.</div>
-            </div>
+          <div className="form-group">
+            <label>Процент (%) *</label>
+            <input
+              value={ratePercent}
+              onChange={(e) => setRatePercent(e.target.value.replace(/[^\d.]/g, ''))}
+              onBlur={() => setTouched(true)}
+              className={touched && !rateValid ? 'input-error' : ''}
+              placeholder="3"
+              disabled={saving}
+            />
           </div>
         )}
 
@@ -258,7 +248,7 @@ export default function BonusRuleFormModal({ setId, rule, onClose, onSaved }: Pr
           </div>
         )}
 
-        {kind === 'FIXED_PER_CONSULTATION' && (
+        {needsCap && (
           <div className="form-group">
             <label>Потолок вклада правила, сомони *</label>
             <input
@@ -269,6 +259,7 @@ export default function BonusRuleFormModal({ setId, rule, onClose, onSaved }: Pr
               placeholder="1000"
               disabled={saving}
             />
+            <div className="receipt-dropzone-hint">Предохранитель от опечатки в ставке или всплеска количества — обязателен для всех счётных правил.</div>
           </div>
         )}
 

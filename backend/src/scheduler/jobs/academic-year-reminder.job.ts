@@ -4,8 +4,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { JobContext, JobResult, ScheduledJob } from '../job.contract';
-import { localDayStart, localHour, toLocal } from '../time';
-import { formatDateRuShort, ordinalYearRu } from '../../grants/grant-year';
+import { localDayStart, localHour } from '../time';
+import { academicYearOriginKey, formatDateRuShort, ordinalYearRu } from '../../grants/grant-year';
 
 // Раздел 4 ТЗ — «за 1–2 месяца до старта нового учебного года CRM автоматически
 // создаёт задачу». Верхняя граница окна = «за 2 месяца» (раньше задача не
@@ -185,7 +185,7 @@ export class AcademicYearReminderJob implements ScheduledJob {
       // порядковый номер курса. См. academicYearJob проекта архитектора:
       // порядковый ключ терял бы звонок студентам, оставшимся на второй год
       // или ушедшим в академ, календарный — переигрывает в новом году.
-      const calendarYear = toLocal(g.nextYearStartsAt).getUTCFullYear();
+      //
       // В ключ входит id ГРАНТА, а не только студента. Схема допускает
       // несколько грантов у одного человека — это буквально «двойной грант»
       // из названия раздела: год языковых курсов по одному гранту, затем
@@ -194,7 +194,9 @@ export class AcademicYearReminderJob implements ScheduledJob {
       // второй INSERT упал бы на unique, и менеджер получил бы напоминание
       // ровно по одному из двух грантов — молча, потому что P2002 глотается
       // как «дубль». studentId в ключе оставлен для читаемости в логах.
-      const originKey = `academic-year:${g.student.id}:${g.id}:${calendarYear}`;
+      // Сам ключ строит grants/grant-year.ts: тот же формат нужен
+      // GrantsService.update(), который синхронизирует задачу при переносе даты.
+      const originKey = academicYearOriginKey(g.student.id, g.id, g.nextYearStartsAt);
 
       const lines = [
         `Позвонить студенту ${g.student.fullName} и проинформировать о начале ${ordinalYearRu(n)} года обучения по гранту.`,

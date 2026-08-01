@@ -34,7 +34,12 @@ export default function PayslipDetailModal({ payslip, onClose }: Props) {
           <div>
             <div className="dialog-title" style={{ marginBottom: 4 }}>
               {payslip.user.fullName} · {payslip.periodKey}
-              {payslip.revision > 1 && <span className="mgr-you"> · ревизия {payslip.revision}</span>}
+              {/* «ред. N» — только номер версии: revision растёт и когда ошибочный
+                  черновик просто удалили и сгенерировали заново, аннулирования при
+                  этом не было. Факт сторно-цепочки — отдельная метка по
+                  replacedById (то же разделение в ведомости, pages/Payroll.tsx). */}
+              {payslip.revision > 1 && <span className="mgr-you" title="Номер версии листа за период"> · ред. {payslip.revision}</span>}
+              {payslip.replacedById && <span className="mgr-you" title="Взамен этого листа выпущен новый"> · переиздан</span>}
             </div>
             <PayslipStatusBadge status={payslip.status} />
           </div>
@@ -48,7 +53,13 @@ export default function PayslipDetailModal({ payslip, onClose }: Props) {
         )}
 
         <div className="payments-totals" style={{ marginBottom: 16 }}>
-          <div><span>Оклад</span><strong>{formatMoney(payslip.baseAmount)}</strong></div>
+          {/* «Оклад (реестр)» — договорная сумма, «Оклад (замена)» — ручная
+              подмена, от которой и посчитан «Итого». Подпись именно
+              «(реестр)», а не просто «Оклад»: в списке листов под «Окладом»
+              стоит сумма к расчёту (baseOverride ?? baseAmount), и одинаковая
+              подпись при разных числах читалась как ошибка начисления.
+              Те же три смысла разведены в CSV (utils/payrollReport.ts). */}
+          <div><span>Оклад (реестр)</span><strong>{formatMoney(payslip.baseAmount)}</strong></div>
           {payslip.baseOverride && <div><span>Оклад (замена)</span><strong className="text-warning">{formatMoney(payslip.baseOverride)}</strong></div>}
           <div><span>Бонус</span><strong className="text-success">{formatMoney(payslip.bonusAmount)}</strong></div>
           <div><span>Премия KPI</span><strong className="text-success">{formatMoney(payslip.kpiBonusAmount)}</strong></div>

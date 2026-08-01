@@ -17,6 +17,54 @@ export function toDatetimeLocalValue(iso: string | null | undefined): string {
   return new Date(d.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
+/** Душанбе, UTC+5 — та же константа, что APP_TZ_OFFSET_MINUTES в backend/src/scheduler/time.ts. */
+const APP_TZ_OFFSET_MINUTES = 300;
+
+/**
+ * ISO-момент КАЛЕНДАРНОЙ даты -> значение <input type="date">.
+ *
+ * ПРАВИЛО. Поля, которые бэкенд разбирает через parseCalendarDate
+ * (grants/grant-year.ts) — startDate и nextYearStartsAt гранта, effectiveFrom
+ * набора формул и договора компенсации, signedAt договора — хранятся как
+ * полночь ПО ДУШАНБЕ, то есть как 19:00 ПРЕДЫДУЩИХ суток в UTC.
+ *
+ * Поэтому `iso.slice(0, 10)` брать НЕЛЬЗЯ: срез отдаёт UTC-часть, то есть день
+ * назад. Список показывает «01.09.2026» (toLocaleDateString считает по зоне
+ * браузера), а форма редактирования той же записи — «31.08.2026»; сохранение
+ * без правки даты отправляет сдвинутый день обратно, и КАЖДОЕ сохранение
+ * теряет ровно сутки — сдвиг накопительный, за ним уезжают вычисляемые от
+ * даты значения (следующий учебный год, окно джобы напоминаний, период
+ * действия формул).
+ *
+ * Возвращаем момент в Душанбе и только потом берём UTC-компоненты —
+ * симметрично parseCalendarDate, которая этот же сдвиг вычитает.
+ */
+export function toDateInputValue(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Date(d.getTime() + APP_TZ_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Сегодняшняя дата в формате <input type="date"> — по МЕСТНОМУ времени, а не
+ * по UTC.
+ *
+ * `new Date().toISOString().slice(0, 10)` здесь неверен: в Душанбе (UTC+5)
+ * с полуночи до 05:00 он отдаёт ВЧЕРАШНИЙ день. Практическое следствие
+ * зависит от места использования: в `max` он гасит сегодняшний день в
+ * календаре (интерфейс запрещает то, что бэкенд принимает), в значении по
+ * умолчанию — тихо подставляет вчера, и платёж или консультация уезжают в
+ * предыдущий расчётный период, раздувая базу бонуса за уже закрываемый месяц.
+ *
+ * Одна функция на все формы: три копии этой строки уже успели разъехаться.
+ */
+export function todayInputValue(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /**
  * Границы периода из двух <input type="date"> в ISO для бэкенда.
  *

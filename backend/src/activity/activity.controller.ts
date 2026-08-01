@@ -5,6 +5,21 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { parseTake } from '../common/pagination';
+
+/** Потолок выдачи журнала — сервис режет по нему же (см. ActivityService.list()). */
+const MAX_ACTIVITY_TAKE = 200;
+
+/**
+ * `new Date('вчера')` даёт Invalid Date, который уезжает в Prisma внутри
+ * фильтра createdAt и роняет запрос в 500. Фильтр по датам вспомогательный,
+ * поэтому мусор деградирует до «без ограничения по дате», а не до ошибки.
+ */
+const parseDate = (raw: string | undefined): Date | undefined => {
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+};
 
 /**
  * Раздел 2 ТЗ («СИСТЕМНЫЕ ЛОГИ» — доступны Основателю; операционный контроль
@@ -38,9 +53,11 @@ export class ActivityController {
       actorId,
       studentId,
       action,
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
-      take: take ? Number(take) : undefined,
+      from: parseDate(from),
+      to: parseDate(to),
+      // `Number('abc')` давал NaN, а `NaN ?? 200` — снова NaN: Prisma получала
+      // take: NaN и журнал не открывался вовсе (500) вместо честной деградации.
+      take: parseTake(take, MAX_ACTIVITY_TAKE),
       currentUserId: user?.id,
       currentUserRole: user?.role,
     });

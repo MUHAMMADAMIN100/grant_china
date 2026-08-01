@@ -319,24 +319,41 @@ export class KpiService {
    * база FIXED_PER_STAGE. Считается лениво (не входит в стандартный набор
    * метрик), вызывается bonus-engine ТОЛЬКО для этапов, реально
    * упомянутых в активных правилах.
-   * «Закрыт» = сумма APPROVED-платежей по (studentId, stage) достигла
-   * plannedAmount, дата закрытия — paidAt последнего такого платежа.
+   * «Закрыт» = нарастающий итог APPROVED-платежей по (studentId, stage)
+   * ВПЕРВЫЕ достиг plannedAmount; дата закрытия — paidAt именно того платежа.
+   *
+   * ПОЧЕМУ не SUM/MAX(paidAt) по всем платежам этапа (так было раньше):
+   * такая дата ЕЗДИТ ЗАДНИМ ЧИСЛОМ. Любая доплата по уже закрытому и
+   * оплаченному этапу переносила этап в период последнего платежа — бонус за
+   * него начислялся ВТОРОЙ раз, реальными деньгами. Обратный случай не менее
+   * опасен: approve() перед заморозкой зовёт recalculateCore(), и если к тому
+   * моменту по этапу прошла копеечная доплата следующим месяцем, этап уезжал
+   * из утверждаемого периода — сотрудник молча терял заработанный бонус ровно
+   * в момент утверждения листа. Момент первого покрытия плана не меняется от
+   * более поздних платежей, а верхняя граница paidAt < range.to отсекает
+   * будущее, поэтому закрытый период больше не переписывается.
    */
   async closedStagesCount(managerId: string | undefined, stage: PaymentStage, range: PeriodRange): Promise<number> {
     const managerCondition = managerId ? Prisma.sql`c."managerId" = ${managerId}` : Prisma.sql`c."managerId" IS NOT NULL`;
     const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
-      WITH totals AS (
-        SELECT p."studentId", p."stage", SUM(p."amount") AS paid, MAX(p."paidAt") AS last_paid_at
+      WITH running AS (
+        SELECT p."studentId", p."stage", p."paidAt",
+               SUM(p."amount") OVER (PARTITION BY p."studentId", p."stage" ORDER BY p."paidAt", p."id") AS paid_so_far
         FROM "Payment" p
         JOIN "Contract" c ON c.id = p."contractId" AND c."deletedAt" IS NULL AND ${managerCondition}
         WHERE p."deletedAt" IS NULL AND p."status" = 'APPROVED' AND p."kind" = 'SCHEDULE' AND p."stage" = ${stage}::"PaymentStage"
-        GROUP BY p."studentId", p."stage"
+          AND p."paidAt" < ${range.to}
+      ),
+      closed AS (
+        SELECT r."studentId", r."stage", MIN(r."paidAt") AS closed_at
+        FROM running r
+        JOIN "PaymentSchedule" ps ON ps."studentId" = r."studentId" AND ps."stage" = r."stage" AND ps."deletedAt" IS NULL
+        WHERE r.paid_so_far >= ps."plannedAmount" AND ps."plannedAmount" > 0
+        GROUP BY r."studentId", r."stage"
       )
       SELECT COUNT(*) AS count
-      FROM totals t
-      JOIN "PaymentSchedule" ps ON ps."studentId" = t."studentId" AND ps."stage" = t."stage" AND ps."deletedAt" IS NULL
-      WHERE t.paid >= ps."plannedAmount" AND ps."plannedAmount" > 0
-        AND t.last_paid_at >= ${range.from} AND t.last_paid_at < ${range.to}
+      FROM closed
+      WHERE closed_at >= ${range.from} AND closed_at < ${range.to}
     `;
     return Number(rows[0]?.count ?? 0);
   }

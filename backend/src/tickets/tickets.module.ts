@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
+import { TasksModule } from '../tasks/tasks.module';
 
 // PrismaService/ActivityService/RealtimeGateway — глобальные модули
 // (@Global() в их собственных модулях), импортировать их здесь не нужно.
@@ -14,8 +15,15 @@ import { TicketsService } from './tickets.service';
  * ролевыми проверками под конкретного пользователя (тот же приём, что у
  * follow-up-reminder.job.ts и academic-year-reminder.job.ts).
  * Экспорт TicketsService оставлен для будущих потребителей внутри Nest.
+ *
+ * TasksModule — единственный импорт: обратное направление той же связи.
+ * Автозадачу о вылете создаёт джоба, но её originKey содержит момент вылета,
+ * поэтому перенос/отмена/удаление рейса обязаны погасить задачу по СТАРОМУ
+ * ключу — иначе она вечно висит в «Просроченных» по несуществующему рейсу.
+ * Прямой доступ к prisma.task из сервиса запрещён (как в GrantsModule).
  */
 @Module({
+  imports: [TasksModule],
   controllers: [TicketsController],
   providers: [TicketsService],
   exports: [TicketsService],

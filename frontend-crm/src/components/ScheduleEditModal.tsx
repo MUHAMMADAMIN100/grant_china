@@ -23,7 +23,10 @@ export default function ScheduleEditModal({ studentId, stage, current, onClose, 
   const { toast } = useUI();
   const [plannedAmount, setPlannedAmount] = useState(current.plannedAmount);
   const [dueDate, setDueDate] = useState(current.dueDate ? current.dueDate.slice(0, 10) : '');
-  const [comment, setComment] = useState('');
+  // Предзаполняем сохранённым комментарием: поле уходит на сервер безусловно
+  // (см. onSave), поэтому с пустой инициализацией правка одной только суммы
+  // стирала бы уже сохранённый текст.
+  const [comment, setComment] = useState(current.comment ?? '');
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
 
@@ -38,7 +41,11 @@ export default function ScheduleEditModal({ studentId, stage, current, onClose, 
         stage,
         plannedAmount,
         dueDate: dueDate || undefined,
-        comment: comment.trim() || undefined,
+        // Пустую строку шлём как есть, а не undefined: сервис обновляет поле
+        // только при dto.comment !== undefined, поэтому на undefined
+        // намеренная очистка молча не применялась — тост об успехе был, а
+        // после перезагрузки текст возвращался. '' сервис приводит к null.
+        comment: comment.trim(),
       });
       toast('План этапа обновлён', 'success');
       onSaved();

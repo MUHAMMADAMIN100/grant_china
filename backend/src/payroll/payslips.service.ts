@@ -86,6 +86,10 @@ const PAYSLIP_SELECT = {
   voidedBy: { select: { id: true, fullName: true } },
   voidReason: true,
   replacedById: true,
+  // Обратный конец сторно-цепочки: какой аннулированный лист заменяет этот.
+  // Связь 1:1 по факту (replacedById помечен @unique), массив — лишь форма,
+  // в которой Prisma отдаёт обратную сторону отношения.
+  replaces: { select: { id: true } },
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.PayslipSelect;
@@ -117,8 +121,15 @@ export class PayslipsService {
   }
 
   private serialize(row: PayslipRow) {
+    const { replaces, ...rest } = row;
     return {
-      ...row,
+      ...rest,
+      // Плоский признак переиздания для интерфейса. Метку «переиздан» нельзя
+      // рисовать по revision > 1: ревизия растёт и после удаления черновика
+      // (remove не освобождает номер), а это первый выпуск листа, никакого
+      // аннулирования и сторно не было. Здесь же — факт: непусто только у
+      // листа, выпущенного через reissue() взамен аннулированного.
+      replacesId: replaces[0]?.id ?? null,
       baseAmount: this.money(row.baseAmount),
       baseOverride: row.baseOverride ? this.money(row.baseOverride) : null,
       bonusAmount: this.money(row.bonusAmount),
@@ -134,6 +145,25 @@ export class PayslipsService {
   private async refetch(id: string) {
     const row = await this.prisma.payslip.findUniqueOrThrow({ where: { id }, select: PAYSLIP_SELECT });
     return this.serialize(row);
+  }
+
+  /**
+   * Следующая ревизия листа за период — max(revision)+1 по ВСЕМ строкам пары
+   * (userId, periodKey), включая soft-удалённые (тот же приём, что в reissue).
+   *
+   * ПОЧЕМУ не константа 1: @@unique([userId, periodKey, revision]) про
+   * deletedAt не знает, а remove() оставляет удалённый черновик в таблице с
+   * его revision. С жёсткой единицей период после удаления черновика
+   * блокировался НАВСЕГДА — createManual() отвечал 409, и лист за этот месяц
+   * нельзя было создать уже ничем. То есть ревизия нужна ровно для того,
+   * чтобы удалённый лист можно было пересоздать ОСОЗНАННЫМ ручным действием
+   * (createManual/reissue). Идемпотентность generate() на неё не опирается:
+   * генератор сам пропускает сотрудников, у которых за период уже есть живая
+   * строка, — см. проверку decided в generate().
+   */
+  private async nextRevision(userId: string, periodKey: string): Promise<number> {
+    const max = await this.prisma.payslip.aggregate({ where: { userId, periodKey }, _max: { revision: true } });
+    return (max._max.revision ?? 0) + 1;
   }
 
   private async loadForAdminMutation(id: string): Promise<PayslipRow> {
@@ -259,9 +289,17 @@ export class PayslipsService {
     user: { id: string; role: Role },
     range: PeriodRange,
     ruleSet: RuleSetWithRules | null,
-  ): Promise<{ baseAmount: Prisma.Decimal; metrics: ManagerPeriodMetrics; bonusAmount: Prisma.Decimal; kpiBonusAmount: Prisma.Decimal; breakdown: BonusLine[] }> {
+    baseOverride: Prisma.Decimal | null = null,
+  ): Promise<{ baseAmount: Prisma.Decimal; effectiveBase: Prisma.Decimal; metrics: ManagerPeriodMetrics; bonusAmount: Prisma.Decimal; kpiBonusAmount: Prisma.Decimal; breakdown: BonusLine[] }> {
     const baseAmountRaw = await this.compensation.effectiveAt(user.id, range.from);
     const baseAmount = baseAmountRaw ?? new Prisma.Decimal(0);
+    // Контракт движка (bonus-engine.ts:46) — «оклад периода (baseOverride ??
+    // baseSalary)»: KPI_THRESHOLD_BONUS со ставкой считает процент ОТ ЭТОГО
+    // числа. Раньше в движок уходил только оклад из реестра, а baseOverride
+    // Основателя применялся к одному итогу — премия в процентах молча
+    // считалась от старой ставки. Реестровый baseAmount при этом возвращается
+    // отдельно: в Payslip.baseAmount хранится именно он, а не подмена.
+    const effectiveBase = baseOverride ?? baseAmount;
     const metrics = await this.kpi.forManager(user.id, range);
 
     let breakdown: BonusLine[] = [];
@@ -281,22 +319,26 @@ export class PayslipsService {
         const needsTeam = rules.some((r) => r.kind === 'KPI_THRESHOLD_BONUS' && r.metricScope === 'TEAM');
         const teamMetrics = needsTeam ? await this.kpi.forTeam(range) : null;
 
-        const result = calculateBonus(rules, { baseAmount, personalMetrics: metrics, teamMetrics, closedStagesByStage });
+        const result = calculateBonus(rules, { baseAmount: effectiveBase, personalMetrics: metrics, teamMetrics, closedStagesByStage });
         breakdown = result.breakdown;
         bonusAmount = result.bonusAmount;
         kpiBonusAmount = result.kpiBonusAmount;
       }
     }
 
-    return { baseAmount, metrics, bonusAmount, kpiBonusAmount, breakdown };
+    return { baseAmount, effectiveBase, metrics, bonusAmount, kpiBonusAmount, breakdown };
   }
 
   private async recalculateCore(existing: PayslipRow, actor: CurrentUser) {
     const range: PeriodRange = { key: existing.periodKey, from: existing.periodStart, to: existing.periodEnd };
     const ruleSet = await this.rules.activeSetFor(range.from);
-    const calc = await this.buildCalculation({ id: existing.userId, role: existing.user.role }, range, ruleSet as RuleSetWithRules | null);
-    const base = existing.baseOverride ?? calc.baseAmount;
-    const { total, needsReview } = this.evaluateTotal(base, calc.bonusAmount, calc.kpiBonusAmount, existing.adjustmentAmount);
+    const calc = await this.buildCalculation(
+      { id: existing.userId, role: existing.user.role },
+      range,
+      ruleSet as RuleSetWithRules | null,
+      existing.baseOverride,
+    );
+    const { total, needsReview } = this.evaluateTotal(calc.effectiveBase, calc.bonusAmount, calc.kpiBonusAmount, existing.adjustmentAmount);
 
     return this.prisma.payslip.update({
       where: { id: existing.id },
@@ -555,11 +597,38 @@ export class PayslipsService {
     });
     const ruleSet = await this.rules.activeSetFor(range.from);
 
+    // Идемпотентность генератора НЕ может держаться на P2002: слот
+    // @@unique([userId, periodKey, activeSlot]) освобождается и при удалении
+    // черновика (remove: activeSlot = null), и при аннулировании
+    // (voidPayslip: activeSlot = null). А джоба закрытия периода тикает раз в
+    // час весь первый день месяца — лист, намеренно удалённый Основателем в
+    // 09:30, к 10:00 создавался заново и мог уйти в выплату вместе со всей
+    // ведомостью; аннулированный лист получал новый DRAFT в обход reissue(),
+    // с оборванной сторно-цепочкой (replacedById остаётся null).
+    // Решением по сотруднику за период считается ЛЮБАЯ строка — живая, любого
+    // статуса (включая VOID), И soft-удалённая. Удалить черновик — это тоже
+    // решение: «этого листа быть не должно», и генератор не вправе его
+    // отменять. Фильтр по deletedAt здесь был бы ровно тем поведением, ради
+    // устранения которого написан абзац выше: удалённый в 09:30 лист
+    // возвращался бы в 10:00 следующим тиком джобы.
+    // Пересоздать лист после удаления по-прежнему можно — но только руками,
+    // через createManual() или reissue(), где ревизию и подбирает nextRevision().
+    const existingRows = await this.prisma.payslip.findMany({
+      where: { periodKey: range.key, userId: { in: users.map((u) => u.id) } },
+      select: { userId: true },
+    });
+    const decided = new Set(existingRows.map((r) => r.userId));
+
     let created = 0;
     let skipped = 0;
     for (const u of users) {
+      if (decided.has(u.id)) {
+        skipped += 1;
+        continue;
+      }
       const calc = await this.buildCalculation(u, range, ruleSet as RuleSetWithRules | null);
       const { total, needsReview } = this.evaluateTotal(calc.baseAmount, calc.bonusAmount, calc.kpiBonusAmount, new Prisma.Decimal(0));
+      const revision = await this.nextRevision(u.id, range.key);
       try {
         await this.prisma.payslip.create({
           data: {
@@ -567,7 +636,7 @@ export class PayslipsService {
             periodStart: range.from,
             periodEnd: range.to,
             periodKey: range.key,
-            revision: 1,
+            revision,
             activeSlot: 'ACTIVE',
             status: 'DRAFT',
             baseAmount: calc.baseAmount,
@@ -594,6 +663,10 @@ export class PayslipsService {
         });
         created += 1;
       } catch (e) {
+        // Остаётся страховкой от гонки: между выборкой existingRows и
+        // create() лист мог создать параллельный прогон джобы или ручное
+        // действие Основателя. Признаком идемпотентности эта ветка больше
+        // не служит — её даёт проверка decided выше.
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
           skipped += 1;
           continue;
@@ -632,6 +705,7 @@ export class PayslipsService {
     const ruleSet = await this.rules.activeSetFor(range.from);
     const calc = await this.buildCalculation(user, range, ruleSet as RuleSetWithRules | null);
     const { total, needsReview } = this.evaluateTotal(calc.baseAmount, calc.bonusAmount, calc.kpiBonusAmount, new Prisma.Decimal(0));
+    const revision = await this.nextRevision(user.id, range.key);
 
     const created = await this.prisma.payslip
       .create({
@@ -640,7 +714,7 @@ export class PayslipsService {
           periodStart: range.from,
           periodEnd: range.to,
           periodKey: range.key,
-          revision: 1,
+          revision,
           activeSlot: 'ACTIVE',
           status: 'DRAFT',
           baseAmount: calc.baseAmount,
@@ -703,13 +777,21 @@ export class PayslipsService {
     const adjustmentReason = dto.adjustmentAmount !== undefined ? dto.adjustmentReason!.trim() : existing.adjustmentReason;
     const baseOverride = dto.baseOverride !== undefined ? new Prisma.Decimal(dto.baseOverride) : existing.baseOverride;
 
-    const base = baseOverride ?? existing.baseAmount;
-    const { total, needsReview } = this.evaluateTotal(base, existing.bonusAmount, existing.kpiBonusAmount, adjustmentAmount);
-
-    await this.prisma.payslip.update({
-      where: { id },
-      data: { adjustmentAmount, adjustmentReason, baseOverride, totalAmount: total, needsReview },
-    });
+    if (dto.baseOverride !== undefined) {
+      // Замена оклада меняет БАЗУ процентных премий KPI (движок берёт процент
+      // от оклада периода), поэтому сложить старые bonusAmount/kpiBonusAmount
+      // с новой базой нельзя — премия осталась бы посчитанной от реестровой
+      // ставки. Пишем новые поля и прогоняем движок целиком.
+      await this.prisma.payslip.update({ where: { id }, data: { adjustmentAmount, adjustmentReason, baseOverride } });
+      await this.recalculateCore(await this.loadForAdminMutation(id), actor);
+    } else {
+      const base = baseOverride ?? existing.baseAmount;
+      const { total, needsReview } = this.evaluateTotal(base, existing.bonusAmount, existing.kpiBonusAmount, adjustmentAmount);
+      await this.prisma.payslip.update({
+        where: { id },
+        data: { adjustmentAmount, adjustmentReason, baseOverride, totalAmount: total, needsReview },
+      });
+    }
 
     const parts: string[] = [];
     if (dto.adjustmentAmount !== undefined) parts.push(`корректировка ${this.money(adjustmentAmount)} TJS (${adjustmentReason})`);

@@ -67,11 +67,21 @@ export default function Payments() {
   const [items, setItems] = useState<Payment[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [pendingItems, setPendingItems] = useState<Payment[]>([]);
   const [pendingTotal, setPendingTotal] = useState(0);
   const [pendingTotalAmount, setPendingTotalAmount] = useState('0.00');
   const [pendingLoading, setPendingLoading] = useState(true);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+
+  // Счётчики поколений запросов (свой на каждый список). debounce откладывает
+  // СТАРТ, но уже улетевший запрос не отменяет: медленный ответ по прошлому
+  // фильтру приходил после свежего и перерисовывал таблицу чужими платежами,
+  // а пагинация считалась по чужому total. Ответ с устаревшим номером
+  // отбрасываем — это же снимает гонку с realtime-перезагрузкой.
+  const reqRef = useRef(0);
+  const pendingReqRef = useRef(0);
 
   const [users, setUsers] = useState<User[]>([]);
   const [rejectTarget, setRejectTarget] = useState<Payment | null>(null);
@@ -88,7 +98,9 @@ export default function Payments() {
   }, [isPriv]);
 
   const loadAll = () => {
+    const my = ++reqRef.current;
     setLoading(true);
+    setError(null);
     listPayments({
       status: status || undefined,
       stage: stage || undefined,
@@ -100,20 +112,51 @@ export default function Payments() {
       page,
       pageSize: PAGE_SIZE,
     })
-      .then((res) => { setItems(res.items); setTotal(res.total); })
-      .finally(() => setLoading(false));
+      .then((res) => {
+        if (my !== reqRef.current) return;
+        setItems(res.items);
+        setTotal(res.total);
+      })
+      .catch((e: any) => {
+        if (my !== reqRef.current) return;
+        // Без сброса items/total на экране осталась бы выборка ПРОШЛОГО
+        // фильтра: Основатель фильтрует «Наличные», запрос падает, а на экране
+        // остаются безналичные платежи — и он делает по ним выводы о кассе.
+        setItems([]);
+        setTotal(0);
+        setError(e?.response?.data?.message || 'Не удалось загрузить список платежей');
+      })
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   const loadPending = () => {
     if (!isPriv) return;
+    const my = ++pendingReqRef.current;
     setPendingLoading(true);
+    setPendingError(null);
     listPendingPayments({ page: pendingPage, pageSize: PAGE_SIZE })
       .then((res) => {
+        if (my !== pendingReqRef.current) return;
         setPendingItems(res.items);
         setPendingTotal(res.total);
         setPendingTotalAmount(res.totalAmount);
       })
-      .finally(() => setPendingLoading(false));
+      .catch((e: any) => {
+        if (my !== pendingReqRef.current) return;
+        // Очередь на одобрение — деньги: показать устаревшую или выдать отказ
+        // за «очередь пуста» одинаково недопустимо.
+        setPendingItems([]);
+        setPendingTotal(0);
+        setPendingTotalAmount('0.00');
+        setPendingError(e?.response?.data?.message || 'Не удалось загрузить очередь на одобрение');
+      })
+      .finally(() => {
+        if (my !== pendingReqRef.current) return;
+        setPendingLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -251,6 +294,8 @@ export default function Payments() {
               <input type="date" value={to} onChange={(e) => onFilterChange('to', e.target.value)} title="Дата поступления до" />
             </div>
 
+            {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
+
             <AnimatePresence mode="wait">
               {loading ? (
                 <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -303,6 +348,8 @@ export default function Payments() {
               </div>
             )}
 
+            {pendingError && <div className="error-banner" style={{ marginBottom: 12 }}>{pendingError}</div>}
+
             <AnimatePresence mode="wait">
               {pendingLoading ? (
                 <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -318,7 +365,11 @@ export default function Payments() {
                   <table className="table">
                     <thead>
                       <tr>
-                        <th>Студент</th><th>Этап</th><th>Назначение</th><th>Способ</th><th>Сумма</th><th>Подано</th><th>Кем</th><th>Чек</th>
+                        {/* ТЗ 1.1 Double Check: без даты поступления второй акт
+                            проверки не ловит ошибку в paidAt, а по ней строится
+                            вся отчётность и база премий. «Подано» — это про
+                            момент подачи в очередь, не про приход денег. */}
+                        <th>Студент</th><th>Этап</th><th>Назначение</th><th>Способ</th><th>Сумма</th><th>Дата поступления</th><th>Подано</th><th>Кем</th><th>Чек</th>
                         {isFdr && <th>Действия</th>}
                       </tr>
                     </thead>
@@ -343,6 +394,7 @@ export default function Payments() {
                             <td data-label="Назначение">{PAYMENT_PURPOSE_LABEL[p.purpose]}</td>
                             <td data-label="Способ">{PAYMENT_METHOD_LABEL[p.method]}</td>
                             <td data-label="Сумма">{formatMoney(p.amount)}</td>
+                            <td data-label="Дата поступления">{new Date(p.paidAt).toLocaleDateString('ru-RU')}</td>
                             <td data-label="Подано">{p.submittedAt ? new Date(p.submittedAt).toLocaleString('ru-RU') : '—'}</td>
                             <td data-label="Кем">{p.submittedBy?.fullName || '—'}</td>
                             <td data-label="Чек">

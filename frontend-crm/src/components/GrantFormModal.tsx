@@ -3,6 +3,9 @@ import { motion } from 'framer-motion';
 import { GRANT_STATUS_LABEL, createGrant, updateGrant, type GrantStatus, type StudentGrant } from '../api/grants';
 import { useUI } from '../ui/Dialogs';
 import { hasErrors, maxLen, validateAll } from '../utils/validators';
+// Правило «календарная дата по Душанбе -> <input type="date">» живёт в одном
+// месте: локальная копия уже разъезжалась с PayrollRules (см. utils/datetime.ts).
+import { toDateInputValue } from '../utils/datetime';
 import Icon from '../Icon';
 
 type Props = {
@@ -12,8 +15,6 @@ type Props = {
   onClose: () => void;
   onSaved: () => void;
 };
-
-const toDateInputValue = (iso: string | null | undefined): string => (iso ? iso.slice(0, 10) : '');
 
 /**
  * ТЗ 4 — создание/правка записи реестра грантов. Год обучения двигается
@@ -61,15 +62,20 @@ export default function GrantFormModal({ studentId, grant, onClose, onSaved }: P
     setSaving(true);
     try {
       if (isEdit && grant) {
+        // Пустые строки отправляем КАК ЕСТЬ: `|| undefined` axios не
+        // сериализует, бэкенд обновляет поле только при dto.name !== undefined —
+        // очистка названия, вуза или заметки молча не сохранялась, а форма
+        // при этом рапортовала об успехе. Пустая строка проходит валидацию и
+        // превращается на бэкенде в null.
         await updateGrant(grant.id, {
-          name: name.trim() || undefined,
-          university: university.trim() || undefined,
+          name: name.trim(),
+          university: university.trim(),
           totalYears: totalYearsNum,
           currentYear: currentYearNum,
           startDate,
           nextYearStartsAt: nextYearStartsAt || null,
           status,
-          note: note.trim() || undefined,
+          note: note.trim(),
         });
         toast('Грант обновлён', 'success');
       } else {

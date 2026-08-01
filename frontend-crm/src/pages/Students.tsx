@@ -61,7 +61,15 @@ export default function Students() {
   const [total, setTotal] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  // Счётчик поколений запросов списка. debounce откладывает СТАРТ, но уже
+  // улетевший запрос не отменяет: медленный ответ по «Ива» приходил после
+  // быстрого по «Иванов» и перерисовывал таблицу чужими студентами, а
+  // пагинация считалась по чужому total. Ответ с устаревшим номером
+  // отбрасываем — это же снимает гонку с realtime-перезагрузкой.
+  const reqRef = useRef(0);
 
   // Realtime debounce — несколько событий за 500мс схлопываются в один load().
   // Без этого 'student:updated' + 'application:new' + 'application:updated'
@@ -76,7 +84,9 @@ export default function Students() {
   };
 
   const load = () => {
+    const my = ++reqRef.current;
     setLoading(true);
+    setError(null);
     listStudentsPaged({
       search: search || undefined,
       direction: direction || undefined,
@@ -89,10 +99,23 @@ export default function Students() {
       pageSize: PAGE_SIZE,
     })
       .then((res) => {
+        if (my !== reqRef.current) return;
         setItems(res.items);
         setTotal(res.total);
       })
-      .finally(() => setLoading(false));
+      .catch((e: any) => {
+        if (my !== reqRef.current) return;
+        // Без сброса items/total на экране осталась бы выборка ПРОШЛОГО
+        // фильтра, а сброшенный loading выдал бы её за успешно применённый.
+        // Пустая таблица без баннера читалась бы как «ничего не найдено».
+        setItems([]);
+        setTotal(0);
+        setError(e?.response?.data?.message || 'Не удалось загрузить список студентов');
+      })
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -337,6 +360,8 @@ export default function Students() {
             <option value="none">Без гранта</option>
           </select>
         </div>
+
+        {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 
         <AnimatePresence mode="wait">
           {loading ? (

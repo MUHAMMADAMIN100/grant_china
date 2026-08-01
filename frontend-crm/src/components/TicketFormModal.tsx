@@ -27,6 +27,16 @@ type Props = {
 };
 
 /**
+ * Подпись варианта автокомплита. Если почты нет — показываем телефон: двух
+ * однофамильцев без email иначе не отличить друг от друга ни глазами, ни
+ * кодом, и билет уходил бы первому попавшемуся из списка.
+ */
+const studentOptionLabel = (s: Student): string => {
+  const hint = s.email?.trim() || s.phones?.[0]?.trim() || '';
+  return hint ? `${s.fullName} · ${hint}` : s.fullName;
+};
+
+/**
  * ТЗ «Билеты», п.4.3 — карточка создания/редактирования билета.
  * «При вводе ФИО студента должен работать автокомплит по существующей базе CRM».
  *
@@ -56,6 +66,8 @@ export default function TicketFormModal({ ticket, studentId, studentName, onClos
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** Текст, который в поле подставил сам datalist при выборе варианта. */
+  const pickedLabelRef = useRef<string | null>(null);
 
   useEffect(() => {
     listChinaCities().then(setCities).catch(() => setCities([]));
@@ -65,6 +77,12 @@ export default function TicketFormModal({ ticket, studentId, studentName, onClos
   // введено хотя бы два символа — иначе каждый нажатый символ бил бы в API.
   useEffect(() => {
     if (isEdit || studentId) return;
+    // ВАЖНО: по подставленной datalist подписи «ФИО · email» не ищем. Бэкенд
+    // ищет по fullName contains / email contains, такой подстроки нет ни в
+    // имени, ни в почте — ответ приходил пустой, затирал список вариантов, а
+    // вместе с ним и выбранного студента: кнопка «Добавить билет» оставалась
+    // заблокированной навсегда.
+    if (studentQuery === pickedLabelRef.current) return;
     const q = studentQuery.trim();
     if (q.length < 2) {
       setStudents([]);
@@ -78,12 +96,24 @@ export default function TicketFormModal({ ticket, studentId, studentName, onClos
     return () => clearTimeout(t);
   }, [studentQuery, isEdit, studentId]);
 
-  // Пользователь выбрал вариант из datalist — сопоставляем текст с id.
-  useEffect(() => {
-    if (isEdit || studentId) return;
-    const match = students.find((s) => `${s.fullName} · ${s.email ?? ''}`.trim() === studentQuery.trim());
-    setSelectedStudentId(match?.id ?? '');
-  }, [studentQuery, students, isEdit, studentId]);
+  /**
+   * Выбор из datalist приходит тем же onChange, что и ручной ввод, поэтому
+   * различаем их по совпадению с подписью варианта. Id проставляется здесь,
+   * в момент выбора, и НЕ пересчитывается из текста поля на каждый ответ API —
+   * иначе он терялся бы при любом обновлении списка. Сбрасываем выбор только
+   * при настоящей правке текста.
+   */
+  const onStudentQueryChange = (value: string) => {
+    setStudentQuery(value);
+    const picked = students.find((s) => studentOptionLabel(s) === value);
+    if (picked) {
+      pickedLabelRef.current = value;
+      setSelectedStudentId(picked.id);
+      return;
+    }
+    pickedLabelRef.current = null;
+    setSelectedStudentId('');
+  };
 
   const canSubmit = useMemo(() => {
     if (!destinationCity.trim() || !departureAt || !flightNumber.trim()) return false;
@@ -157,13 +187,13 @@ export default function TicketFormModal({ ticket, studentId, studentName, onClos
               <input
                 list="ticket-student-options"
                 value={studentQuery}
-                onChange={(e) => setStudentQuery(e.target.value)}
+                onChange={(e) => onStudentQueryChange(e.target.value)}
                 placeholder="Начните вводить ФИО..."
                 autoFocus
               />
               <datalist id="ticket-student-options">
                 {students.map((s) => (
-                  <option key={s.id} value={`${s.fullName} · ${s.email ?? ''}`.trim()} />
+                  <option key={s.id} value={studentOptionLabel(s)} />
                 ))}
               </datalist>
               {studentQuery.trim().length >= 2 && !selectedStudentId && (
@@ -272,7 +302,7 @@ export default function TicketFormModal({ ticket, studentId, studentName, onClos
           )}
           {isEdit && (
             <div className="receipt-dropzone-hint">
-              Файл билета добавляется и удаляется в карточке билета — здесь только данные рейса.
+              Файл билета прикрепляется и удаляется кнопками в списке билетов — здесь только данные рейса.
             </div>
           )}
 

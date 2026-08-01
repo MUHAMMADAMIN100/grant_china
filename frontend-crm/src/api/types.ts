@@ -596,6 +596,8 @@ export interface PaymentStageSummary {
   stageOrder: number;
   plannedAmount: string;
   dueDate: string | null;
+  /** Комментарий строки графика — без него модалка правки плана не может предзаполнить поле и стирает сохранённый текст. */
+  comment: string | null;
   paidAmount: string;
   pendingAmount: string;
   remainingAmount: string;

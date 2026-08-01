@@ -228,8 +228,9 @@ export class TasksService {
    * Идемпотентность — паттерн A (UNIQUE-INSERT, см. scheduler/job.contract.ts):
    * Task.originKey уникален в БД, поэтому гонка двух одновременных вызовов
    * (два инстанса Railway, повторный тик планировщика) арбитрируется самой
-   * базой — второй INSERT падает с P2002, мы ловим её и возвращаем уже
-   * существующую задачу вместо дубля.
+   * базой — второй INSERT падает с P2002, мы ловим её и разбираемся с тем,
+   * кто уже занял ключ: ЖИВУЮ задачу возвращаем как есть (дубль не нужен),
+   * soft-удалённую ВОСКРЕШАЕМ (см. комментарий в ветке P2002).
    */
   async createSystemTask(input: SystemTaskInput) {
     const assignee = await this.prisma.user.findFirst({ where: { id: input.assignedToId, deletedAt: null } });
@@ -254,14 +255,36 @@ export class TasksService {
         include: TASK_INCLUDE,
       });
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        const existing = await this.prisma.task.findUnique({
-          where: { originKey: input.originKey },
-          include: TASK_INCLUDE,
-        });
-        if (existing) return existing;
-      }
-      throw e;
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) throw e;
+      const existing = await this.prisma.task.findUnique({
+        where: { originKey: input.originKey },
+        include: TASK_INCLUDE,
+      });
+      if (!existing) throw e;
+      // Живая задача по занятому ключу — гонка (второй инстанс/повторный тик)
+      // либо «человек уже разобрался»: возвращаем как есть, дубль не нужен.
+      if (!existing.deletedAt) return existing;
+      // Soft-удалённая задача = НАДГРОБИЕ, а не признак того, что напоминание
+      // уже отработано. Сценарий: менеджер по ошибке уводит дату гранта на
+      // следующий год — GrantsService гасит задачу по старому ключу и сбрасывает
+      // reminderSentAt; менеджер возвращает исходную дату — блок
+      // пересинхронизации уже не срабатывает (reminderSentAt = null), джоба
+      // заново занимает claim и приходит сюда со СТАРЫМ ключом. Вернуть
+      // «надгробие» как есть значило бы «создано 1» в логе и напоминание,
+      // потерянное навсегда. Поэтому воскрешаем со свежими данными и дальше по
+      // коду уведомляем исполнителя ровно как при создании.
+      task = await this.prisma.task.update({
+        where: { id: existing.id },
+        data: {
+          title: input.title.trim(),
+          description: input.description.trim(),
+          assignedToId: input.assignedToId,
+          dueDate: input.dueDate ?? null,
+          status: TaskStatus.TODO,
+          deletedAt: null,
+        },
+        include: TASK_INCLUDE,
+      });
     }
 
     await this.notifications.notifyUser(assignee.id, {
@@ -320,6 +343,26 @@ export class TasksService {
     }
 
     const wasDeleted = Boolean(existing.deletedAt);
+    // ПЕРЕНОС СРОКА ОБЯЗАН ВОСКРЕШАТЬ ЗАКРЫТУЮ ЗАДАЧУ. originKey у консультации
+    // один на всю жизнь записи, поэтому второй и каждый следующий перенос
+    // повторного звонка приходит в ЖИВУЮ задачу со статусом DONE (менеджер
+    // закрыл её после первого звонка): раньше обновлялись только
+    // title/description/dueDate, статус оставался DONE — на /tasks задача
+    // выглядела выполненной, в «Просроченные» не попадала и уведомления не
+    // было, то есть менеджер молча оставался без открытого напоминания.
+    // Условие «срок в будущем» отсекает правку описания задним числом по уже
+    // отработанной задаче — её реанимировать не за чем.
+    // Условие «срок ФАКТИЧЕСКИ изменился» отсекает переназначение исполнителя:
+    // менеджер дозвонился раньше срока и закрыл задачу, администратор отдаёт
+    // консультацию другому сотруднику (отпуск) — дата та же, воскрешать нечего,
+    // иначе новый менеджер получит уведомление и повторно позвонит клиенту,
+    // которому уже звонили. Меняем только assignedToId, статус не трогаем.
+    const reopened =
+      !wasDeleted &&
+      existing.status === TaskStatus.DONE &&
+      !!input.dueDate &&
+      input.dueDate.getTime() > Date.now() &&
+      (!existing.dueDate || input.dueDate.getTime() !== existing.dueDate.getTime());
     const updated = await this.prisma.task.update({
       where: { id: existing.id },
       data: {
@@ -328,19 +371,20 @@ export class TasksService {
         assignedToId: input.assignedToId,
         dueDate: input.dueDate ?? null,
         deletedAt: null,
-        // Воскрешаем всегда в TODO — если задача была удалена, её прежний
-        // статус не имеет смысла; если не была удалена, status не трогаем.
-        ...(wasDeleted ? { status: TaskStatus.TODO } : {}),
+        // Воскрешаем в TODO, если задача была удалена (прежний статус не имеет
+        // смысла) или закрыта, а срок перенесён вперёд; иначе status не трогаем.
+        ...(wasDeleted || reopened ? { status: TaskStatus.TODO } : {}),
       },
       include: TASK_INCLUDE,
     });
 
-    if (wasDeleted) {
-      // Менеджер потерял видимость задачи (она была скрыта как удалённая) —
-      // сообщаем заново теми же каналами, что и при первом создании.
+    if (wasDeleted || reopened) {
+      // Задача пропала из поля зрения менеджера (скрыта как удалённая либо
+      // закрыта им же) — сообщаем заново теми же каналами, что и при первом
+      // создании, иначе новый срок остаётся незамеченным.
       await this.notifications.notifyUser(assignee.id, {
         type: 'TASK_ASSIGNED',
-        title: 'Задача восстановлена',
+        title: wasDeleted ? 'Задача восстановлена' : 'Задача снова открыта',
         message: updated.title,
         payload: { taskId: updated.id },
       });

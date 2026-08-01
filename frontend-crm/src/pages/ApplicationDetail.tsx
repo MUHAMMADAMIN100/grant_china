@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { assignApplicationManager, deleteApplication, getApplication, updateApplication } from '../api/applications';
+import { assignApplicationManager, clearRepeatApplication, deleteApplication, getApplication, updateApplication } from '../api/applications';
 import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import { listContracts } from '../api/contracts';
 import type { Application, ApplicationStatus, Contract, Direction, Student, StudentStatus } from '../api/types';
-import { APPLICATION_STAGES, DIRECTION_LABEL, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
+import { APPLICATION_STAGES, DIRECTION_LABEL, LEAD_SOURCES, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, isPrivileged, leadSourceLabel } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -23,6 +23,30 @@ import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, req
 
 import { buildFileUrl } from '../utils/fileUrl';
 
+/**
+ * Изменились ли поля карточки студента, которыми владеет форма на этой
+ * странице (та же проверка и с тем же обоснованием есть в StudentDetail.tsx).
+ *
+ * RealtimeGateway не исключает отправителя и не передаёт автора события
+ * (backend/src/realtime/realtime.gateway.ts шлёт только { id, studentId }),
+ * поэтому назначенный менеджер получает эхо и СВОИХ действий: правит телефон,
+ * не сохраняя грузит скан — document:uploaded прилетает ему же. Без этой
+ * проверки он видел бы «обновлено другим пользователем», хотя никто другой
+ * ничего не менял. Сравниваем ровно те поля, из-за которых подсказка нужна.
+ */
+function cardFieldsDiffer(prev: Student | null, next: Student): boolean {
+  if (!prev) return false;
+  return (
+    prev.fullName !== next.fullName ||
+    prev.phones.join(',') !== next.phones.join(',') ||
+    (prev.email || '') !== (next.email || '') ||
+    prev.direction !== next.direction ||
+    prev.cabinet !== next.cabinet ||
+    prev.status !== next.status ||
+    (prev.comment || '') !== (next.comment || '')
+  );
+}
+
 export default function ApplicationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -32,6 +56,18 @@ export default function ApplicationDetail() {
   const [student, setStudent] = useState<Student | null>(null);
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState<any>(null);
+  // reload() асинхронный, и решение «переливать ли форму» принимается уже
+  // ПОСЛЕ await — к этому моменту значения edit/form из замыкания того рендера,
+  // в котором reload был создан (realtime-подписка, onChange у
+  // DocumentsChecklist), успевают устареть. Рефы всегда отдают актуальное.
+  const editRef = useRef(false);
+  editRef.current = edit;
+  const formRef = useRef<any>(null);
+  formRef.current = form;
+  // Прошлый серверный снимок карточки студента — по той же причине через реф:
+  // сравнение происходит после await, где `student` из замыкания уже устарел.
+  const studentRef = useRef<Student | null>(null);
+  studentRef.current = student;
   const [error, setError] = useState<string | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -40,6 +76,14 @@ export default function ApplicationDetail() {
   // (расторгли и подписали заново), поэтому ищем именно связанный с app.id.
   const [contract, setContract] = useState<Contract | null>(null);
   const [contractModalOpen, setContractModalOpen] = useState(false);
+  // ТЗ 3.1 — источник привлечения правится вручную именно здесь:
+  // ensureApplication сознательно создаёт заявку с source = null в расчёте на
+  // карточку, и без этого контрола поле у целого класса заявок оставалось бы
+  // пустым навсегда, а отчёт по каналам привлечения не собирался.
+  // Состояние отдельное от form: блок обязан работать и в ветке isNew, где
+  // карточки студента (и самой form) ещё нет.
+  const [sourceEdit, setSourceEdit] = useState<{ source: string; sourceDetail: string } | null>(null);
+  const [sourceSaving, setSourceSaving] = useState(false);
 
   const formErrors = form
     ? validateAll(
@@ -65,7 +109,30 @@ export default function ApplicationDetail() {
     : {};
   const showErr = (k: string) => touched[k] && (formErrors as any)[k];
 
-  const reload = async () => {
+  /**
+   * Окно подавления подсказки «обновлено другим пользователем».
+   *
+   * RealtimeGateway намеренно не исключает отправителя, поэтому автор
+   * изменения получает эхо СВОЕГО же действия. Сравнения полей (prev vs s)
+   * для отсечения эха мало: собственное сохранение как раз и меняет поля, то
+   * есть упрёк в чужой правке приходил ровно после своей. Взводим окно перед
+   * каждой своей мутацией — 5 секунд с запасом покрывают путь
+   * «HTTP-ответ → сокет → reload».
+   */
+  const selfMutationUntilRef = useRef(0);
+  const markSelfMutation = () => {
+    selfMutationUntilRef.current = Date.now() + 5000;
+  };
+
+  /**
+   * opts.resetForm — ЯВНОЕ разрешение перезалить форму данными сервера.
+   * Передаётся только там, где сброс задуман: первичная загрузка по id,
+   * успешное сохранение и кнопка «Отмена».
+   * opts.external — вызов пришёл от realtime-события, а не напрямую от
+   * действия пользователя. Само по себе это НЕ значит «правил кто-то другой»
+   * (см. cardFieldsDiffer), нужно только чтобы решить, показывать ли подсказку.
+   */
+  const reload = async (opts?: { resetForm?: boolean; external?: boolean }) => {
     if (!id) return;
     // ПРОБЛЕМА F аудита: раньше error не сбрасывался на успешном пути. Роут
     // /applications/:id не размонтируется при смене :id, поэтому одна ошибка
@@ -84,16 +151,27 @@ export default function ApplicationDetail() {
           // почему-то закрыт (редкий рассинхрон менеджеров), не роняем всю
           // страницу заявки — просто не показываем блок студента.
           const s = await getStudent(a.studentId);
+          const prev = studentRef.current;
+          // Данные карточки обновляем ВСЕГДА (иначе загруженный документ не
+          // появится в чек-листе), а форму переливаем только когда это
+          // задумано. Раньше setForm был безусловным: менеджер правил ФИО и
+          // телефон, не закрывая режим редактирования грузил скан паспорта —
+          // DocumentsChecklist дёргал onChange={reload}, введённое молча
+          // заменялось серверным, и «Сохранить» возвращал старые значения.
           setStudent(s);
-          setForm({
-            fullName: s.fullName,
-            phones: s.phones.join(', '),
-            email: s.email || '',
-            direction: s.direction,
-            cabinet: s.cabinet,
-            status: s.status,
-            comment: s.comment || '',
-          });
+          if (opts?.resetForm || !formRef.current || !editRef.current) {
+            setForm({
+              fullName: s.fullName,
+              phones: s.phones.join(', '),
+              email: s.email || '',
+              direction: s.direction,
+              cabinet: s.cabinet,
+              status: s.status,
+              comment: s.comment || '',
+            });
+          } else if (opts?.external && Date.now() > selfMutationUntilRef.current && cardFieldsDiffer(prev, s)) {
+            toast('Карточка обновлена другим пользователем — ваши правки сохранены', 'info');
+          }
         } catch {
           setStudent(null);
         }
@@ -120,11 +198,13 @@ export default function ApplicationDetail() {
     }
   };
 
-  useEffect(() => { reload(); }, [id]);
+  // Смена :id — единственный случай, когда форму обязательно перезалить:
+  // иначе в ней остались бы данные студента предыдущей заявки.
+  useEffect(() => { reload({ resetForm: true }); }, [id]);
 
   useRealtime({
     'contract:updated': (data: any) => {
-      if (data?.studentId && data.studentId === app?.studentId) reload();
+      if (data?.studentId && data.studentId === app?.studentId) reload({ external: true });
     },
     'application:updated': (data: any) => {
       // Бэкенд переходит на «тонкие» realtime-события: вместо всего объекта
@@ -134,26 +214,27 @@ export default function ApplicationDetail() {
       // случае (reload() дешёвый, доступ всё равно перепроверит backend).
       const applicationId = data?.id ?? data?.applicationId ?? data?.application?.id;
       const studentId = data?.studentId ?? data?.application?.studentId;
-      if (applicationId === undefined && studentId === undefined) { reload(); return; }
-      if (applicationId === id || studentId === app?.studentId) reload();
+      if (applicationId === undefined && studentId === undefined) { reload({ external: true }); return; }
+      if (applicationId === id || studentId === app?.studentId) reload({ external: true });
     },
     'student:updated': (data: any) => {
-      if (data?.studentId && data.studentId === app?.studentId) reload();
+      if (data?.studentId && data.studentId === app?.studentId) reload({ external: true });
     },
     'document:uploaded': (data: any) => {
-      if (data?.studentId === app?.studentId) reload();
+      if (data?.studentId === app?.studentId) reload({ external: true });
     },
     'document:deleted': (data: any) => {
-      if (data?.studentId === app?.studentId) reload();
+      if (data?.studentId === app?.studentId) reload({ external: true });
     },
     'form:updated': (data: any) => {
-      if (data?.studentId === app?.studentId) reload();
+      if (data?.studentId === app?.studentId) reload({ external: true });
     },
   });
 
   const onStatus = async (status: ApplicationStatus) => {
     if (!id) return;
     try {
+      markSelfMutation();
       await updateApplication(id, { status });
       // Подсказки для двух переходов, у которых есть побочный эффект, о
       // котором менеджеру важно знать. Раньше здесь проверялись легаси-статусы
@@ -207,6 +288,7 @@ export default function ApplicationDetail() {
     }
     const phones = form.phones.split(',').map((p: string) => p.trim()).filter(Boolean);
     try {
+      markSelfMutation();
       await updateStudent(student.id, {
         fullName: form.fullName.trim(),
         phones,
@@ -217,7 +299,7 @@ export default function ApplicationDetail() {
         comment: form.comment?.trim() || undefined,
       });
       toast('Данные сохранены', 'success');
-      await reload();
+      await reload({ resetForm: true });
       setEdit(false);
       setTouched({});
     } catch (e: any) {
@@ -225,10 +307,49 @@ export default function ApplicationDetail() {
     }
   };
 
+  const onSaveSource = async () => {
+    if (!id || !sourceEdit) return;
+    setSourceSaving(true);
+    try {
+      markSelfMutation();
+      await updateApplication(id, {
+        // «Не указан» отправляем именно как null, а не undefined: undefined
+        // axios не сериализует, бэкенд поле не трогает — ошибочно
+        // проставленный источник нельзя было снять вообще, а тост при этом
+        // рапортовал об успехе. null проходит валидацию (@IsOptional в
+        // UpdateApplicationDto пропускает и null, и undefined, до
+        // @IsIn(LEAD_SOURCE_VALUES) дело не доходит) и обнуляет колонку —
+        // «неизвестно» в схеме выражается ровно через source = null
+        // (common/lead-source.ts).
+        source: sourceEdit.source || null,
+        sourceDetail: sourceEdit.sourceDetail.trim(),
+      });
+      toast('Источник привлечения сохранён', 'success');
+      setSourceEdit(null);
+      await reload();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка сохранения источника', 'error');
+    } finally {
+      setSourceSaving(false);
+    }
+  };
+
+  const onClearRepeat = async () => {
+    if (!id) return;
+    try {
+      await clearRepeatApplication(id);
+      toast('Пометка «Повторное обращение» снята', 'success');
+      await reload();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка', 'error');
+    }
+  };
+
   const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !student) return;
     try {
+      markSelfMutation();
       await uploadPhoto(student.id, file);
       toast('Фото загружено', 'success');
       await reload();
@@ -267,8 +388,23 @@ export default function ApplicationDetail() {
       <BackButton fallback="/applications" />
       <div className="card">
       <div className="card-header">
-        <h2 className="card-title">{app.fullName}</h2>
+        <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {app.fullName}
+          {app.repeatOfId && (
+            <span className="badge badge-warning" title="По телефону/email похоже на повторное обращение">
+              Повторное
+            </span>
+          )}
+        </h2>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* ТЗ 3.1 — эвристика по телефону ложно срабатывает на общем семейном
+              номере (брат и сестра). Без этой кнопки заявка навсегда висела бы
+              во вкладке «Архив» и искажала её счётчик. */}
+          {canAct && app.repeatOfId && (
+            <button className="btn btn-sm btn-secondary" onClick={onClearRepeat} title="Снять пометку «Повторное обращение»">
+              Не повторное
+            </button>
+          )}
           {canEdit && !edit && (
             <button className="btn btn-sm btn-secondary" onClick={() => setEdit(true)}>
               Редактировать
@@ -276,7 +412,8 @@ export default function ApplicationDetail() {
           )}
           {canEdit && edit && (
             <>
-              <button className="btn btn-sm btn-secondary" onClick={() => { setEdit(false); reload(); }}>Отмена</button>
+              {/* resetForm ОБЯЗАТЕЛЕН: здесь откат правок — это и есть смысл кнопки. */}
+              <button className="btn btn-sm btn-secondary" onClick={() => { setEdit(false); reload({ resetForm: true }); }}>Отмена</button>
               <button className="btn btn-sm btn-primary" onClick={onSave}>Сохранить</button>
             </>
           )}
@@ -366,6 +503,57 @@ export default function ApplicationDetail() {
             <div className="detail-row"><div className="detail-label">Создана</div><div className="detail-value">{new Date(app.createdAt).toLocaleString('ru-RU')}</div></div>
           </>
         )}
+
+        {/* ТЗ 3.1 — «Источник привлечения». Блок вне веток isNew/student: у
+            заявок, созданных через ensureApplication, source = null, и именно
+            их менеджер обязан заполнить руками — иначе отчёт по каналам пуст. */}
+        <div className="detail-row">
+          <div className="detail-label">Источник привлечения</div>
+          <div className="detail-value">
+            {sourceEdit ? (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  value={sourceEdit.source}
+                  onChange={(e) => setSourceEdit({ ...sourceEdit, source: e.target.value })}
+                  disabled={sourceSaving}
+                >
+                  <option value="">Не указан</option>
+                  {LEAD_SOURCES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+                <input
+                  value={sourceEdit.sourceDetail}
+                  onChange={(e) => setSourceEdit({ ...sourceEdit, sourceDetail: e.target.value })}
+                  maxLength={200}
+                  placeholder="Уточнение: @ник, кампания, кто порекомендовал"
+                  disabled={sourceSaving}
+                />
+                <button className="btn btn-sm btn-secondary" onClick={() => setSourceEdit(null)} disabled={sourceSaving}>
+                  Отмена
+                </button>
+                <button className="btn btn-sm btn-primary" onClick={onSaveSource} disabled={sourceSaving}>
+                  {sourceSaving ? 'Сохранение…' : 'Сохранить'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span className={`badge ${app.source ? 'badge-info' : 'badge-gray'}`}>{leadSourceLabel(app.source)}</span>
+                {app.sourceDetail && <span>{app.sourceDetail}</span>}
+                {canAct && (
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => setSourceEdit({ source: app.source || '', sourceDetail: app.sourceDetail || '' })}
+                    title="Проставить источник привлечения"
+                  >
+                    <Icon name="edit" size={14} style={{ marginRight: 4 }} />
+                    Изменить
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
 
         {!isNew && student && form && (
           <>

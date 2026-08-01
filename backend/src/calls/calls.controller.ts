@@ -67,11 +67,17 @@ export class CallsController {
    * «Кто звонит» по номеру — используется всплывающей карточкой при входящем
    * вызове и формой ручной фиксации звонка. Возвращает однозначное совпадение
    * либо список кандидатов, если номер принадлежит нескольким карточкам.
+   *
+   * Отвечает ТОЛЬКО по доступным сотруднику карточкам (resolveByPhoneFor):
+   * иначе перебор номеров превращал эндпоинт в выгрузку ФИО и id всей чужой
+   * клиентской базы — при том что GET /students/:id на те же записи отдаёт 404.
+   * Лимит 60/мин — по той же причине: перебор должен быть дорогим.
    */
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Get('resolve')
-  resolve(@Query('phone') phone: string) {
-    return this.calls.resolveByPhone(phone || '');
+  resolve(@Query('phone') phone: string, @CurrentUser() user: any) {
+    return this.calls.resolveByPhoneFor(phone || '', user);
   }
 
   /**

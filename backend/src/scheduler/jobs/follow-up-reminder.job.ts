@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { JobContext, JobResult, ScheduledJob } from '../job.contract';
@@ -61,7 +62,45 @@ export class FollowUpReminderJob implements ScheduledJob {
 
     let created = 0;
     let skipped = 0;
+    let cachedFounderId: string | null | undefined;
     for (const c of candidates) {
+      // Получатель обязан быть ЖИВЫМ сотрудником, и выбирается ДО claim'а.
+      // Увольнение (soft-delete) не обнуляет managerId у консультаций, а
+      // notifyUser — единственный метод NotificationsService, который НЕ
+      // отсеивает уволенных получателей: напоминание уходило в никуда, при
+      // этом строка была уже занята навсегда (reminderSentAt), то есть
+      // повторной попытки не будет никогда. Тот же приём и та же причина,
+      // что в flight-reminder.job.ts.
+      const maybe = [c.managerId, c.createdById].filter((v): v is string => !!v);
+      const aliveIds = new Set<string>();
+      if (maybe.length) {
+        const alive = await this.prisma.user.findMany({
+          where: { id: { in: maybe }, deletedAt: null },
+          select: { id: true },
+        });
+        alive.forEach((u) => aliveIds.add(u.id));
+      }
+      const pick = (id: string | null | undefined): string | null => (id && aliveIds.has(id) ? id : null);
+
+      let assigneeId = pick(c.managerId) ?? pick(c.createdById);
+      if (!assigneeId) {
+        if (cachedFounderId === undefined) {
+          const founder = await this.prisma.user.findFirst({
+            where: { role: Role.FOUNDER, deletedAt: null },
+            orderBy: { createdAt: 'asc' },
+            select: { id: true },
+          });
+          cachedFounderId = founder?.id ?? null;
+        }
+        assigneeId = cachedFounderId;
+      }
+      if (!assigneeId) {
+        // Живого адресата нет вовсе — строку НЕ занимаем: напоминание должно
+        // достаться следующему прогону, когда ответственного назначат заново.
+        skipped += 1;
+        continue;
+      }
+
       // Паттерн B (claim-flag, job.contract.ts): атомарно занимаем строку
       // ДО побочного эффекта — только владелец claim'а шлёт уведомление.
       const claimed = await this.prisma.consultation.updateMany({
@@ -70,11 +109,6 @@ export class FollowUpReminderJob implements ScheduledJob {
       });
       if (claimed.count !== 1) {
         skipped += 1; // кто-то другой (второй инстанс/повторный тик) уже занял
-        continue;
-      }
-      const assigneeId = c.managerId ?? c.createdById;
-      if (!assigneeId) {
-        skipped += 1;
         continue;
       }
       await this.notifications.notifyUser(assigneeId, {

@@ -45,6 +45,14 @@ export default function Contracts() {
   const [stats, setStats] = useState<ContractStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Счётчик поколений запросов списка. debounce откладывает СТАРТ, но уже
+  // улетевший запрос не отменяет: медленный ответ по прошлому фильтру
+  // приходил после свежего и перерисовывал таблицу чужими договорами, а
+  // пагинация считалась по чужому total. Ответ с устаревшим номером
+  // отбрасываем — это же снимает гонку с realtime-перезагрузкой.
+  const reqRef = useRef(0);
 
   useEffect(() => {
     if (isPriv) listUsers().then(setUsers).catch(() => {});
@@ -55,7 +63,9 @@ export default function Contracts() {
   };
 
   const load = () => {
+    const my = ++reqRef.current;
     setLoading(true);
+    setError(null);
     listContracts({
       status: status || undefined,
       managerId: isPriv ? manager || undefined : undefined,
@@ -64,8 +74,24 @@ export default function Contracts() {
       page,
       pageSize: PAGE_SIZE,
     })
-      .then((res) => { setItems(res.items); setTotal(res.total); })
-      .finally(() => setLoading(false));
+      .then((res) => {
+        if (my !== reqRef.current) return;
+        setItems(res.items);
+        setTotal(res.total);
+      })
+      .catch((e: any) => {
+        if (my !== reqRef.current) return;
+        // Без сброса items/total на экране осталась бы выборка ПРОШЛОГО
+        // фильтра, а сброшенный loading выдал бы её за успешно применённый.
+        // Пустая таблица без баннера читалась бы как «ничего не найдено».
+        setItems([]);
+        setTotal(0);
+        setError(e?.response?.data?.message || 'Не удалось загрузить список договоров');
+      })
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -140,6 +166,8 @@ export default function Contracts() {
           <input type="date" value={from} onChange={(e) => onFilterChange('from', e.target.value)} title="Подписан от" />
           <input type="date" value={to} onChange={(e) => onFilterChange('to', e.target.value)} title="Подписан до" />
         </div>
+
+        {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 
         <AnimatePresence mode="wait">
           {loading ? (

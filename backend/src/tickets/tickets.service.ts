@@ -6,6 +6,8 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { normalizeCity } from '../common/china-cities';
+import { formatLocalDateTime } from '../scheduler/time';
+import { TasksService } from '../tasks/tasks.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 
@@ -22,6 +24,16 @@ export interface TicketFileInput {
 
 /** Тип Document для маршрутной квитанции. Управляется ТОЛЬКО через tickets/. */
 export const TICKET_DOCUMENT_TYPE = 'TICKET';
+
+/**
+ * Ключ автозадачи «Вылет через 3 дня». ОБЯЗАН совпадать с выражением в
+ * scheduler/jobs/flight-reminder.job.ts: задачу создаёт джоба, а гасит при
+ * переносе/отмене/удалении рейса этот сервис — разъехавшийся формат означал бы,
+ * что сервис гасит несуществующий ключ, а старая задача остаётся висеть.
+ */
+function flightTaskOriginKey(ticketId: string, departureAt: Date): string {
+  return `flight:${ticketId}:${departureAt.getTime()}`;
+}
 
 const TICKET_INCLUDE = {
   student: { select: { id: true, fullName: true, phones: true, managerId: true, chinaManagerId: true } },
@@ -69,6 +81,11 @@ export class TicketsService {
     private prisma: PrismaService,
     private activity: ActivityService,
     private realtime: RealtimeGateway,
+    // Единственная зависимость модуля: автозадачу о вылете СОЗДАЁТ джоба, но
+    // гасить её при переносе/отмене/удалении рейса обязан тот, кто рейс и
+    // меняет. Прямой доступ к prisma.task запрещён архитектурой — только через
+    // TasksService (тот же приём, что в grants.service.ts).
+    private tasks: TasksService,
   ) {}
 
   private parseDate(raw: string, message: string): Date {
@@ -250,7 +267,12 @@ export class TicketsService {
         action: 'TICKET_CREATE',
         studentId: student.id,
         studentName: student.fullName,
-        details: `Билет ${dto.flightNumber.trim()} → ${normalizeCity(dto.destinationCity)}, вылет ${departureAt.toLocaleString('ru-RU')}`,
+        // Время вылета — ТОЛЬКО через formatLocalDateTime: на сервере TZ=UTC,
+        // и голое toLocaleString напечатало бы вылет на 5 часов раньше
+        // реального. Джоба напоминаний форматирует ту же дату этим хелпером —
+        // без него одна и та же дата печаталась бы в системе двумя разными
+        // числами, и журнал спорил бы с текстом автозадачи и SMS студенту.
+        details: `Билет ${dto.flightNumber.trim()} → ${normalizeCity(dto.destinationCity)}, вылет ${formatLocalDateTime(departureAt, true)}`,
       })
       .catch(() => undefined);
     this.realtime.emitForStudent(student, 'ticket:updated', { id: created.id, studentId: student.id }, { studentId: student.id });
@@ -275,6 +297,7 @@ export class TicketsService {
       data.flightNumber = flight;
     }
     if (dto.airline !== undefined) data.airline = dto.airline?.trim() || null;
+    const nextStatus = dto.status ?? existing.status;
     if (dto.status !== undefined && dto.status !== existing.status) {
       changes.push(`Статус: ${existing.status} → ${dto.status}`);
       data.status = dto.status;
@@ -297,8 +320,10 @@ export class TicketsService {
       nextDepartureAt = this.parseDate(dto.departureAt, 'Некорректная дата вылета');
       departureChanged = nextDepartureAt.getTime() !== existing.departureAt.getTime();
       if (departureChanged) {
+        // formatLocalDateTime, а не toLocaleString — см. комментарий в create():
+        // сервер живёт в UTC, голый toLocaleString сдвигает вылет на 5 часов.
         changes.push(
-          `Вылет: ${existing.departureAt.toLocaleString('ru-RU')} → ${nextDepartureAt.toLocaleString('ru-RU')}`,
+          `Вылет: ${formatLocalDateTime(existing.departureAt, true)} → ${formatLocalDateTime(nextDepartureAt, true)}`,
         );
       }
       data.departureAt = nextDepartureAt;
@@ -317,12 +342,48 @@ export class TicketsService {
     // и занимает строку НАВСЕГДА. Без сброса флагов перенос вылета на неделю
     // вперёд означал бы, что напоминание по новому сроку не придёт никогда —
     // молча, без единой ошибки в логах.
+    //
+    // Работает это в паре с originKey задачи, куда входит момент вылета
+    // (flight-reminder.job.ts): сам по себе сброс флага холост — джоба
+    // упиралась бы в занятый ключ и возвращала старую задачу.
     if (departureChanged) {
       data.taskCreatedAt = null;
       data.smsSentAt = null;
     }
 
+    // ВОЗВРАТ ИЗ ОТМЕНЫ = ТОЖЕ НОВЫЙ ЦИКЛ. При отмене мы гасим задачу о вылете
+    // (см. ниже), но флаг taskCreatedAt остаётся заполненным. Если менеджер
+    // отменил билет по ошибке и вернул статус обратно, джоба такой билет уже
+    // не подхватит — она выбирает строго по `taskCreatedAt: null`, — и
+    // напоминание пропадёт навсегда, молча. Причём SMS студенту при этом
+    // уйдёт (smsSentAt не трогали), то есть студенту напомнят, а
+    // ответственному нет. Сбрасываем оба флага, чтобы цикл начался заново.
+    const revivedFromCancelled = existing.status === TicketStatus.CANCELLED && nextStatus !== TicketStatus.CANCELLED;
+    if (revivedFromCancelled) {
+      data.taskCreatedAt = null;
+      data.smsSentAt = null;
+    }
+
     await this.prisma.ticket.update({ where: { id }, data });
+
+    // Сброса флагов выше МАЛО. В originKey задачи входит момент вылета, поэтому
+    // после переноса джоба создаёт НОВУЮ задачу, а старая никуда не девается:
+    // у менеджера две одноимённые задачи по одному билету с противоречащими
+    // датами, и первая вечно висит в «Просроченных», требуя готовить студента к
+    // рейсу, которого не будет. Гасим её здесь — тем же приёмом, что
+    // GrantsService при переносе учебного года.
+    const staleTaskKeys = new Set<string>();
+    if (departureChanged) staleTaskKeys.add(flightTaskOriginKey(id, existing.departureAt));
+    // Отменённый рейс джоба больше не подхватит, но задача, созданная ДО
+    // отмены, сама не исчезнет — и требует готовить студента к вылету,
+    // которого не будет. Ключ считаем по ИТОГОВОЙ дате: при одновременном
+    // переносе и отмене старый ключ уже добавлен строкой выше.
+    if (nextStatus === TicketStatus.CANCELLED && existing.status !== TicketStatus.CANCELLED) {
+      staleTaskKeys.add(flightTaskOriginKey(id, nextDepartureAt));
+    }
+    for (const key of staleTaskKeys) {
+      await this.tasks.softDeleteSystemTaskIfPending(key);
+    }
 
     if (changes.length) {
       this.activity
@@ -350,6 +411,11 @@ export class TicketsService {
   async remove(id: string, user: CurrentUser) {
     const existing = await this.loadForMutation(id, user);
     await this.prisma.ticket.update({ where: { id }, data: { deletedAt: new Date() } });
+    // Билета больше нет — фантомная задача «проверить готовность к вылету»
+    // тем более неуместна (то же, что consultations.service.remove() делает со
+    // своей автозадачей). Гасим только не взятую в работу — решение по уже
+    // начатой остаётся за менеджером.
+    await this.tasks.softDeleteSystemTaskIfPending(flightTaskOriginKey(id, existing.departureAt));
     this.activity
       .log({
         actorId: user.id,
