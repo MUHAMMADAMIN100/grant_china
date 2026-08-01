@@ -73,7 +73,12 @@ export default function Sidebar() {
     // только руководству.
     ...(isPrivileged(user?.role) ? [
       { to: '/analytics', icon: 'insights', label: 'Аналитика' },
-      { to: '/payroll', icon: 'payroll', label: 'Зарплаты' },
+      // icon ОБЯЗАН быть существующим именем Material Symbols: компонент Icon
+      // просто печатает имя внутрь элемента со шрифтом, и если лигатуры нет,
+      // на экране остаётся сырой текст. Здесь стояло 'payroll' — такого имени
+      // в наборе не существует, и в меню читалось «PAYROLL» поверх подписи.
+      // TypeScript такое не ловит: принимается любая строка.
+      { to: '/payroll', icon: 'request_quote', label: 'Зарплаты' },
       { to: '/activity', icon: 'history', label: 'Активность' },
       { to: '/users', icon: 'group', label: 'Пользователи' },
     ] : []),

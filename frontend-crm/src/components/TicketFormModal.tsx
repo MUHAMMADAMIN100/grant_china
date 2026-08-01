@@ -97,22 +97,67 @@ export default function TicketFormModal({ ticket, studentId, studentName, onClos
   }, [studentQuery, isEdit, studentId]);
 
   /**
-   * Выбор из datalist приходит тем же onChange, что и ручной ввод, поэтому
-   * различаем их по совпадению с подписью варианта. Id проставляется здесь,
-   * в момент выбора, и НЕ пересчитывается из текста поля на каждый ответ API —
-   * иначе он терялся бы при любом обновлении списка. Сбрасываем выбор только
-   * при настоящей правке текста.
+   * Пересопоставление ПОСЛЕ прихода списка студентов.
+   *
+   * Без этого форма не работала даже с корректным вводом: поиск уходит с
+   * задержкой 300 мс, а сопоставление выполняется в onChange — то есть по
+   * списку, которого на тот момент ещё нет. Менеджер дописывает ФИО целиком,
+   * список приезжает через треть секунды, но onChange больше не вызывается, и
+   * selectedStudentId навсегда остаётся пустым. Кнопка «Добавить билет»
+   * заблокирована при полностью заполненной форме — ровно то, с чем пришёл
+   * пользователь.
+   *
+   * Ставим id только когда он ещё не выбран: если выбор уже сделан, повторное
+   * обновление списка не должно его трогать.
    */
+  useEffect(() => {
+    if (isEdit || studentId) return;
+    if (selectedStudentId) return;
+    if (!students.length) return;
+    const id = resolveStudentId(studentQuery);
+    if (id) {
+      pickedLabelRef.current = studentQuery;
+      setSelectedStudentId(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [students]);
+
+  /**
+   * Выбор из datalist приходит тем же onChange, что и ручной ввод, поэтому
+   * различаем их по содержимому поля. Id проставляется здесь, в момент выбора,
+   * и НЕ пересчитывается из текста поля на каждый ответ API — иначе он терялся
+   * бы при любом обновлении списка.
+   *
+   * СОПОСТАВЛЯЕМ ДВУМЯ СПОСОБАМИ, а не только по полной подписи «ФИО · почта».
+   * Раньше засчитывалось лишь точное совпадение с подписью, и форма вставала
+   * намертво в самом обычном сценарии: менеджер печатает «Иванов Иван», видит
+   * подсказку браузера, но не кликает по ней (или дописывает имя руками до
+   * конца) — текст в поле остаётся без хвоста « · почта», совпадения нет,
+   * selectedStudentId пустой, кнопка «Добавить билет» заблокирована, а
+   * подпись «Выберите студента из списка» не объясняет, что кликнуть надо
+   * именно по варианту.
+   *
+   * Совпадение по одному ФИО засчитываем ТОЛЬКО когда однофамилец ровно один.
+   * Если их несколько — id не ставим: билет не должен уехать наугад первому
+   * попавшемуся (ровно ради этого в подписи и появился хвост с почтой).
+   */
+  const resolveStudentId = (value: string): string => {
+    const v = value.trim().toLowerCase();
+    if (!v) return '';
+    // 1. Точное совпадение с подписью варианта — клик по datalist.
+    const byLabel = students.find((s) => studentOptionLabel(s).toLowerCase() === v);
+    if (byLabel) return byLabel.id;
+    // 2. Точное совпадение по ФИО — набрано руками. Только если однозначно.
+    const byName = students.filter((s) => s.fullName.trim().toLowerCase() === v);
+    if (byName.length === 1) return byName[0].id;
+    return '';
+  };
+
   const onStudentQueryChange = (value: string) => {
     setStudentQuery(value);
-    const picked = students.find((s) => studentOptionLabel(s) === value);
-    if (picked) {
-      pickedLabelRef.current = value;
-      setSelectedStudentId(picked.id);
-      return;
-    }
-    pickedLabelRef.current = null;
-    setSelectedStudentId('');
+    const id = resolveStudentId(value);
+    pickedLabelRef.current = id ? value : null;
+    setSelectedStudentId(id);
   };
 
   const canSubmit = useMemo(() => {
@@ -196,8 +241,39 @@ export default function TicketFormModal({ ticket, studentId, studentName, onClos
                   <option key={s.id} value={studentOptionLabel(s)} />
                 ))}
               </datalist>
-              {studentQuery.trim().length >= 2 && !selectedStudentId && (
-                <div className="form-error-text">Выберите студента из списка</div>
+              {/* Найденные варианты кнопками, а не только нативным datalist.
+                  Подсказка браузера показывается не всегда (её легко закрыть
+                  Escape'ом, на мобильном она ведёт себя иначе), и тогда
+                  единственным сигналом оставалась красная строка «выберите из
+                  списка» — из которой непонятно, где этот список и почему
+                  набранное вручную ФИО не подходит. Клик по кнопке ставит id
+                  напрямую, минуя любое сопоставление по тексту. */}
+              {!selectedStudentId && students.length > 0 && (
+                <div className="student-suggestions">
+                  {students.slice(0, 6).map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        const label = studentOptionLabel(s);
+                        setStudentQuery(label);
+                        pickedLabelRef.current = label;
+                        setSelectedStudentId(s.id);
+                      }}
+                    >
+                      {studentOptionLabel(s)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedStudentId && (
+                <div className="form-hint-ok">
+                  <Icon name="check_circle" size={14} /> Студент выбран
+                </div>
+              )}
+              {studentQuery.trim().length >= 2 && !selectedStudentId && students.length === 0 && (
+                <div className="form-error-text">Студент не найден — проверьте написание ФИО</div>
               )}
             </div>
           )}

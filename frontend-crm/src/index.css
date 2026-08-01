@@ -1233,6 +1233,24 @@ select.input-error {
   font-size: 14px;
 }
 
+/* Подтверждение выбора в автокомплите — зелёная строка вместо красной.
+   Пользователю нужен явный сигнал «поле принято», иначе при заблокированной
+   кнопке непонятно, какое именно поле её держит. */
+.form-hint-ok {
+  color: #16a34a; font-size: 12px; margin-top: 4px;
+  display: flex; align-items: center; gap: 4px;
+}
+
+/* Найденные студенты кнопками под полем ввода (TicketFormModal). Нативный
+   datalist показывается не во всех ситуациях, поэтому дублируем варианты
+   явными кнопками — клик по ним ставит id напрямую. */
+.student-suggestions {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+}
+.student-suggestions .btn {
+  font-size: 12px; padding: 4px 10px;
+}
+
 .enrolled-badge {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 12px; border-radius: 20px;
