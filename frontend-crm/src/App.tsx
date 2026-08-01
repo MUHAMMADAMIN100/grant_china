@@ -1,31 +1,47 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './store/auth';
 import Login from './pages/Login';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
-import Dashboard from './pages/Dashboard';
-import Applications from './pages/Applications';
-import ApplicationDetail from './pages/ApplicationDetail';
-import Consultations from './pages/Consultations';
-import Students from './pages/Students';
-import StudentDetail from './pages/StudentDetail';
-import StudentNew from './pages/StudentNew';
-import Users from './pages/Users';
-import Tasks from './pages/Tasks';
-import Programs from './pages/Programs';
-import Activity from './pages/Activity';
-import Payments from './pages/Payments';
-import Analytics from './pages/Analytics';
-import Contracts from './pages/Contracts';
-import ContractDetail from './pages/ContractDetail';
-import MyPayroll from './pages/MyPayroll';
-import Payroll from './pages/Payroll';
-import PayrollRules from './pages/PayrollRules';
-import Grants from './pages/Grants';
-import Tickets from './pages/Tickets';
-import Knowledge from './pages/Knowledge';
-import Conversations from './pages/Conversations';
+
+/**
+ * СТРАНИЦЫ ГРУЗЯТСЯ ПО ТРЕБОВАНИЮ.
+ *
+ * Раньше все 23 страницы импортировались статически и попадали в один файл:
+ * 774 КБ (230 КБ сжатыми). Открывая карточку студента, браузер выкачивал заодно
+ * код аналитики, зарплатной ведомости, базы знаний, чатов, договоров и всего
+ * остального — и только потом начинал рисовать. На быстром канале это ~0.5 с,
+ * на медленном мобильном — секунды сплошного белого экрана. Vite ровно на это
+ * и ругался предупреждением про чанки больше 500 КБ.
+ *
+ * Теперь каждая страница — отдельный кусок, который скачивается при первом
+ * заходе на неё. Login и Layout оставлены статическими намеренно: Login нужен
+ * до всякой навигации, Layout рисуется на каждой странице, и вынос их в
+ * отдельные запросы только добавил бы задержку.
+ */
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Applications = lazy(() => import('./pages/Applications'));
+const ApplicationDetail = lazy(() => import('./pages/ApplicationDetail'));
+const Consultations = lazy(() => import('./pages/Consultations'));
+const Students = lazy(() => import('./pages/Students'));
+const StudentDetail = lazy(() => import('./pages/StudentDetail'));
+const StudentNew = lazy(() => import('./pages/StudentNew'));
+const Users = lazy(() => import('./pages/Users'));
+const Tasks = lazy(() => import('./pages/Tasks'));
+const Programs = lazy(() => import('./pages/Programs'));
+const Activity = lazy(() => import('./pages/Activity'));
+const Payments = lazy(() => import('./pages/Payments'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Contracts = lazy(() => import('./pages/Contracts'));
+const ContractDetail = lazy(() => import('./pages/ContractDetail'));
+const MyPayroll = lazy(() => import('./pages/MyPayroll'));
+const Payroll = lazy(() => import('./pages/Payroll'));
+const PayrollRules = lazy(() => import('./pages/PayrollRules'));
+const Grants = lazy(() => import('./pages/Grants'));
+const Tickets = lazy(() => import('./pages/Tickets'));
+const Knowledge = lazy(() => import('./pages/Knowledge'));
+const Conversations = lazy(() => import('./pages/Conversations'));
 
 export default function App() {
   const init = useAuth((s) => s.init);
@@ -42,6 +58,20 @@ export default function App() {
   }
 
   return (
+    // Suspense обязателен при lazy-страницах: пока кусок скачивается, React
+    // должен что-то показать. Каркас, а не «Загрузка...» — пустое место
+    // читается как сломанная страница, контур как загружающаяся.
+    <Suspense
+      fallback={
+        <div className="card">
+          <div className="card-body">
+            <div className="skeleton-line" style={{ width: '45%' }} />
+            <div className="skeleton-line" style={{ width: '65%' }} />
+            <div className="skeleton-line" style={{ width: '35%' }} />
+          </div>
+        </div>
+      }
+    >
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
@@ -129,5 +159,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
