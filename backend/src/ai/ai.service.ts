@@ -1,54 +1,63 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import Anthropic from '@anthropic-ai/sdk';
+import { Region, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { GeminiError, GeminiTurn, callGemini } from './gemini';
+import { buildStudentContext } from './student-context';
 
 /**
- * ТЗ 6.1 — AI-помощник по внутренним регламентам CRM.
+ * ТЗ 6.1 — AI-помощник CRM. Работает на Google Gemini (решение заказчика).
  *
- * АРХИТЕКТУРА: это RAG, а НЕ дообучение модели. Все опубликованные статьи базы
- * знаний собираются в системный промпт запроса, и модель отвечает строго по
- * ним. Практические следствия, которые важно понимать при эксплуатации:
+ * АРХИТЕКТУРА: это RAG, а НЕ дообучение модели. В каждый запрос собирается
+ * контекст из двух частей — опубликованные статьи базы знаний и срез данных по
+ * студентам, ДОСТУПНЫМ ИМЕННО ЭТОМУ сотруднику. Модель отвечает строго по ним.
+ * Практические следствия, важные при эксплуатации:
  *  - правка статьи действует на следующий же вопрос, без «переобучения»;
- *  - помощник физически не может знать того, чего нет в базе, — и обязан
- *    честно об этом сказать (это прописано в системном промпте);
- *  - помощник НЕ ходит в базу данных CRM. Он объясняет, КАК сделать действие,
- *    но не отвечает на «сколько денег принёс Иванов» — доступ к персональным
- *    и финансовым данным идёт только через обычные эндпоинты с проверкой прав.
+ *  - помощник физически не может знать того, чего нет в контексте, — и обязан
+ *    честно об этом сказать (прописано в системном промпте);
+ *  - границы доступа НЕ ЗАДАЮТСЯ ПРОМПТОМ. Менеджер не видит чужих студентов
+ *    не потому, что модель попросили о них не рассказывать, а потому, что их
+ *    нет в присланных данных. Просьбу в промпте можно обойти уговорами,
+ *    отсутствие данных — нельзя.
  *
- * СТОИМОСТЬ. Системный промпт (вся база знаний) одинаков у всех запросов, и на
- * нём включено кэширование: повторные обращения читают его примерно в десять
- * раз дешевле. Поэтому «дорогая» часть промпта оплачивается один раз в
- * пять минут, а не на каждый вопрос сотрудника.
+ * ЧТО УХОДИТ ВО ВНЕШНИЙ СЕРВИС. Вопрос сотрудника, статьи базы знаний и
+ * перечисленные факты по его студентам (ФИО, направление, этап, виза, суммы
+ * оплат). Это персональные данные, покидающие сервер компании. Паспортных
+ * данных, сканов документов и содержимого анкет среди них нет (см.
+ * student-context.ts). Отключается снятием переменной GEMINI_API_KEY.
  */
 
-// Модель по умолчанию. Вынесена в env, чтобы Основатель мог переключиться
-// на более дешёвую без передеплоя кода (тот же приём, что у SMS_PROVIDER).
-const DEFAULT_MODEL = 'claude-opus-5';
+/**
+ * Модель по умолчанию. Вынесена в env: линейка Gemini обновляется чаще, чем
+ * выходят релизы этого проекта, и переключение не должно требовать передеплоя
+ * кода. Если имя окажется неизвестным, Gemini ответит 404 — сообщение об этом
+ * пробрасывается пользователю целиком, чтобы причина была очевидна.
+ */
+const DEFAULT_MODEL = 'gemini-2.5-pro';
 
 // Помощник отвечает короткими пошаговыми инструкциями, а не эссе. Лимит
-// сознательно небольшой: он и ограничивает стоимость ответа, и работает как
-// страховка от «простыни» при неудачно сформулированном вопросе.
-const MAX_TOKENS = 4096;
+// ограничивает и стоимость ответа, и «простыню» при неудачном вопросе.
+const MAX_OUTPUT_TOKENS = 4096;
 
-// Сколько предыдущих реплик диалога уходит в запрос. Чат нужен ради
-// уточняющих вопросов («а если чек не пришёл?»), и без истории они
-// бессмысленны; но вся переписка за месяц в контекст не нужна — она только
-// удорожает запрос и размывает фокус.
+// Сколько предыдущих реплик уходит в запрос. Чат нужен ради уточняющих
+// вопросов («а если чек не пришёл?») — без истории они бессмысленны. Но вся
+// переписка за месяц только удорожает запрос и размывает фокус.
 const HISTORY_TURNS = 12;
 
 // Длина вопроса. Не про экономию, а про защиту эндпоинта: без ограничения
 // сюда можно вставить мегабайт текста и оплатить его токенами компании.
 const MAX_QUESTION_LENGTH = 2000;
 
-export type CurrentUser = { id: string; role: string };
+export type CurrentUser = { id: string; role: Role | string; region?: Region | string | null };
 
 export interface AiAskResult {
   answer: string;
   /** Сколько статей базы реально попало в контекст (для прозрачности в UI). */
   articles: number;
-  /** true — база не влезла в контекст целиком, ответ мог быть неполным. */
+  /** Сколько студентов попало в контекст — сотрудник должен понимать охват ответа. */
+  students: number;
+  /** true — контекст не поместился целиком, ответ мог быть неполным. */
   truncated: boolean;
   model: string;
 }
@@ -56,7 +65,7 @@ export interface AiAskResult {
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly client: Anthropic | null;
+  private readonly apiKey: string | null;
   private readonly model: string;
 
   constructor(
@@ -64,59 +73,90 @@ export class AiService {
     private prisma: PrismaService,
     private knowledge: KnowledgeService,
   ) {
-    const apiKey = config.get<string>('ANTHROPIC_API_KEY') || null;
+    // GOOGLE_API_KEY принимается как запасное имя: под ним ключ выдают в части
+    // консолей Google, и человек, вставивший его туда, не должен получить
+    // молчаливо отключённого помощника.
+    this.apiKey = config.get<string>('GEMINI_API_KEY') || config.get<string>('GOOGLE_API_KEY') || null;
     this.model = config.get<string>('AI_MODEL') || DEFAULT_MODEL;
     // Ключ опционален — ровно как у SMS/Telegram/почты: без него модуль просто
     // отключён, а не роняет приложение при старте. Об отключении явно пишем в
     // лог, иначе «помощник молчит» превращается в необъяснимую загадку.
-    if (apiKey) {
-      this.client = new Anthropic({ apiKey });
-      this.logger.log(`AI-помощник включён (модель ${this.model})`);
+    if (this.apiKey) {
+      this.logger.log(`AI-помощник включён (Gemini, модель ${this.model})`);
     } else {
-      this.client = null;
-      this.logger.warn('AI-помощник отключён: не задан ANTHROPIC_API_KEY');
+      this.logger.warn('AI-помощник отключён: не задан GEMINI_API_KEY');
     }
   }
 
   /** Доступен ли помощник — фронт прячет виджет, если ключ не настроен. */
   isEnabled(): boolean {
-    return this.client !== null;
+    return this.apiKey !== null;
   }
 
   /**
    * Системный промпт. Всё, что делает помощника предсказуемым, живёт здесь:
-   * язык, границы компетенции, требование ссылаться на статью и признавать
+   * язык, границы компетенции, требование ссылаться на источник и признавать
    * незнание. Формулировки намеренно позитивные («делай так»), а не
    * запретительные — так модель следует им точнее.
    */
-  private buildSystemPrompt(context: string, truncated: boolean): string {
-    return [
+  private buildSystemPrompt(args: {
+    knowledge: string;
+    knowledgeTruncated: boolean;
+    students: string;
+    studentsIncluded: number;
+    studentsTotal: number;
+    studentsTruncated: boolean;
+    roleLabel: string;
+  }): string {
+    const blocks: string[] = [
       'Ты — внутренний помощник CRM-системы образовательного агентства GrantChina (Таджикистан → Китай).',
-      'Твои пользователи — сотрудники агентства: менеджеры, администраторы, основатель.',
+      `Сейчас с тобой говорит сотрудник с ролью «${args.roleLabel}».`,
       '',
-      'Отвечай на русском языке, коротко и по шагам. Сотрудник читает тебя между звонками —',
-      'дай пошаговую инструкцию и остановись. Не пересказывай вопрос и не добавляй вступлений.',
+      'Отвечай на русском языке, коротко и по делу. Сотрудник читает тебя между звонками:',
+      'дай ответ или пошаговую инструкцию и остановись. Не пересказывай вопрос и не добавляй вступлений.',
       '',
-      'Отвечай ТОЛЬКО на основании раздела «База знаний» ниже. Если ответа там нет, так и скажи:',
-      '«В базе знаний нет ответа на этот вопрос — уточните у Основателя или администратора».',
+      'У тебя два источника: раздел «База знаний» — правила и порядок работы агентства,',
+      'и раздел «Студенты» — факты по конкретным людям. Отвечай ТОЛЬКО по ним.',
+      'Если ответа нет ни там, ни там, так и скажи: «В моих данных этого нет».',
       'Не додумывай регламент и не опирайся на то, как это обычно устроено в других компаниях:',
-      'у GrantChina свои правила, и выдуманный ответ здесь дороже отсутствия ответа.',
+      'у GrantChina свои правила, и выдуманный ответ дороже отсутствия ответа.',
       '',
-      'Когда ответ опирается на конкретную статью, назови её заголовок в конце — так сотрудник',
-      'сможет открыть первоисточник и проверить.',
+      'Считая что-либо по списку студентов, приводи и число, и то, как ты его получил',
+      '(например: «трое: Иванов, Петров, Сидоров»). Сотрудник должен иметь возможность проверить.',
       '',
-      'Ты не имеешь доступа к данным CRM: не отвечай на вопросы о конкретных студентах, суммах,',
-      'платежах или сотрудниках. На такой вопрос объясни, в каком разделе CRM эти данные смотрят.',
-      truncated
-        ? '\nВНИМАНИЕ: база знаний не поместилась в контекст целиком. Если вопрос выглядит так, будто ответ должен быть в базе, но ты его не видишь — предупреди сотрудника об этом.'
-        : '',
+      'В разделе «Студенты» перечислены ТОЛЬКО те, к кому у этого сотрудника есть доступ.',
+      'Если он спрашивает про человека, которого в списке нет, — скажи, что такого студента',
+      'в доступных тебе данных нет, и не строй догадок о нём.',
       '',
-      '# База знаний',
-      '',
-      context || '(база знаний пока пуста — сообщи об этом сотруднику и предложи обратиться к администратору)',
-    ]
-      .filter(Boolean)
-      .join('\n');
+      'Когда ответ опирается на статью базы знаний, назови её заголовок в конце —',
+      'так сотрудник откроет первоисточник и проверит.',
+    ];
+
+    if (args.knowledgeTruncated) {
+      blocks.push(
+        '',
+        'ВНИМАНИЕ: база знаний не поместилась целиком. Если вопрос выглядит так, будто ответ',
+        'должен быть в базе, но ты его не видишь — предупреди сотрудника об этом.',
+      );
+    }
+    if (args.studentsTruncated) {
+      blocks.push(
+        '',
+        `ВНИМАНИЕ: тебе показаны ${args.studentsIncluded} студентов из ${args.studentsTotal} доступных.`,
+        'Отвечая на вопросы «сколько» и «у кого», обязательно предупреждай, что видишь не всех.',
+      );
+    }
+
+    blocks.push('', '# База знаний', '');
+    blocks.push(args.knowledge || '(база знаний пока пуста — сообщи об этом сотруднику)');
+
+    blocks.push('', '# Студенты', '');
+    blocks.push(
+      args.students ||
+        '(доступных тебе студентов нет — на вопросы о конкретных людях отвечай, что данных нет)',
+    );
+
+    return blocks.join('\n');
   }
 
   /** История диалога сотрудника — только его собственная (userId из JWT). */
@@ -142,20 +182,54 @@ export class AiService {
     return { ok: true };
   }
 
+  private roleLabel(role: Role | string): string {
+    if (role === 'FOUNDER') return 'Основатель';
+    if (role === 'ADMIN') return 'Администратор';
+    return 'Менеджер';
+  }
+
+  /** Переводит ошибку Gemini в понятное сотруднику сообщение. */
+  private translateError(e: GeminiError): never {
+    // 400 с текстом про ключ и 401/403 — это всегда неверный или отозванный
+    // ключ. Отдельное сообщение, потому что чинит его администратор, а не
+    // пользователь: без явного указания причины он будет ждать «когда починится».
+    if (e.status === 401 || e.status === 403 || /api key/i.test(e.detail ?? '')) {
+      this.logger.error(`AI: ключ отклонён (${e.status}): ${e.detail ?? e.message}`);
+      throw new ServiceUnavailableException(
+        'AI-помощник: ключ доступа отклонён. Проверьте переменную GEMINI_API_KEY.',
+      );
+    }
+    if (e.status === 404) {
+      this.logger.error(`AI: модель «${this.model}» не найдена: ${e.detail ?? e.message}`);
+      throw new ServiceUnavailableException(
+        `AI-помощник: модель «${this.model}» недоступна для этого ключа. Укажите другую в переменной AI_MODEL.`,
+      );
+    }
+    if (e.status === 429) {
+      throw new ServiceUnavailableException('AI-помощник перегружен запросами. Попробуйте через минуту.');
+    }
+    if (e.status === 504 || e.status === 502) {
+      throw new ServiceUnavailableException('AI-помощник не ответил вовремя. Попробуйте ещё раз.');
+    }
+    this.logger.error(`AI: ошибка ${e.status}: ${e.detail ?? e.message}`);
+    throw new ServiceUnavailableException('AI-помощник временно недоступен. Попробуйте позже.');
+  }
+
   async ask(question: string, user: CurrentUser): Promise<AiAskResult> {
     const text = (question || '').trim();
     if (!text) throw new BadRequestException('Введите вопрос');
     if (text.length > MAX_QUESTION_LENGTH) {
       throw new BadRequestException(`Вопрос слишком длинный (максимум ${MAX_QUESTION_LENGTH} символов)`);
     }
-    if (!this.client) {
+    if (!this.apiKey) {
       throw new ServiceUnavailableException(
-        'AI-помощник не настроен: администратору нужно задать ANTHROPIC_API_KEY в переменных окружения.',
+        'AI-помощник не настроен: администратору нужно задать GEMINI_API_KEY в переменных окружения.',
       );
     }
 
-    const [context, priorRaw] = await Promise.all([
+    const [knowledge, studentsCtx, priorRaw] = await Promise.all([
       this.knowledge.buildContext(),
+      buildStudentContext(this.prisma, user),
       this.prisma.aiChatMessage.findMany({
         where: { userId: user.id, deletedAt: null },
         orderBy: { createdAt: 'desc' },
@@ -168,90 +242,52 @@ export class AiService {
     // в хронологический порядок, иначе модель прочитает диалог задом наперёд.
     const prior = priorRaw.reverse();
 
-    // Первым сообщением обязан быть 'user' — если история почему-то начинается
-    // с ответа помощника (например, старые записи после чистки), отрезаем
-    // ведущие 'assistant', иначе API отклонит запрос.
+    // Первой репликой обязан быть вопрос пользователя — если история почему-то
+    // начинается с ответа помощника (старые записи после чистки), отрезаем
+    // ведущие ответы, иначе API отклонит запрос.
     while (prior.length && prior[0].role !== 'user') prior.shift();
 
-    const messages: Anthropic.MessageParam[] = [
+    const turns: GeminiTurn[] = [
       ...prior.map((m) => ({
-        role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const),
-        content: m.content,
+        role: (m.role === 'assistant' ? 'model' : 'user') as GeminiTurn['role'],
+        text: m.content,
       })),
-      { role: 'user' as const, content: text },
+      { role: 'user' as const, text },
     ];
 
-    let response: Anthropic.Message;
+    let result;
     try {
-      response = await this.client.messages.create({
+      result = await callGemini({
         model: this.model,
-        max_tokens: MAX_TOKENS,
-        // Кэширование системного промпта: база знаний одинакова у всех
-        // запросов и меняется редко, поэтому её обработка оплачивается один
-        // раз, а последующие вопросы читают её примерно в 10 раз дешевле.
-        // Ставим метку на последний (и единственный) системный блок — всё,
-        // что до неё, кэшируется целиком.
-        system: [
-          {
-            type: 'text',
-            text: this.buildSystemPrompt(context.text, context.truncated),
-            cache_control: { type: 'ephemeral' },
-          },
-        ],
-        // Уровень «усилий» (output_config.effort) здесь НЕ задаётся намеренно:
-        // установленная версия SDK этот параметр ещё не поддерживает, а
-        // отправлять его в обход типов — верный способ получить 400 в проде.
-        // Помощнику по регламентам глубокое рассуждение и не требуется: ответ
-        // лежит в тексте базы, задача — найти и изложить.
-        messages,
+        apiKey: this.apiKey,
+        system: this.buildSystemPrompt({
+          knowledge: knowledge.text,
+          knowledgeTruncated: knowledge.truncated,
+          students: studentsCtx.text,
+          studentsIncluded: studentsCtx.included,
+          studentsTotal: studentsCtx.total,
+          studentsTruncated: studentsCtx.truncated,
+          roleLabel: this.roleLabel(user.role),
+        }),
+        turns,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
       });
     } catch (e) {
-      // Типизированные исключения SDK вместо разбора текста ошибки.
-      if (e instanceof Anthropic.AuthenticationError) {
-        this.logger.error('AI: ключ ANTHROPIC_API_KEY отклонён');
-        throw new ServiceUnavailableException('AI-помощник: ключ доступа отклонён. Проверьте ANTHROPIC_API_KEY.');
-      }
-      if (e instanceof Anthropic.RateLimitError) {
-        throw new ServiceUnavailableException('AI-помощник перегружен запросами. Попробуйте через минуту.');
-      }
-      if (e instanceof Anthropic.APIConnectionError) {
-        throw new ServiceUnavailableException('AI-помощник недоступен: нет связи с сервисом. Попробуйте позже.');
-      }
-      if (e instanceof Anthropic.APIError) {
-        this.logger.error(`AI: ошибка API ${e.status}: ${e.message}`);
-        throw new ServiceUnavailableException('AI-помощник временно недоступен. Попробуйте позже.');
-      }
+      if (e instanceof GeminiError) this.translateError(e);
       throw e;
     }
 
-    // Проверяем stop_reason ДО чтения content: при отказе классификатора
-    // массив content пуст, и обращение к content[0] упало бы с TypeError.
-    if (response.stop_reason === 'refusal') {
-      return {
-        answer:
-          'Не могу ответить на этот вопрос. Переформулируйте его в терминах работы с CRM ' +
-          'или обратитесь к Основателю.',
-        articles: context.articles,
-        truncated: context.truncated,
-        model: response.model,
-      };
-    }
-
-    const answer = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n')
-      .trim();
-
-    const finalAnswer =
-      answer ||
-      (response.stop_reason === 'max_tokens'
+    const answer =
+      result.text ||
+      (result.finishReason === 'MAX_TOKENS'
         ? 'Ответ получился слишком длинным. Задайте вопрос уже — например, про один конкретный шаг.'
-        : 'Не удалось получить ответ. Попробуйте переформулировать вопрос.');
+        : result.finishReason === 'SAFETY'
+          ? 'Не могу ответить на этот вопрос. Переформулируйте его в терминах работы с CRM.'
+          : 'Не удалось получить ответ. Попробуйте переформулировать вопрос.');
 
     // Сохраняем обе реплики ОДНОЙ транзакцией: половина диалога в базе хуже,
     // чем его отсутствие — при следующем вопросе модель получила бы вопрос
-    // без ответа и решила бы, что на него отвечать не нужно.
+    // без ответа и решила бы, что отвечать не нужно.
     await this.prisma.$transaction([
       this.prisma.aiChatMessage.create({
         data: { userId: user.id, role: 'user', content: text },
@@ -260,19 +296,20 @@ export class AiService {
         data: {
           userId: user.id,
           role: 'assistant',
-          content: finalAnswer,
-          model: response.model,
-          inputTokens: response.usage.input_tokens,
-          outputTokens: response.usage.output_tokens,
+          content: answer,
+          model: result.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
         },
       }),
     ]);
 
     return {
-      answer: finalAnswer,
-      articles: context.articles,
-      truncated: context.truncated,
-      model: response.model,
+      answer,
+      articles: knowledge.articles,
+      students: studentsCtx.included,
+      truncated: knowledge.truncated || studentsCtx.truncated,
+      model: result.model,
     };
   }
 }
