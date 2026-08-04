@@ -83,7 +83,35 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   display: flex; align-items: center; justify-content: center;
   color: white; font-weight: 800;
 }
-.sidebar-nav { flex: 1; padding: 16px 12px; }
+/**
+ * Список пунктов меню — единственное, что прокручивается в сайдбаре.
+ *
+ * Пунктов стало 17, и на ноутбуке они перестали помещаться в 100vh. Раньше
+ * здесь стоял только `flex: 1` без прокрутки: содержимое вылезало за пределы
+ * блока, а `.sidebar-user` внизу — который в флекс-колонке по умолчанию
+ * сжимаем — схлопывался, и имя пользователя оказывалось перечёркнуто
+ * последним пунктом меню.
+ *
+ * min-height: 0 ОБЯЗАТЕЛЕН. Без него флекс-элемент не может стать меньше
+ * своего содержимого (min-height у него по умолчанию auto), overflow-y
+ * никогда не срабатывает, и прокрутки не появляется — самая частая причина,
+ * по которой «overflow: auto не работает» внутри флекс-колонки.
+ */
+.sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 12px;
+}
+/* Тонкая полоса вместо системной: на тёмном фоне стандартная выглядит грубо.
+   Firefox понимает только scrollbar-*, webkit — только ::-webkit-*, поэтому
+   заданы оба набора. */
+.sidebar-nav { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; }
+.sidebar-nav::-webkit-scrollbar { width: 6px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.32); }
 .sidebar-nav a {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 14px; border-radius: 8px;
@@ -97,6 +125,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .sidebar-nav-icon { font-size: 18px; width: 20px; text-align: center; }
 
 .sidebar-user {
+  /* flex-shrink: 0 — блок пользователя не сжимается НИКОГДА. Именно его
+     сжатие и давало наложение имени на последний пункт меню: прокрутки у
+     списка не было, места не хватало, и флексбокс отбирал высоту у того
+     элемента, который позволял её отобрать. */
+  flex-shrink: 0;
   padding: 16px; border-top: 1px solid rgba(255,255,255,0.08);
   display: flex; align-items: center; gap: 12px;
 }
@@ -1148,6 +1181,46 @@ select.input-error {
   border-color: var(--danger) !important;
   background: #fef2f2;
 }
+.dialog-card { padding: 22px; border-radius: 14px; }
+  .dialog-title { font-size: 17px; }
+  .dialog-actions { flex-direction: column-reverse; }
+  .dialog-actions .btn { width: 100%; }
+
+  /* Тосты */
+  .toast-stack { top: 10px; right: 10px; left: 10px; }
+  .toast { min-width: 0; max-width: 100%; }
+
+  /* Notification panel — во весь экран */
+  .notif-panel {
+    position: fixed; top: 56px !important; right: 0 !important;
+    left: 0; width: 100%; max-height: calc(100vh - 56px);
+    border-radius: 0; border-left: none; border-right: none;
+  }
+
+  /* Менеджер-дропдаун */
+  .manager-bar { flex-direction: column; align-items: stretch; gap: 10px; }
+  .manager-bar-two { grid-template-columns: 1fr; }
+  .manager-dropdown { position: fixed; left: 10px; right: 10px; top: 120px; min-width: 0; }
+
+  /* Формы новых/редактирования */
+  .form-actions { flex-direction: column-reverse; gap: 8px; }
+  .form-actions .btn { width: 100%; justify-content: center; }
+}
+
+/* ============================================================================
+   ОБЩИЕ СТИЛИ, ВОЗВРАЩЁННЫЕ ИЗ МОБИЛЬНОГО МЕДИА-ЗАПРОСА.
+
+   Этот блок физически лежал внутри @media (max-width: 720px) и потому
+   применялся ТОЛЬКО на телефоне. На обычном экране не было ни рамок у
+   ленты активности, ни оформления поля телефона, ни зелёной подсказки
+   «студент выбран», ни каркаса загрузки страниц — браузер эти правила
+   просто не читал.
+
+   Судя по всему, блок дописывали в конец файла, не заметив, что файл
+   заканчивается открытым медиа-запросом. Ошибка тихая: на телефоне всё
+   выглядит правильно, а на десктопе элементы теряют оформление, и это
+   легко списать на «так и задумано».
+   ============================================================================ */
 
 /* Phone input with country dropdown — ЖЁСТКАЯ горизонтальная раскладка.
    Inheritance from .af-field input { width: 100% } или подобных правил
@@ -1313,11 +1386,49 @@ select.input-error {
 .doc-slot-add { width: 100%; margin-top: 6px; justify-content: center; }
 .doc-slot-count { color: var(--text-soft); font-weight: 500; font-size: 12px; }
 
-.activity-list { display: flex; flex-direction: column; gap: 10px; }
+/**
+ * Лента активности — карточками.
+ *
+ * Рамка тут была и раньше, но одного светло-серого пикселя на белом фоне
+ * недостаточно: на реальном экране лента читалась сплошной стеной текста, и
+ * было не видно, где кончается одно событие и начинается следующее. Добавлены
+ * три вещи, каждая решает свою часть задачи:
+ *   - тень — отделяет карточку от фона страницы;
+ *   - цветная полоса слева — задаёт тип события до чтения текста;
+ *   - увеличенный отступ между карточками — даёт глазу паузу.
+ */
+.activity-list { display: flex; flex-direction: column; gap: 12px; }
 .activity-item {
-  background: white; border: 1px solid var(--border); border-radius: 10px;
-  padding: 14px 16px;
+  position: relative;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px 14px 20px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  transition: box-shadow .15s, transform .15s;
 }
+.activity-item:hover {
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.1);
+  transform: translateY(-1px);
+}
+/* Полоса рисуется псевдоэлементом, а не border-left: у border-left не
+   получится скруглить только левый край карточки, не трогая остальные. */
+.activity-item::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  border-radius: 10px 0 0 10px;
+  background: var(--text-soft);
+}
+/* Тона те же, что у бейджей: если поменять один — второй сразу бросится
+   в глаза как несовпадающий, и рассинхрон не проживёт долго. */
+.activity-item.accent-info::before { background: #2563eb; }
+.activity-item.accent-success::before { background: #16a34a; }
+.activity-item.accent-warning::before { background: #d97706; }
+.activity-item.accent-danger::before { background: var(--primary, #d52b2b); }
+.activity-item.accent-gray::before { background: #9ca3af; }
+
 .activity-item-head {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 8px; gap: 12px; flex-wrap: wrap;
@@ -1393,31 +1504,6 @@ select.input-error {
   .app-stepper-select { width: 100%; min-width: 0; }
 }
 
-.dialog-card { padding: 22px; border-radius: 14px; }
-  .dialog-title { font-size: 17px; }
-  .dialog-actions { flex-direction: column-reverse; }
-  .dialog-actions .btn { width: 100%; }
-
-  /* Тосты */
-  .toast-stack { top: 10px; right: 10px; left: 10px; }
-  .toast { min-width: 0; max-width: 100%; }
-
-  /* Notification panel — во весь экран */
-  .notif-panel {
-    position: fixed; top: 56px !important; right: 0 !important;
-    left: 0; width: 100%; max-height: calc(100vh - 56px);
-    border-radius: 0; border-left: none; border-right: none;
-  }
-
-  /* Менеджер-дропдаун */
-  .manager-bar { flex-direction: column; align-items: stretch; gap: 10px; }
-  .manager-bar-two { grid-template-columns: 1fr; }
-  .manager-dropdown { position: fixed; left: 10px; right: 10px; top: 120px; min-width: 0; }
-
-  /* Формы новых/редактирования */
-  .form-actions { flex-direction: column-reverse; gap: 8px; }
-  .form-actions .btn { width: 100%; justify-content: center; }
-}
 
 /* ===== SMALL PHONES (до 380) ===== */
 @media (max-width: 380px) {

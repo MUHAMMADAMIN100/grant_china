@@ -25,9 +25,30 @@ const TITLES: Record<string, string> = {
   '/users': 'Пользователи',
 };
 
+/**
+ * Заголовок раздела по адресу страницы.
+ *
+ * Раньше это был `.find(([k]) => pathname.startsWith(k))` — ПЕРВОЕ совпадение
+ * по порядку объявления объекта. Такая логика зависит от того, в каком порядке
+ * написаны ключи, и от того, не является ли один путь префиксом другого: стоит
+ * добавить раздел с адресом, начинающимся так же, как существующий, — и в
+ * шапке окажется чужое название, а найти причину по виду кода почти невозможно.
+ *
+ * Теперь сначала ищется ТОЧНОЕ совпадение, и только потом — самый ДЛИННЫЙ
+ * подходящий префикс (чтобы вложенные страницы вроде /contracts/:id и
+ * /payroll/rules наследовали заголовок своего раздела).
+ */
+function titleFor(pathname: string): string {
+  if (TITLES[pathname]) return TITLES[pathname];
+  const match = Object.keys(TITLES)
+    .filter((k) => pathname === k || pathname.startsWith(`${k}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ? TITLES[match] : 'GrantChina CRM';
+}
+
 export default function Layout() {
   const loc = useLocation();
-  const title = Object.entries(TITLES).find(([k]) => loc.pathname.startsWith(k))?.[1] || 'GrantChina CRM';
+  const title = titleFor(loc.pathname);
 
   return (
     <div className="app-layout">

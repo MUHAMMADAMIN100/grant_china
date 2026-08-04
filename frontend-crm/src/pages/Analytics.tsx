@@ -198,10 +198,25 @@ export default function Analytics() {
     setFilter('preset', p);
   };
 
-  const stageMax = data ? maxOf(data.byStage.map((r) => toNumber(r.amount))) : 0;
-  const purposeMax = data ? maxOf(data.byPurpose.map((r) => toNumber(r.amount))) : 0;
-  const methodMax = data ? maxOf(data.byMethod.map((r) => toNumber(r.amount))) : 0;
-  const managerMax = data ? maxOf(data.byManager.map((r) => toNumber(r.amount))) : 0;
+  /**
+   * Массивы читаем ЧЕРЕЗ ФОЛБЭК, а не напрямую.
+   *
+   * Прямое `data.byManager.map(...)` роняло весь экран аналитики у каждого
+   * Администратора: бэкенд намеренно не отдаёт ему поимённый срез сборов
+   * (кадровые данные, см. finance-analytics.controller.ts), а страница считала
+   * поле обязательным. Одно отсутствующее поле не должно стоить пользователю
+   * всей страницы — тем более что остальные пять блоков он видеть вправе.
+   */
+  const byStage = data?.byStage ?? [];
+  const byPurpose = data?.byPurpose ?? [];
+  const byMethod = data?.byMethod ?? [];
+  const byManager = data?.byManager ?? null;
+  const monthly = data?.monthly ?? [];
+
+  const stageMax = maxOf(byStage.map((r) => toNumber(r.amount)));
+  const purposeMax = maxOf(byPurpose.map((r) => toNumber(r.amount)));
+  const methodMax = maxOf(byMethod.map((r) => toNumber(r.amount)));
+  const managerMax = maxOf((byManager ?? []).map((r) => toNumber(r.amount)));
 
   return (
     <motion.div className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -349,10 +364,10 @@ export default function Analytics() {
               <div className="card" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
                 <div className="card-header"><h2 className="card-title">Разбивка по этапам оплаты</h2></div>
                 <div className="card-body">
-                  {data.byStage.length === 0 ? (
+                  {byStage.length === 0 ? (
                     <div className="empty">Нет данных</div>
                   ) : (
-                    data.byStage.map((r) => (
+                    byStage.map((r) => (
                       <BarRow
                         key={r.stage}
                         label={r.label}
@@ -368,10 +383,10 @@ export default function Analytics() {
               <div className="card" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
                 <div className="card-header"><h2 className="card-title">Разбивка по назначению</h2></div>
                 <div className="card-body">
-                  {data.byPurpose.length === 0 ? (
+                  {byPurpose.length === 0 ? (
                     <div className="empty">Нет данных</div>
                   ) : (
-                    data.byPurpose.map((r) => (
+                    byPurpose.map((r) => (
                       <BarRow
                         key={r.purpose}
                         label={r.label}
@@ -387,10 +402,10 @@ export default function Analytics() {
               <div className="card" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
                 <div className="card-header"><h2 className="card-title">Наличные против безнала</h2></div>
                 <div className="card-body">
-                  {data.byMethod.length === 0 ? (
+                  {byMethod.length === 0 ? (
                     <div className="empty">Нет данных</div>
                   ) : (
-                    data.byMethod.map((r) => (
+                    byMethod.map((r) => (
                       <BarRow
                         key={r.method}
                         label={r.label}
@@ -403,36 +418,42 @@ export default function Analytics() {
                 </div>
               </div>
 
-              <div className="card" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
-                <div className="card-header"><h2 className="card-title">Топ менеджеров по собранным суммам</h2></div>
-                <div className="card-body">
-                  {data.byManager.length === 0 ? (
-                    <div className="empty">Нет данных</div>
-                  ) : (
-                    data.byManager.map((r) => (
-                      <BarRow
-                        key={r.managerId ?? 'none'}
-                        label={r.managerName}
-                        sub={`(${r.count} ${r.count === 1 ? 'платёж' : 'платежей'})`}
-                        amount={r.amount}
-                        max={managerMax}
-                      />
-                    ))
-                  )}
+              {/* Блока нет вовсе, если сервер не отдал срез: поимённые сборы
+                  видит только Основатель. Показывать Администратору пустую
+                  карточку с надписью «Нет данных» было бы враньём — данные
+                  есть, просто не для него. */}
+              {byManager && (
+                <div className="card" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
+                  <div className="card-header"><h2 className="card-title">Топ менеджеров по собранным суммам</h2></div>
+                  <div className="card-body">
+                    {byManager.length === 0 ? (
+                      <div className="empty">Нет данных</div>
+                    ) : (
+                      byManager.map((r) => (
+                        <BarRow
+                          key={r.managerId ?? 'none'}
+                          label={r.managerName}
+                          sub={`(${r.count} ${r.count === 1 ? 'платёж' : 'платежей'})`}
+                          amount={r.amount}
+                          max={managerMax}
+                        />
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="card" style={{ boxShadow: 'none', border: '1px solid var(--border)', marginTop: 18 }}>
               <div className="card-header"><h2 className="card-title">Динамика по месяцам</h2></div>
               <div className="card-body">
-                {data.monthly.length === 0 ? (
+                {monthly.length === 0 ? (
                   <div className="empty">Нет данных</div>
                 ) : (
                   <>
-                    <Sparkline points={data.monthly} />
+                    <Sparkline points={monthly} />
                     <div className="analytics-month-list">
-                      {data.monthly.map((p) => (
+                      {monthly.map((p) => (
                         <div className="analytics-month-item" key={p.month}>
                           <span>{monthLabel(p.month)}</span>
                           <strong>{formatMoney(p.amount)}</strong>

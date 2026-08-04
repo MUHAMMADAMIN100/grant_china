@@ -179,7 +179,11 @@ export default function Activity() {
             {items.map((e) => (
               <motion.div
                 key={e.id}
-                className="activity-item"
+                // Цвет ярлыка события переносим на саму карточку: полоса слева
+                // красится тем же тоном, что и бейдж. Так тип события читается
+                // с расстояния, не вчитываясь в текст, а лента перестаёт быть
+                // однородной стеной — глазу есть за что зацепиться.
+                className={`activity-item accent-${(ACTION_BADGE[e.action] || 'badge-gray').replace('badge-', '')}`}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
               >

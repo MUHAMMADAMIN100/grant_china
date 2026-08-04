@@ -817,7 +817,19 @@ export interface PaymentsAnalytics {
   byStage: AnalyticsStageBreakdown[];
   byPurpose: AnalyticsPurposeBreakdown[];
   byMethod: AnalyticsMethodBreakdown[];
-  byManager: AnalyticsManagerRow[];
+  /**
+   * «Кто сколько собрал», поимённо. НЕОБЯЗАТЕЛЬНОЕ, и это не мелочь типизации.
+   *
+   * Бэкенд намеренно вырезает этот срез у Администратора
+   * (finance-analytics.controller.ts): поимённые сборы — кадровая оценка, а в
+   * волне 6 на этих же цифрах считается бонусная часть зарплаты. Решение
+   * правильное, но тип обещал массив всегда, и страница читала `.map` без
+   * проверки — у КАЖДОГО Администратора экран аналитики падал целиком с
+   * «Cannot read properties of undefined (reading 'map')».
+   *
+   * Необязательный тип заставляет обрабатывать отсутствие явно.
+   */
+  byManager?: AnalyticsManagerRow[];
   monthly: AnalyticsMonthPoint[];
   /** Не зависит от периода — снимок текущей очереди на одобрение (как /payments/pending/count). */
   pendingApproval: AnalyticsAmountCount;

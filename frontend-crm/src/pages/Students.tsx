@@ -23,6 +23,23 @@ const GRANT_FILTER_LABEL: Record<'multi' | 'any' | 'none', string> = {
   none: 'Без гранта',
 };
 
+/**
+ * Пояснения к пунктам фильтра грантов.
+ *
+ * Названия сами по себе неоднозначны. «Без гранта» читается как «грант
+ * отклонили», хотя на деле означает «в реестре грантов по этому студенту нет
+ * ни одной записи» — он может учиться за свой счёт, а может просто ещё не
+ * быть внесён. Это разные вещи, и менеджеру важно понимать, что второй случай
+ * тоже попадает сюда. «Двойной грант» читается как «две стипендии», хотя это
+ * грант на несколько лет, который надо продлевать каждый год.
+ */
+const GRANT_FILTER_HINT: Record<string, string> = {
+  '': 'Все студенты, без фильтра по грантам',
+  multi: 'Грант рассчитан на 2 года и больше — его нужно продлевать каждый учебный год',
+  any: 'Есть хотя бы один незакрытый грант, включая разовый на один год',
+  none: 'В реестре грантов нет ни одной записи: студент либо учится за свой счёт, либо грант ещё не внесли в систему',
+};
+
 export default function Students() {
   const navigate = useNavigate();
   const me = useAuth((s) => s.user);
@@ -362,15 +379,20 @@ export default function Students() {
               ))}
             </select>
           )}
+          {/* Подсказка на КАЖДОМ пункте, а не только на самом списке.
+              «Без гранта» и «Двойной грант» неочевидны одинаково: первый легко
+              прочитать как «грант отклонили», второй — как «две стипендии».
+              Пояснение в title показывается при наведении и на сам список,
+              и на каждую строку раскрытого списка. */}
           <select
             value={grant}
             onChange={(e) => onFilterChange('grant', e.target.value)}
-            title="Реестр «двойных грантов» (раздел 4 ТЗ)"
+            title={GRANT_FILTER_HINT[grant] ?? GRANT_FILTER_HINT['']}
           >
-            <option value="">Любой грант</option>
-            <option value="multi">Двойной грант (2+ года)</option>
-            <option value="any">Есть грант</option>
-            <option value="none">Без гранта</option>
+            <option value="" title={GRANT_FILTER_HINT['']}>Любой грант</option>
+            <option value="multi" title={GRANT_FILTER_HINT.multi}>Двойной грант (2+ года)</option>
+            <option value="any" title={GRANT_FILTER_HINT.any}>Есть грант</option>
+            <option value="none" title={GRANT_FILTER_HINT.none}>Без гранта</option>
           </select>
         </div>
 
