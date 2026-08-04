@@ -5,6 +5,7 @@ import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged, isFounder, canWriteFinance, canManageFinance } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
+import { phoneContainsConditions } from '../common/phone';
 import { parseCalendarDate, formatDateRuShort } from '../grants/grant-year';
 import { AMOUNT_RE } from '../payments/dto/create-payment.dto';
 import { CreateContractDto } from './dto/create-contract.dto';
@@ -133,7 +134,24 @@ export class ContractsService {
     if (filters.managerId) and.push({ managerId: filters.managerId });
 
     const studentExtra: Prisma.StudentWhereInput[] = [];
-    if (filters.search) studentExtra.push({ fullName: { contains: filters.search, mode: 'insensitive' } });
+    if (filters.search) {
+      // ТЗ v3 раздел 1 — поиск по договорам обязан находить и по телефону
+      // студента. Student.phoneSearch хранит каждый номер в двух формах —
+      // с кодом страны и без (см. buildPhoneSearch), поэтому сравнения с
+      // цифрами запроса хватает для любого формата ввода.
+      //
+      // ОДИН элемент с внутренним OR: studentScopeWhere объединяет extra через
+      // AND, и два отдельных условия потребовали бы совпадения И по ФИО,
+      // И по телефону одновременно — реестр всегда оказывался бы пустым.
+      const searchOr: Prisma.StudentWhereInput[] = [
+        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        // Два варианта запроса (цифры как есть и национальная форма) — общая
+        // функция, потому что номер мог быть записан и с кодом страны, и без.
+        // Пустой массив при текстовом запросе: `contains ''` вернул бы всё.
+        ...phoneContainsConditions('phoneSearch', filters.search),
+      ];
+      studentExtra.push({ OR: searchOr });
+    }
     and.push({ student: this.studentScopeWhere(user, studentExtra) });
 
     const where: Prisma.ContractWhereInput = { deletedAt: null, AND: and };

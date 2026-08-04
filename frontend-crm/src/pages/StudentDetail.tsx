@@ -50,6 +50,87 @@ function CredRow({ label, value }: { label: string; value: string }) {
 import { buildFileUrl } from '../utils/fileUrl';
 
 /**
+ * Раздел 5 ТЗ — «Виза получена: Да / Нет».
+ *
+ * Переключатель, а не поле формы. Виза — это событие: менеджер отмечает её
+ * в тот момент, когда её выдали, поэтому клик сохраняется сразу (PATCH ровно
+ * с одним полем) и не требует входить в режим редактирования карточки.
+ *
+ * `canEdit` — та же проверка прав, что у остальных полей карточки (решение
+ * заказчика: отдельной роли для визы нет — переключает Основатель,
+ * Администратор и назначенный менеджер студента). Без прав кнопки не
+ * рендерятся ВООБЩЕ, а не блокируются: кнопка, ведущая к 403, показываться
+ * не должна — остаётся только индикатор.
+ *
+ * Цвет активной опции задан инлайном поверх .scope-btn.active: штатный
+ * «активный» в этом контроле — фирменный красный (переключатель «Мои/Все»),
+ * а здесь цвет несёт смысл. Зелёный «Да» / серый «Нет» читаются с одного
+ * взгляда и совпадают с индикатором в списке студентов.
+ */
+const VISA_ACTIVE_STYLE = {
+  yes: { background: '#16a34a', color: '#fff', boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)' },
+  no: { background: '#6b7280', color: '#fff', boxShadow: 'none' },
+} as const;
+
+function VisaSwitch({
+  value,
+  receivedAt,
+  canEdit,
+  saving,
+  onChange,
+}: {
+  value: boolean;
+  receivedAt: string | null;
+  canEdit: boolean;
+  saving: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div>
+      {canEdit ? (
+        <div className="scope-switch" role="group" aria-label="Виза получена">
+          <button
+            type="button"
+            className={`scope-btn${value ? ' active' : ''}`}
+            disabled={saving}
+            aria-pressed={value}
+            onClick={() => onChange(true)}
+            style={{ ...(value ? VISA_ACTIVE_STYLE.yes : null), opacity: saving ? 0.6 : 1 }}
+          >
+            <Icon name="verified" size={16} />
+            Да
+          </button>
+          <button
+            type="button"
+            className={`scope-btn${!value ? ' active' : ''}`}
+            disabled={saving}
+            aria-pressed={!value}
+            onClick={() => onChange(false)}
+            style={{ ...(!value ? VISA_ACTIVE_STYLE.no : null), opacity: saving ? 0.6 : 1 }}
+          >
+            <Icon name="schedule" size={16} />
+            Нет
+          </button>
+        </div>
+      ) : (
+        <span className={`badge ${value ? 'badge-success' : 'badge-gray'}`} style={{ gap: 4 }}>
+          <Icon name={value ? 'verified' : 'schedule'} size={14} />
+          {value ? 'Получена' : 'Не получена'}
+        </span>
+      )}
+      {/* Дату показываем только при «Да»: при снятой отметке сервер обнуляет
+          visaReceivedAt, и строка «отмечено ...» рядом с «Нет» вводила бы
+          в заблуждение. */}
+      {value && receivedAt && (
+        <div style={{ color: 'var(--text-soft)', fontSize: 12, marginTop: 6 }}>
+          Отмечено {new Date(receivedAt).toLocaleDateString('ru-RU')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Изменились ли поля, которыми владеет форма редактирования.
  *
  * RealtimeGateway не исключает отправителя и не кладёт в payload автора
@@ -97,6 +178,10 @@ export default function StudentDetail() {
   const photoRef = useRef<HTMLInputElement>(null);
   const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
   const [regenerating, setRegenerating] = useState(false);
+  // Раздел 5 ТЗ — переключатель визы сохраняется отдельным запросом, поэтому
+  // и «идёт сохранение» у него своё: блокировать всю карточку ради одного
+  // клика незачем, а два клика подряд по «Да»/«Нет» дали бы гонку запросов.
+  const [visaSaving, setVisaSaving] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -246,6 +331,33 @@ export default function StudentDetail() {
       await reload();
     } catch (err: any) {
       toast(err?.response?.data?.message || 'Ошибка загрузки', 'error');
+    }
+  };
+
+  /**
+   * Раздел 5 ТЗ — отметка «Виза получена».
+   *
+   * reload() зовём БЕЗ resetForm: менеджер мог одновременно править ФИО
+   * в открытой форме, и отметка о визе не должна затирать его несохранённый
+   * ввод (та же причина, по которой resetForm вообще появился).
+   * markSelfMutation() — чтобы эхо собственного изменения по сокету не
+   * показало подсказку «карточка обновлена другим пользователем».
+   */
+  const onVisaChange = async (next: boolean) => {
+    if (!id || !student || visaSaving) return;
+    // Повторный клик по уже активной опции — не запрос: сервер бы всё равно
+    // не менял visaReceivedAt, но лишний PATCH дёрнул бы realtime всем.
+    if (student.visaReceived === next) return;
+    setVisaSaving(true);
+    try {
+      markSelfMutation();
+      await updateStudent(id, { visaReceived: next });
+      toast(next ? 'Отмечено: виза получена' : 'Отметка о визе снята', 'success');
+      await reload();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Не удалось сохранить статус визы', 'error');
+    } finally {
+      setVisaSaving(false);
     }
   };
 
@@ -554,6 +666,31 @@ export default function StudentDetail() {
                 </div>
               </>
             )}
+
+            {/* Раздел 5 ТЗ — статус визы стоит ВНЕ ветки !edit/edit намеренно.
+                Это не поле анкеты, которое правят «заодно со всем остальным»,
+                а отдельный факт: он виден и в режиме просмотра, и в режиме
+                редактирования, и переключается независимо от кнопки
+                «Сохранить». Поэтому же visaReceived НЕ добавлен ни в form,
+                ни в cardFieldsDiffer() — форма им не владеет, и подсказка
+                «карточка обновлена другим пользователем» из-за визы не нужна. */}
+            <div className="detail-row">
+              <div className="detail-label">Виза получена</div>
+              <div className="detail-value">
+                {/* Карточка приходит по STUDENT_SELECT, где виза выбрана явно,
+                    но тип поля необязательный (в облегчённом студенте внутри
+                    заявки его нет). Читаем со значением по умолчанию, а не
+                    через `!`: undefined означал бы «не пришло», и рисовать по
+                    нему «Да» было бы прямым враньём. */}
+                <VisaSwitch
+                  value={student.visaReceived ?? false}
+                  receivedAt={student.visaReceivedAt ?? null}
+                  canEdit={canEdit}
+                  saving={visaSaving}
+                  onChange={onVisaChange}
+                />
+              </div>
+            </div>
           </div>
         </div>
         </>

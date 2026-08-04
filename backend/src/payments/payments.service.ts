@@ -21,6 +21,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { FileResolverService } from '../files/file-resolver.service';
 import { canManageFinance, canWriteFinance, isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
+import { phoneContainsConditions } from '../common/phone';
 import { localDayStart } from '../scheduler/time';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
@@ -395,12 +396,22 @@ export class PaymentsService {
     }
 
     if (filters.search) {
-      and.push({
-        OR: [
-          { reference: { contains: filters.search, mode: 'insensitive' } },
-          { student: { fullName: { contains: filters.search, mode: 'insensitive' } } },
-        ],
-      });
+      // ТЗ v3 раздел 1 — «включить поиск по номеру телефона студента ВО ВСЕ
+      // поисковые строки». Финансы были единственным разделом без него: искали
+      // только по номеру квитанции и ФИО.
+      //
+      // Условия по телефону — отдельными ветками OR, а не внутри объекта
+      // student выше: Prisma не допускает два разных условия на одно
+      // relation-поле в одном объекте (тот же приём, что в tickets.service).
+      const or: Prisma.PaymentWhereInput[] = [
+        { reference: { contains: filters.search, mode: 'insensitive' } },
+        { student: { fullName: { contains: filters.search, mode: 'insensitive' } } },
+      ];
+      // Пустой массив при текстовом запросе — условие не добавится вовсе.
+      for (const cond of phoneContainsConditions('phoneSearch', filters.search)) {
+        or.push({ student: cond });
+      }
+      and.push({ OR: or });
     }
 
     if (and.length) where.AND = and;
@@ -633,7 +644,12 @@ export class PaymentsService {
   // Запись — платежи
   // ------------------------------------------------------------------
 
-  async create(dto: CreatePaymentDto, file: ReceiptFileInput | undefined, user: CurrentUser) {
+  /**
+   * ТЗ v3 раздел 2: чеков может быть несколько (files — массив, пустой если не
+   * приложили ни одного). Раньше параметр был `file | undefined` — ровно один
+   * файл за создание платежа, и второй чек физически некуда было приложить.
+   */
+  async create(dto: CreatePaymentDto, files: ReceiptFileInput[], user: CurrentUser) {
     // ТЗ v3 раздел 4 — первой строкой, ДО загрузки студента: Администратор не
     // должен даже по коду ответа отличать существующего студента от
     // несуществующего, раз вносить платежи ему всё равно запрещено.
@@ -667,11 +683,12 @@ export class PaymentsService {
     // ТЗ 1.3: для Проживания/Питания чек обязателен уже на создании — без
     // него не создаётся НИЧЕГО (ни платёж, ни документ). Тот же инвариант,
     // что в update()/removeReceipt() — единая функция, три места вызова
-    // (Проблемы 3/4 аудита волны 1).
-    assertReceiptInvariant(dto.purpose, Boolean(file));
+    // (Проблемы 3/4 аудита волны 1). Требуется ХОТЯ БЫ ОДИН чек, не ровно один.
+    const hasFiles = files.length > 0;
+    assertReceiptInvariant(dto.purpose, hasFiles);
 
     const submit = dto.submit === 'true';
-    if (submit && !file) {
+    if (submit && !hasFiles) {
       throw new BadRequestException('Прикрепите чек или квитанцию перед отправкой на одобрение');
     }
 
@@ -719,18 +736,22 @@ export class PaymentsService {
         },
         select: { id: true },
       });
-      if (file) {
-        await tx.document.create({
-          data: {
+      if (hasFiles) {
+        // createMany одним запросом: пятнадцать отдельных INSERT внутри
+        // транзакции держали бы её открытой заметно дольше, а id созданных
+        // документов здесь никому не нужны — платёж всё равно перечитывается
+        // целиком (refetch) вместе с receipts.
+        await tx.document.createMany({
+          data: files.map((file) => ({
             studentId: dto.studentId,
             paymentId: payment.id,
-            type: 'RECEIPT',
+            type: 'RECEIPT' as const,
             filename: file.filename,
             originalName: file.originalName,
             mimeType: file.mimeType,
             size: file.size,
             url: file.url,
-          },
+          })),
         });
       }
       return payment;
@@ -751,7 +772,7 @@ export class PaymentsService {
     // не упоминал о нём ни словом, а «прикрепление чеков» как событие ленты
     // было невозможно отфильтровать. Второй, отдельный лог — не замена
     // PAYMENT_CREATE, а именно СОБЫТИЕ «прикреплён чек».
-    if (file) {
+    if (hasFiles) {
       this.activity
         .log({
           actorId: user.id,
@@ -759,7 +780,13 @@ export class PaymentsService {
           action: 'PAYMENT_RECEIPT_ADD',
           studentId: dto.studentId,
           studentName: student.fullName,
-          details: 'Прикреплён чек к новому платежу',
+          // Количество в тексте — чтобы по ленте было видно, сколько
+          // подтверждений реально приложили: «прикреплён чек» при пяти файлах
+          // вводило бы проверяющего в заблуждение.
+          details:
+            files.length === 1
+              ? 'Прикреплён чек к новому платежу'
+              : `Прикреплено чеков к новому платежу: ${files.length}`,
         })
         .catch(() => undefined);
     }
@@ -1204,25 +1231,40 @@ export class PaymentsService {
   // Запись — чеки
   // ------------------------------------------------------------------
 
-  async addReceipt(id: string, file: ReceiptFileInput | undefined, user: CurrentUser) {
-    if (!file) throw new BadRequestException('Файл не передан');
+  /**
+   * ТЗ v3 раздел 2 — догрузка чеков пачкой. Возвращает МАССИВ созданных
+   * документов (раньше возвращался один объект): и одиночная, и групповая
+   * загрузка идут через один и тот же ответ, иначе клиенту пришлось бы
+   * угадывать форму ответа по числу отправленных файлов.
+   */
+  async addReceipt(id: string, files: ReceiptFileInput[], user: CurrentUser) {
+    if (files.length === 0) throw new BadRequestException('Файл не передан');
     const payment = await this.loadPaymentForMutation(id, user);
     if (!EDITABLE_STATUSES.has(payment.status)) {
       throw new ConflictException('Догрузить чек можно только к черновику или отклонённому платежу');
     }
 
-    const doc = await this.prisma.document.create({
-      data: {
-        studentId: payment.studentId,
-        paymentId: id,
-        type: 'RECEIPT',
-        filename: file.filename,
-        originalName: file.originalName,
-        mimeType: file.mimeType,
-        size: file.size,
-        url: file.url,
-      },
-    });
+    // Не createMany: id новых документов нужны и клиенту (он дорисовывает
+    // список без перезагрузки), и в WebSocket-событии. createManyAndReturn
+    // появился только в Prisma 5.14, а в проекте зафиксирован ^5.10 — на
+    // пятнадцати строках цикл внутри транзакции дешевле, чем требование
+    // поднять версию клиента на боевой базе.
+    const docs = await this.prisma.$transaction(
+      files.map((file) =>
+        this.prisma.document.create({
+          data: {
+            studentId: payment.studentId,
+            paymentId: id,
+            type: 'RECEIPT',
+            filename: file.filename,
+            originalName: file.originalName,
+            mimeType: file.mimeType,
+            size: file.size,
+            url: file.url,
+          },
+        }),
+      ),
+    );
 
     this.activity
       .log({
@@ -1233,17 +1275,21 @@ export class PaymentsService {
         action: 'PAYMENT_RECEIPT_ADD',
         studentId: payment.studentId,
         studentName: payment.student.fullName,
-        details: 'Добавлен чек к платежу',
+        details: docs.length === 1 ? 'Добавлен чек к платежу' : `Добавлено чеков к платежу: ${docs.length}`,
       })
       .catch(() => undefined);
     this.realtime.emitForStudent(
       payment.student,
       'payment:receipt-added',
-      { studentId: payment.studentId, paymentId: id, docId: doc.id },
+      // docId оставлен рядом с docIds намеренно: на него завязаны сторонние
+      // читатели события (см. комментарий в student-auth.controller.ts), и
+      // молча убрать поле — сломать их на пустом месте. Для пачки в нём
+      // первый документ, полный список — в docIds.
+      { studentId: payment.studentId, paymentId: id, docId: docs[0].id, docIds: docs.map((d) => d.id) },
       { studentId: payment.studentId },
     );
 
-    return doc;
+    return docs;
   }
 
   async removeReceipt(docId: string, user: CurrentUser) {

@@ -92,8 +92,15 @@ export interface CreatePaymentPayload {
   comment?: string;
   /** true — сразу отправить на одобрение Основателю (кнопка «Подтвердить»). */
   submit?: boolean;
-  /** Чек — обязателен для Проживания/Питания и для submit=true (проверяет бэкенд). */
-  file?: File | null;
+  /**
+   * ТЗ v3 раздел 2 — чеки пачкой, до 15 штук за раз. Обязателен хотя бы один
+   * для Проживания/Питания и для submit=true (проверяет бэкенд).
+   *
+   * Массив, а не один File: бэкенд принимает пачку через AnyFilesInterceptor,
+   * и слать их по одному значило бы 15 HTTP-запросов вместо одного плюс
+   * отдельная обработка частичного отказа посередине.
+   */
+  files?: File[] | null;
 }
 
 export async function createPayment(payload: CreatePaymentPayload) {
@@ -107,7 +114,12 @@ export async function createPayment(payload: CreatePaymentPayload) {
   if (payload.reference) fd.append('reference', payload.reference);
   if (payload.comment) fd.append('comment', payload.comment);
   if (payload.submit) fd.append('submit', 'true');
-  if (payload.file) fd.append('file', payload.file);
+  // Имя поля 'file' (единственное число) сохранено намеренно: бэкенд
+  // принимает файлы через AnyFilesInterceptor, который не привязан к имени,
+  // но у пользователя в браузере может быть закэширован старый бандл, шлющий
+  // ровно 'file'. Одинаковое имя означает, что старый и новый клиент работают
+  // с одним и тем же сервером без переходного периода.
+  for (const f of payload.files ?? []) fd.append('file', f);
   const { data } = await api.post<Payment>('/payments', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
@@ -170,11 +182,20 @@ export async function deletePayment(id: string) {
   return data;
 }
 
-/** Догрузить ещё один чек к уже существующему DRAFT/REJECTED платежу. */
-export async function addPaymentReceipt(id: string, file: File) {
+/**
+ * Догрузить чеки к уже существующему DRAFT/REJECTED платежу.
+ *
+ * ТЗ v3 раздел 2 — принимает пачку и возвращает МАССИВ созданных документов.
+ * Тип возврата важен: бэкенд после перехода на мультизагрузку отдаёт именно
+ * массив, и объявление `Promise<Document>` было бы прямым враньём — следующий
+ * вызывающий обратился бы к `doc.id` и получил undefined.
+ */
+export async function addPaymentReceipts(id: string, files: File[]) {
   const fd = new FormData();
-  fd.append('file', file);
-  const { data } = await api.post<Document>(`/payments/${id}/receipts`, fd, {
+  // Имя поля 'file' — то же, что у createPayment, по той же причине
+  // совместимости со старым закэшированным бандлом.
+  for (const f of files) fd.append('file', f);
+  const { data } = await api.post<Document[]>(`/payments/${id}/receipts`, fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return data;

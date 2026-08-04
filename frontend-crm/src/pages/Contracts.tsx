@@ -152,10 +152,17 @@ export default function Contracts() {
         )}
 
         <div className="filters">
+          {/* ТЗ v3 раздел 1. contracts.service.findAll ищет по ФИО студента и
+              по Student.phoneSearch, где каждый номер лежит в двух формах —
+              с кодом страны и без (buildPhoneSearch), отсюда «в любом формате».
+              Номер договора («ДГ-2026-0001») сервис НЕ ищет, поэтому в подписи
+              его нет: пообещать номер и вернуть пустую таблицу хуже, чем не
+              обещать. Появится поиск по number — расширяйте подпись здесь. */}
           <input
-            placeholder="Поиск: студент..."
+            placeholder="Поиск по ФИО или телефону студента в любом формате..."
             value={search}
             onChange={(e) => onFilterChange('search', e.target.value)}
+            title="Телефон можно вводить в любом виде: +992 90 123-45-67, 992901234567 или 901234567"
           />
           <select value={status} onChange={(e) => onFilterChange('status', e.target.value)}>
             <option value="">Все статусы</option>

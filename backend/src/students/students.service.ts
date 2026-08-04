@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { Direction, Prisma, Region, Role, StudentStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,12 +9,11 @@ import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isPrivileged } from '../common/roles';
 import { assignedToUserFilter, canAccessStudentRecord } from '../common/access';
-import { buildPhoneSearch, phoneQuery } from '../common/phone';
+import { buildPhoneSearch, normalizePhone, phoneContainsConditions } from '../common/phone';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
 import { MANAGED_DOCUMENT_TYPES, REQUIRED_DOCUMENT_TYPES, assertNotManagedDocument } from '../common/documents';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
-import { normalizePhone } from '../common/phone';
 import { normalizeSource } from '../common/lead-source';
 import { findRepeatOfId } from '../common/application-repeat';
 
@@ -38,6 +37,13 @@ const CABINET_BY_DIRECTION: Record<Direction, number> = {
 // Полный select — для карточки студента (detail). Возвращает всё, кроме password.
 const STUDENT_SELECT = {
   ...STUDENT_SAFE_FIELDS,
+  // Раздел 5 ТЗ — статус визы. Дописываем точечно здесь, а не в
+  // STUDENT_SAFE_FIELDS: тот набор общий для ВСЕХ потребителей студента
+  // (в том числе вложенного в заявку в applications.service.ts), а виза
+  // нужна ровно двум экранам — карточке и списку студентов. Тащить её
+  // в каждый ответ по заявкам смысла нет.
+  visaReceived: true,
+  visaReceivedAt: true,
   // MANAGED_DOCUMENT_TYPES — чеки платежей (payments/) и файлы билетов
   // (tickets/): это Document, но принадлежат своим разделам, а не чек-листу
   // документов студента. Они показываются внутри карточки платежа и карточки
@@ -60,6 +66,11 @@ const STUDENT_SELECT = {
 // На 80 студентов это уменьшает payload с ~500КБ до ~30КБ.
 const STUDENT_LIST_SELECT = {
   ...STUDENT_SAFE_FIELDS,
+  // Раздел 5 ТЗ — индикатор визы показывается ПРЯМО В СПИСКЕ (решение
+  // заказчика): менеджер должен видеть, кому виза ещё нужна, не открывая
+  // каждую карточку. Два скаляра на строку — payload списка это не утяжеляет.
+  visaReceived: true,
+  visaReceivedAt: true,
   manager: { select: { id: true, fullName: true } },
   chinaManager: { select: { id: true, fullName: true } },
   applications: {
@@ -81,7 +92,9 @@ const DOCUMENT_TYPE_LABEL: Record<string, string> = {
 type CurrentUser = { id: string; role: Role };
 
 @Injectable()
-export class StudentsService {
+export class StudentsService implements OnModuleInit {
+  private readonly logger = new Logger(StudentsService.name);
+
   constructor(
     private prisma: PrismaService,
     private realtime: RealtimeGateway,
@@ -89,6 +102,54 @@ export class StudentsService {
     private notifications: NotificationsService,
     private fileResolver: FileResolverService,
   ) {}
+
+  onModuleInit() {
+    // ТЗ v3 раздел 1 — самовосстановление поисковой строки по телефону.
+    //
+    // phoneSearch — ПРОИЗВОДНОЕ поле: его обязан заполнить каждый путь записи
+    // студента. Путей уже два (создание вручную и превращение заявки в
+    // карточку), и один из них про это забыли — отказ был молчаливым, студент
+    // просто переставал находиться по телефону. Разовый скрипт бэкфилла такой
+    // случай не ловит: он видит только тех, кто существовал в момент запуска.
+    //
+    // Тот же приём, что у Application.phoneNormalized ниже по проекту: условие
+    // `phoneSearch: null` делает проход идемпотентным, и следующий старт просто
+    // повторит незаконченное.
+    //
+    // Не блокируем старт и не роняем процесс при ошибке: это фоновая гигиена,
+    // а не условие работоспособности. Иначе недоступность БД на старте
+    // отправила бы контейнер в рестарт-луп.
+    void this.backfillPhoneSearch().catch((e) => {
+      this.logger.warn(
+        `Бэкфилл phoneSearch не выполнен (повторится при следующем старте): ${e?.message ?? e}`,
+      );
+    });
+  }
+
+  private async backfillPhoneSearch(): Promise<void> {
+    const BATCH = 1000;
+    const rows = await this.prisma.student.findMany({
+      where: { phoneSearch: null },
+      select: { id: true, phones: true },
+      take: BATCH,
+    });
+    if (!rows.length) return;
+
+    let filled = 0;
+    for (const row of rows) {
+      // Студенты вообще без телефона останутся с null и будут перечитываться
+      // на каждом старте. Это ожидаемо и дёшево: их единицы, а записать им
+      // пустую строку нельзя — `contains ''` совпадает с чем угодно, и такой
+      // студент попадал бы в результат КАЖДОГО поиска по телефону.
+      const next = buildPhoneSearch(row.phones);
+      if (!next) continue;
+      await this.prisma.student
+        .update({ where: { id: row.id }, data: { phoneSearch: next } })
+        .catch(() => undefined);
+      filled += 1;
+    }
+    this.logger.log(`Бэкфилл phoneSearch: просмотрено ${rows.length}, заполнено ${filled}`);
+  }
 
   /**
    * Единая проверка доступа к карточке студента: используется и для чтения
@@ -205,6 +266,11 @@ export class StudentsService {
         cabinet,
         status: dto.status ?? StudentStatus.ACTIVE,
         comment: dto.comment || null,
+        // Раздел 5 ТЗ — виза. Дату проставляем ЗДЕСЬ же, а не отдельным
+        // апдейтом: иначе у студента, заведённого сразу с визой, флаг был бы
+        // «Да», а дата — null, и список показал бы «получена — когда неизвестно».
+        visaReceived: dto.visaReceived ?? false,
+        visaReceivedAt: dto.visaReceived ? new Date() : null,
         managerId: creatorManagerId,
       },
       select: STUDENT_SELECT,
@@ -369,17 +435,17 @@ export class StudentsService {
       // так, как их поставил менеджер. Ни «901234567», ни «992901234567» для
       // записи «+992 90 123-45-67» не срабатывали.
       //
-      // Теперь цифры запроса ищутся подстрокой в phoneSearch, где для каждого
-      // номера лежат обе формы (с кодом страны и без) — см. buildPhoneSearch.
-      const phoneDigits = phoneQuery(filters.search);
+      // Теперь ищем подстрокой в phoneSearch. Вариантов запроса ДВА (цифры как
+      // есть и национальная форма без кода страны) — см. phoneContainsConditions:
+      // одной формы не хватает, потому что сам номер тоже мог быть записан как
+      // с кодом страны, так и без него.
       const or: Prisma.StudentWhereInput[] = [
         { fullName: { contains: filters.search, mode: 'insensitive' } },
         { email: { contains: filters.search, mode: 'insensitive' } },
+        // Пустой массив, если цифр в запросе нет — условие просто не добавится.
+        // Проверять отдельно не нужно: `contains ''` внутри OR вернул бы всю базу.
+        ...phoneContainsConditions('phoneSearch', filters.search),
       ];
-      // Условие по телефону добавляем ТОЛЬКО когда в запросе есть цифры:
-      // иначе `contains ''` совпало бы с каждым студентом, у кого телефон
-      // вообще заполнен, и поиск по имени начал бы возвращать всю базу.
-      if (phoneDigits) or.push({ phoneSearch: { contains: phoneDigits } });
       and.push({ OR: or });
     }
     // stageFilter — на бэкенд. Был клиентским (фильтр по applications[0]),
@@ -486,6 +552,21 @@ export class StudentsService {
       }
     }
     if (dto.cabinet !== undefined) data.cabinet = dto.cabinet;
+    // Раздел 5 ТЗ — «Виза получена: Да / Нет». Права отдельно не проверяем:
+    // выше уже отработал ensureCanEdit(), а по решению заказчика переключать
+    // статус визы может ровно тот, кто и так редактирует карточку —
+    // Основатель, Администратор и назначенный менеджер студента.
+    if (dto.visaReceived !== undefined) {
+      data.visaReceived = dto.visaReceived;
+      // Дату ведём ТОЛЬКО на фактическом переходе состояния. Карточка шлёт
+      // сюда один переключатель, но PATCH публичный: любой клиент, который
+      // отправит объект студента целиком (visaReceived:true в том числе),
+      // сдвигал бы «дату получения визы» вперёд при каждой правке ФИО, и она
+      // превратилась бы в дату последнего сохранения карточки.
+      if (dto.visaReceived !== existing.visaReceived) {
+        data.visaReceivedAt = dto.visaReceived ? new Date() : null;
+      }
+    }
 
     const updated = await this.prisma.student.update({
       where: { id },
@@ -536,6 +617,18 @@ export class StudentsService {
       if (String(beforeS) !== String(afterS)) {
         changes.push(`${FIELD_LABELS[k]}: ${beforeS} → ${afterS}`);
       }
+    }
+    // Раздел 5 ТЗ — виза логируется ОТДЕЛЬНО от FIELD_LABELS, а не строкой
+    // в нём. Цикл выше печатает значение «как есть», и для булева поля
+    // в журнале осталась бы запись «Виза получена: false → true» — журнал
+    // читают менеджеры, а не разработчики. Направление перехода пишем целиком
+    // («Нет → Да» / «Да → Нет»), чтобы в ленте было видно, зафиксировали
+    // получение визы или сняли ошибочную отметку.
+    if (existing.visaReceived !== updated.visaReceived) {
+      const visaLabel = (v: boolean) => (v ? 'Да' : 'Нет');
+      changes.push(
+        `Виза получена: ${visaLabel(existing.visaReceived)} → ${visaLabel(updated.visaReceived)}`,
+      );
     }
     if (changes.length > 0) {
       const summary = changes.join('; ');

@@ -5,6 +5,7 @@ import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
+import { phoneContainsConditions } from '../common/phone';
 import { CreateGrantDto } from './dto/create-grant.dto';
 import { UpdateGrantDto } from './dto/update-grant.dto';
 import { AdvanceGrantDto } from './dto/advance-grant.dto';
@@ -132,7 +133,21 @@ export class GrantsService {
       studentExtra.push({ OR: [{ managerId: filters.managerId }, { chinaManagerId: filters.managerId }] });
     }
     if (filters.search) {
-      studentExtra.push({ fullName: { contains: filters.search, mode: 'insensitive' } });
+      // ТЗ v3 раздел 1 — та же строка поиска ищет и по телефону студента.
+      // Student.phoneSearch содержит обе формы каждого номера (с кодом страны
+      // и без — см. buildPhoneSearch), поэтому цифр запроса достаточно, чтобы
+      // найти карточку независимо от формата ввода.
+      //
+      // ОДИН элемент studentExtra с внутренним OR, а не два: studentScopeWhere
+      // склеивает extra через AND, и раздельные условия означали бы «ФИО
+      // совпало И телефон совпал» — то есть не нашлось бы вообще ничего.
+      const searchOr: Prisma.StudentWhereInput[] = [
+        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        // Оба варианта запроса — общая функция (номер мог быть записан
+        // с кодом страны и без). Пустой массив при поиске по ФИО.
+        ...phoneContainsConditions('phoneSearch', filters.search),
+      ];
+      studentExtra.push({ OR: searchOr });
     }
     and.push({ student: this.studentScopeWhere(user, studentExtra) });
 

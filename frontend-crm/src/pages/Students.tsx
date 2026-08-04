@@ -306,7 +306,20 @@ export default function Students() {
       </div>
       <div className="card-body">
         <div className="filters">
-          <input placeholder="Поиск по ФИО или телефону..." value={search} onChange={(e) => onFilterChange('search', e.target.value)} />
+          {/* ТЗ v3 раздел 1. Подпись обещает ровно то, что делает бэкенд
+              (students.service.findAll): ФИО, email и телефон, причём телефон —
+              подстрокой по Student.phoneSearch, куда buildPhoneSearch кладёт обе
+              формы номера (с кодом страны и без). Поэтому «в любом формате» —
+              не рекламная фраза: «+992 90 123-45-67» находится и по «901234567»,
+              и по «992901234567». Раньше стояло `phones has search` (точное
+              совпадение со строкой целиком), и подпись «или телефону» врала.
+              Не расширяйте текст дальше того, что реально ищет сервис. */}
+          <input
+            placeholder="Поиск по ФИО, email или телефону в любом формате..."
+            value={search}
+            onChange={(e) => onFilterChange('search', e.target.value)}
+            title="Телефон можно вводить в любом виде: +992 90 123-45-67, 992901234567 или 901234567"
+          />
           <select value={direction} onChange={(e) => onFilterChange('direction', e.target.value)}>
             <option value="">Все направления</option>
             <DirectionOptions />
@@ -378,7 +391,7 @@ export default function Students() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>ФИО</th><th>Телефоны</th><th>Направление</th><th>Кабинет</th><th>Менеджер</th><th>Статус</th>
+                    <th>ФИО</th><th>Телефоны</th><th>Направление</th><th>Кабинет</th><th>Менеджер</th><th>Статус</th><th>Виза</th>
                   </tr>
                 </thead>
                 <motion.tbody
@@ -441,6 +454,28 @@ export default function Students() {
                             </span>
                           );
                         })()}
+                      </td>
+                      {/* Раздел 5 ТЗ — индикатор визы прямо в списке (решение
+                          заказчика): менеджер должен видеть, кому виза ещё
+                          нужна, не открывая каждую карточку по очереди.
+                          Кликабельным индикатор здесь НЕ делаем: вся строка —
+                          ссылка в карточку, и переключатель внутри карточки
+                          остаётся единственным местом смены статуса. Иначе
+                          промах мышью по списку менял бы данные студента,
+                          причём у чужого — прав на клик списком не проверить. */}
+                      <td data-label="Виза">
+                        <span
+                          className={`badge ${s.visaReceived ? 'badge-success' : 'badge-gray'}`}
+                          style={{ gap: 4 }}
+                          title={
+                            s.visaReceived
+                              ? `Виза получена${s.visaReceivedAt ? ` · отмечено ${new Date(s.visaReceivedAt).toLocaleDateString('ru-RU')}` : ''}`
+                              : 'Виза ещё не получена'
+                          }
+                        >
+                          <Icon name={s.visaReceived ? 'verified' : 'schedule'} size={14} />
+                          {s.visaReceived ? 'Да' : 'Нет'}
+                        </span>
                       </td>
                     </motion.tr>
                   ))}

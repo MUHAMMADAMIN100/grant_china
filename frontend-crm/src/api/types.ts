@@ -238,6 +238,19 @@ export interface Student {
   cabinet: number;
   status: StudentStatus;
   comment: string | null;
+  /**
+   * ТЗ v3 раздел 5 — «Виза получена: Да / Нет».
+   *
+   * НЕОБЯЗАТЕЛЬНОЕ намеренно, хотя в схеме стоит @default(false). На бэкенде
+   * поле добавлено только в STUDENT_SELECT и STUDENT_LIST_SELECT — карточка и
+   * список студентов, — и сознательно НЕ добавлено в общий STUDENT_SAFE_FIELDS,
+   * которым наполняется вложенный студент внутри заявки. Обязательный тип
+   * обещал бы boolean там, где в рантайме приходит undefined, и `undefined`
+   * тихо отрисовался бы как «Виза не получена» у студента, который её получил.
+   */
+  visaReceived?: boolean;
+  /** Момент отметки о визе; проставляется сервером. null — визы ещё нет. */
+  visaReceivedAt?: string | null;
   managerId: string | null;
   manager?: ManagerInfo | null;
   chinaManagerId: string | null;

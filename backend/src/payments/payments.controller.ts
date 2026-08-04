@@ -9,11 +9,11 @@ import {
   Post,
   Put,
   Query,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { randomUUID } from 'crypto';
@@ -38,39 +38,78 @@ const receiptStorage = diskStorage({
   },
 });
 
-// Чек — фото или PDF, НЕ переиспользуем docFileFilter из students.controller.ts
-// (тот пропускает видео до 200 МБ — «чеком» тогда будут заливать что угодно).
-const ALLOWED_RECEIPT_MIME_RE = /^(image\/(jpeg|jpg|png|webp|heic|heif)|application\/pdf)$/i;
-const ALLOWED_RECEIPT_EXT_RE = /\.(jpe?g|png|webp|heic|heif|pdf)$/i;
+/**
+ * ТЗ v3 раздел 2 — «убрать текущее ограничение, реализовать полноценную
+ * мультизагрузку»; критерий приёмки (решение заказчика) — до 15 файлов ЗА ОДНУ
+ * загрузку. Это лимит именно на запрос, а не на платёж: общее число чеков у
+ * платежа и у студента не ограничено, догрузить можно сколько угодно раз.
+ * Верхняя граница нужна, чтобы один multipart-запрос не занял диск и воркер
+ * на минуты (15 × 20 МБ = 300 МБ — уже потолок разумного).
+ */
+export const MAX_RECEIPT_FILES = 15;
+
+// Чек — фото, PDF или DOCX, НЕ переиспользуем docFileFilter из
+// students.controller.ts (тот пропускает видео до 200 МБ — «чеком» тогда будут
+// заливать что угодно).
+//
+// DOCX добавлен по ТЗ v3 раздел 2 («Поддержка PDF, JPG, PNG, WEBP, HEIC,
+// DOCX»): бухгалтерия части университетов присылает подтверждение оплаты
+// именно вордовским файлом. Старый .doc сознательно НЕ включён — в ТЗ его нет,
+// а список форматов держим ровно таким, какой обещан интерфейсом, иначе
+// клиентская и серверная проверки разъедутся.
+const ALLOWED_RECEIPT_MIME_RE =
+  /^(image\/(jpeg|jpg|png|webp|heic|heif)|application\/pdf|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document)$/i;
+const ALLOWED_RECEIPT_EXT_RE = /\.(jpe?g|png|webp|heic|heif|pdf|docx)$/i;
 const RECEIPT_MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 МБ — с запасом для фото чека/квитанции
 
 const receiptFileFilter = (
-  _req: any,
+  req: any,
   file: Express.Multer.File,
   cb: (error: Error | null, acceptFile: boolean) => void,
 ) => {
-  if (ALLOWED_RECEIPT_MIME_RE.test(file.mimetype) || ALLOWED_RECEIPT_EXT_RE.test(file.originalname)) {
-    return cb(null, true);
+  if (!(ALLOWED_RECEIPT_MIME_RE.test(file.mimetype) || ALLOWED_RECEIPT_EXT_RE.test(file.originalname))) {
+    return cb(new BadRequestException('Чек должен быть фото (JPG/PNG/WEBP/HEIC), PDF или DOCX'), false);
   }
-  cb(new BadRequestException('Чек должен быть фото (JPG/PNG/WEBP/HEIC) или PDF'), false);
+  // Счётчик живёт на объекте ЗАПРОСА, а не в замыкании модуля: объект
+  // receiptUploadOptions один на всё приложение, и общий счётчик склеил бы
+  // параллельные загрузки разных менеджеров — шестнадцатый файл «чужого»
+  // запроса отбивался бы у того, кто грузит первый.
+  req.__receiptFileCount = (req.__receiptFileCount ?? 0) + 1;
+  if (req.__receiptFileCount > MAX_RECEIPT_FILES) {
+    return cb(
+      new BadRequestException(`За одну загрузку можно приложить не более ${MAX_RECEIPT_FILES} файлов`),
+      false,
+    );
+  }
+  cb(null, true);
 };
 
 const receiptUploadOptions = {
   storage: receiptStorage,
-  limits: { fileSize: RECEIPT_MAX_FILE_SIZE },
+  limits: {
+    fileSize: RECEIPT_MAX_FILE_SIZE,
+    // На ЕДИНИЦУ больше лимита ТЗ — это не опечатка. Жёсткий предохранитель
+    // busboy обрывает запрос своим кодом LIMIT_FILE_COUNT, который Nest
+    // превращает в англоязычное «Too many files». Пропустив 16-й файл до
+    // fileFilter, мы отдаём пользователю понятное русское объяснение выше,
+    // а сам предохранитель по-прежнему не даёт залить 500 файлов разом.
+    files: MAX_RECEIPT_FILES + 1,
+  },
   fileFilter: receiptFileFilter,
 };
 
-/** Приводит Express.Multer.File к лёгкому контракту сервиса (без Express-типов внутри payments.service.ts). */
-function toReceiptInput(file: Express.Multer.File | undefined): ReceiptFileInput | undefined {
-  if (!file) return undefined;
-  return {
+/**
+ * Приводит Express.Multer.File[] к лёгкому контракту сервиса (без Express-типов
+ * внутри payments.service.ts). Всегда массив — пустой, если файлов не прислали.
+ */
+function toReceiptInputs(files: Express.Multer.File[] | undefined): ReceiptFileInput[] {
+  return (files ?? []).map((file) => ({
     filename: file.filename,
     originalName: fixFilenameEncoding(file.originalname),
     mimeType: file.mimetype,
     size: file.size,
     url: `/uploads/${file.filename}`,
-  };
+  }));
 }
 
 function parseDateParam(raw: string | undefined): Date | undefined {
@@ -178,15 +217,27 @@ export class PaymentsController {
     return this.payments.findOne(id, user);
   }
 
+  /**
+   * ТЗ v3 раздел 2 — мультизагрузка чеков прямо в модалке оплаты.
+   *
+   * AnyFilesInterceptor, а не FilesInterceptor('files'): имя поля у нас
+   * исторически `file` (см. api/payments.ts createPayment), а новый клиент
+   * шлёт `files[]`. FilesInterceptor привязан к ОДНОМУ имени и на любое другое
+   * отвечает LIMIT_UNEXPECTED_FILE — то есть переименование поля мгновенно
+   * сломало бы всех, у кого в браузере остался старый бандл (а он живёт до
+   * перезагрузки вкладки). AnyFilesInterceptor принимает оба имени, все файлы
+   * одинаково становятся Document type=RECEIPT, лимит и фильтр форматов держит
+   * receiptUploadOptions.
+   */
   @Post()
   @Roles(Role.FOUNDER, Role.EMPLOYEE)
-  @UseInterceptors(FileInterceptor('file', receiptUploadOptions))
+  @UseInterceptors(AnyFilesInterceptor(receiptUploadOptions))
   create(
-    @UploadedFile() file: Express.Multer.File | undefined,
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
     @Body() dto: CreatePaymentDto,
     @CurrentUser() user: any,
   ) {
-    return this.payments.create(dto, toReceiptInput(file), user);
+    return this.payments.create(dto, toReceiptInputs(files), user);
   }
 
   @Patch(':id')
@@ -231,15 +282,16 @@ export class PaymentsController {
     return this.payments.remove(id, user);
   }
 
+  /** Догрузка чеков к существующему платежу — тоже пачкой (ТЗ v3 раздел 2). Возвращает МАССИВ созданных документов. */
   @Post(':id/receipts')
   @Roles(Role.FOUNDER, Role.EMPLOYEE)
-  @UseInterceptors(FileInterceptor('file', receiptUploadOptions))
+  @UseInterceptors(AnyFilesInterceptor(receiptUploadOptions))
   addReceipt(
     @Param('id') id: string,
-    @UploadedFile() file: Express.Multer.File | undefined,
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
     @CurrentUser() user: any,
   ) {
-    return this.payments.addReceipt(id, toReceiptInput(file), user);
+    return this.payments.addReceipt(id, toReceiptInputs(files), user);
   }
 
   @Delete('receipts/:docId')

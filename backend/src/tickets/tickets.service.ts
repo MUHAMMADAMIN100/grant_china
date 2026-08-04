@@ -6,6 +6,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { normalizeCity } from '../common/china-cities';
+import { phoneContainsConditions } from '../common/phone';
 import { formatLocalDateTime } from '../scheduler/time';
 import { TasksService } from '../tasks/tasks.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -54,7 +55,7 @@ export interface TicketListFilters {
   /** Диапазон по дате вылета — «на этой неделе» / «в этом месяце» / кастом. */
   from?: Date;
   to?: Date;
-  /** Поиск по ФИО студента И по номеру рейса (ТЗ 4.2). */
+  /** Поиск по ФИО студента, номеру рейса (ТЗ 4.2) и телефону студента (ТЗ v3 р1). */
   search?: string;
   page?: number;
   pageSize?: number;
@@ -148,13 +149,32 @@ export class TicketsService {
     // в том же ключе `student`, что и scope-условие ниже (Prisma не допускает
     // два разных условия на одно relation-поле объекта) — кладём его в OR.
     if (filters.search) {
-      and.push({
-        OR: [
-          { flightNumber: { contains: filters.search, mode: 'insensitive' } },
-          { airline: { contains: filters.search, mode: 'insensitive' } },
-          { student: { fullName: { contains: filters.search, mode: 'insensitive' } } },
-        ],
-      });
+      // ТЗ v3 раздел 1 — телефон студента ищется здесь же, одной строкой
+      // поиска. Ищем по денормализованному Student.phoneSearch: там для
+      // КАЖДОГО номера студента лежат обе формы записи — с кодом страны и без
+      // (см. buildPhoneSearch в common/phone.ts), поэтому достаточно сравнить
+      // с ним цифры запроса, и «+992 90 123-45-67», «992901234567» и
+      // «901234567» находят одну и ту же карточку.
+      //
+      // Вариантов запроса ДВА: цифры как есть и национальная форма без кода
+      // страны. Одной формы не хватает — сам номер тоже могли записать как с
+      // кодом, так и без (разбор в phoneContainsConditions).
+      //
+      // При поиске по ФИО («Иванов») цифр нет, функция возвращает пустой
+      // массив, и условие не добавляется вовсе: `contains: ''` совпал бы с
+      // каждым студентом с заполненным телефоном и показал бы все билеты.
+      const or: Prisma.TicketWhereInput[] = [
+        { flightNumber: { contains: filters.search, mode: 'insensitive' } },
+        { airline: { contains: filters.search, mode: 'insensitive' } },
+        { student: { fullName: { contains: filters.search, mode: 'insensitive' } } },
+      ];
+      // Отдельной веткой OR, а не внутри объекта student выше: Prisma не
+      // допускает два разных условия на одно relation-поле одного объекта
+      // (та же причина, по которой поиск по ФИО не живёт в ключе scope ниже).
+      for (const cond of phoneContainsConditions('phoneSearch', filters.search)) {
+        or.push({ student: cond });
+      }
+      and.push({ OR: or });
     }
     and.push({ student: this.studentScopeWhere(user) });
 

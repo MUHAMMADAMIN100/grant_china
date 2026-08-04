@@ -1,4 +1,4 @@
-import { IsArray, IsEmail, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Direction, StudentStatus } from '@prisma/client';
 
 const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
@@ -44,4 +44,14 @@ export class UpdateStudentDto {
   @IsString()
   @MaxLength(2000)
   comment?: string;
+
+  // Раздел 5 ТЗ — переключатель «Виза получена: Да / Нет» в карточке студента.
+  // Необязательное: PATCH из карточки шлёт только это одно поле (переключатель
+  // сохраняется сразу, а не вместе со всей формой), и наоборот — обычное
+  // сохранение формы не должно случайно сбрасывать отметку о визе.
+  // Даты здесь нет намеренно: visaReceivedAt проставляет сервер (см.
+  // students.service.update), менеджер её не вводит и подделать не может.
+  @IsOptional()
+  @IsBoolean()
+  visaReceived?: boolean;
 }

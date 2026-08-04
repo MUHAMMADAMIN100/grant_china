@@ -1,4 +1,4 @@
-import { IsArray, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Direction, StudentStatus } from '@prisma/client';
 import { LEAD_SOURCE_VALUES } from '../../common/lead-source';
 
@@ -42,6 +42,15 @@ export class CreateStudentDto {
   @IsString()
   @MaxLength(2000)
   comment?: string;
+
+  // Раздел 5 ТЗ — «Виза получена». При заведении карточки почти всегда false
+  // (визы ещё нет), но поле принимается и здесь: в CRM переносят и студентов,
+  // которые дошли до нас уже с визой, и заставлять менеджера сохранять карточку
+  // дважды ради одного переключателя незачем. Не передали — false (@default
+  // в схеме), выдуманного «Да» сервер не подставляет.
+  @IsOptional()
+  @IsBoolean()
+  visaReceived?: boolean;
 
   // Раздел 3.1 ТЗ — источник привлечения. Заводится ЗДЕСЬ, а не только на
   // публичной форме лендинга: студент, заведённый вручную, тоже создаёт

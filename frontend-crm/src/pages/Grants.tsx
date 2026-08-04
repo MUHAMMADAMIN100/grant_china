@@ -79,7 +79,17 @@ export default function Grants() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Счётчик поколений запросов списка — тот же приём, что в Students.tsx и
+  // Applications.tsx. debounce ниже откладывает СТАРТ запроса, но уже улетевший
+  // не отменяет: при быстром наборе медленный ответ по «Ива» приходил после
+  // быстрого по «Иванов» и перерисовывал таблицу чужими грантами, а пагинация
+  // считалась по чужому total — то есть сервер находил нужное, а экран это
+  // молча затирал. Ответ с устаревшим номером отбрасываем; это же снимает
+  // гонку с realtime-перезагрузкой по 'grant:updated'.
+  const reqRef = useRef(0);
+
   const load = () => {
+    const my = ++reqRef.current;
     setLoading(true);
     listGrants({
       multiOnly: scope === 'multi',
@@ -92,14 +102,19 @@ export default function Grants() {
       pageSize: PAGE_SIZE,
     })
       .then((res) => {
+        if (my !== reqRef.current) return;
         setItems(res.items);
         setTotal(res.total);
       })
       .catch(() => {
+        if (my !== reqRef.current) return;
         setItems([]);
         setTotal(0);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   const loadStats = () => {
@@ -223,10 +238,16 @@ export default function Grants() {
 
         <div className="card-body">
           <div className="filters">
+            {/* ТЗ v3 раздел 1. grants.service.findAll ищет по ФИО студента и по
+                Student.phoneSearch (обе формы номера — с кодом страны и без,
+                см. buildPhoneSearch), отсюда «в любом формате».
+                Название гранта и вуз сервис НЕ ищет, хотя обе колонки видны в
+                таблице — не дописывайте их в подпись, пока этого нет в запросе. */}
             <input
-              placeholder="Поиск по ФИО студента..."
+              placeholder="Поиск по ФИО или телефону студента в любом формате..."
               value={search}
               onChange={(e) => onFilterChange('search', e.target.value)}
+              title="Телефон можно вводить в любом виде: +992 90 123-45-67, 992901234567 или 901234567"
             />
             <select value={due} onChange={(e) => onFilterChange('due', e.target.value)} title="Когда стартует следующий учебный год">
               <option value="">Любой срок продления</option>

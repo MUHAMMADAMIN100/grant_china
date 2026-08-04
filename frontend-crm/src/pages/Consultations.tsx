@@ -187,10 +187,18 @@ export default function Consultations() {
 
       <div className="card-body">
         <div className="filters">
+          {/* ТЗ v3 раздел 1. consultations.service ищет тем же приёмом, что и
+              applications.service: сырой Consultation.phone плюс
+              phoneNormalized цифрами запроса и после normalizePhone — отсюда
+              «в любом формате».
+              Email в подписи НЕТ намеренно: у консультации такого поля не
+              существует (schema.prisma — fullName + phone + purpose), и
+              обещание искать по email отправляло бы менеджера в пустоту. */}
           <input
-            placeholder="Поиск по ФИО или телефону..."
+            placeholder="Поиск по ФИО или телефону в любом формате..."
             value={search}
             onChange={(e) => onFilterChange('search', e.target.value)}
+            title="Телефон можно вводить в любом виде: +992 90 123-45-67, 992901234567 или 901234567"
           />
           <select value={kind} onChange={(e) => onFilterChange('kind', e.target.value)}>
             <option value="">Консультация и собеседование</option>

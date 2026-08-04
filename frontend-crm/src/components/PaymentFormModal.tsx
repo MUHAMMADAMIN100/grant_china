@@ -12,11 +12,11 @@ import {
   canWriteFinance,
   paymentPurposesFor,
 } from '../api/types';
-import { addPaymentReceipt, createPayment, removePaymentReceipt, submitPayment, updatePayment } from '../api/payments';
+import { addPaymentReceipts, createPayment, removePaymentReceipt, submitPayment, updatePayment } from '../api/payments';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { buildFileUrl } from '../utils/fileUrl';
-import ReceiptDropzone from './ReceiptDropzone';
+import ReceiptDropzone, { MAX_RECEIPT_FILES } from './ReceiptDropzone';
 import Icon from '../Icon';
 import { todayInputValue } from '../utils/datetime';
 
@@ -30,6 +30,18 @@ import { todayInputValue } from '../utils/datetime';
  * Душанбе), то есть интерфейс запрещал бы то, что сервер считает корректным.
  */
 const todayStr = todayInputValue;
+
+/**
+ * ТЗ v3 раздел 2: POST /payments/:id/receipts после перехода на мультизагрузку
+ * возвращает МАССИВ созданных документов. Хелпер addPaymentReceipt в
+ * api/payments.ts всё ещё типизирован как один Document (файл вне зоны этой
+ * задачи — см. concerns), поэтому нормализуем ответ здесь и переживаем обе
+ * формы: так экран не сломается ни до, ни после правки хелпера.
+ */
+const asReceiptList = (res: unknown): PaymentReceipt[] => {
+  if (Array.isArray(res)) return res as PaymentReceipt[];
+  return res ? [res as PaymentReceipt] : [];
+};
 
 type Props = {
   studentId: string;
@@ -83,7 +95,9 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
   const [paidAt, setPaidAt] = useState(payment ? payment.paidAt.slice(0, 10) : todayStr());
   const [reference, setReference] = useState(payment?.reference ?? '');
   const [comment, setComment] = useState(payment?.comment ?? '');
-  const [file, setFile] = useState<File | null>(null);
+  // ТЗ v3 раздел 2 — мультизагрузка: было `file: File | null`, то есть ровно
+  // один чек на платёж при создании.
+  const [files, setFiles] = useState<File[]>([]);
   const [receipts, setReceipts] = useState<PaymentReceipt[]>(payment?.receipts ?? []);
   const [saving, setSaving] = useState<'draft' | 'submit' | null>(null);
   const [addingReceipt, setAddingReceipt] = useState(false);
@@ -92,7 +106,7 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
 
   const amountValid = PAYMENT_AMOUNT_RE.test(amount) && parseFloat(amount) > 0;
   const requiresReceiptAlways = RECEIPT_REQUIRED_PURPOSES.includes(purpose);
-  const hasReceipt = isEdit ? receipts.length > 0 : !!file;
+  const hasReceipt = isEdit ? receipts.length > 0 : files.length > 0;
 
   // ТЗ 1.3: для Проживания/Питания сохранение (даже черновика/правки) заблокировано
   // без чека. Для остальных назначений черновик без чека разрешён, но
@@ -114,6 +128,21 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
     if (!submit && draftDisabled) { toast(receiptRequiredCaption, 'error'); return; }
     setSaving(submit ? 'submit' : 'draft');
     try {
+      /**
+       * ТЗ v3 раздел 2 — ВСЕ чеки уходят ОДНИМ запросом вместе с платежом.
+       *
+       * Промежуточная версия слала первый файл с платежом, а остальные
+       * догружала по одному, и это порождало опасный сценарий: если после
+       * успешного createPayment падал любой следующий шаг, модалка оставалась
+       * в режиме создания с целым списком файлов, и повторное нажатие
+       * «Подтвердить» создавало ВТОРОЙ платёж на ту же сумму. Список при этом
+       * не перезагружался, так что уже созданный черновик менеджер не видел и
+       * повторял операцию с высокой вероятностью.
+       *
+       * Один запрос убирает саму возможность частичного успеха: платёж и его
+       * подтверждения появляются вместе либо не появляются вовсе, и повтор
+       * после ошибки снова безопасен.
+       */
       await createPayment({
         studentId,
         stage,
@@ -124,8 +153,9 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
         reference: reference.trim() || undefined,
         comment: comment.trim() || undefined,
         submit,
-        file,
+        files,
       });
+
       toast(submit ? 'Платёж отправлен на одобрение Основателю' : 'Черновик платежа сохранён', 'success');
       onSaved();
       onClose();
@@ -169,17 +199,37 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
     }
   };
 
-  const onAddReceiptFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+  /**
+   * ТЗ v3 раздел 2 — догрузка чеков к уже сохранённому платежу тоже пачкой
+   * (input ниже с multiple). Файлы уходят по одному последовательно: пятнадцать
+   * параллельных multipart по 20 МБ забивают канал и часть отваливается по
+   * таймауту. Ошибка одного файла не отменяет остальные — успешные остаются
+   * загруженными, а список неудачных показывается одним сообщением.
+   */
+  const onAddReceiptFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!f || !payment) return;
+    if (picked.length === 0 || !payment) return;
+    if (picked.length > MAX_RECEIPT_FILES) {
+      toast(
+        `За один раз можно приложить не более ${MAX_RECEIPT_FILES} файлов — выбрано ${picked.length}. Загрузите их в несколько приёмов.`,
+        'error',
+      );
+      return;
+    }
     setAddingReceipt(true);
     try {
-      const doc = await addPaymentReceipt(payment.id, f);
-      setReceipts((prev) => [doc, ...prev]);
-      toast('Чек добавлен', 'success');
+      // Одним запросом: бэкенд принимает пачку, и дробить её на N обращений
+      // значит получить состояние «часть чеков легла, часть нет» вместо
+      // «легли все или ни одного».
+      const added = asReceiptList(await addPaymentReceipts(payment.id, picked));
+      // Список чеков бэкенд отдаёт по убыванию createdAt (PAYMENT_SELECT.receipts),
+      // поэтому пачку кладём сверху в обратном порядке — иначе локальный список
+      // разошёлся бы с тем, что придёт после перезагрузки карточки.
+      if (added.length > 0) setReceipts((prev) => [...added.slice().reverse(), ...prev]);
+      toast(added.length === 1 ? 'Чек добавлен' : `Добавлено чеков: ${added.length}`, 'success');
     } catch (err: any) {
-      toast(buildErrorMessage(err, 'Ошибка загрузки чека'), 'error');
+      toast(buildErrorMessage(err, 'Не удалось загрузить чеки'), 'error');
     } finally {
       setAddingReceipt(false);
     }
@@ -320,22 +370,38 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
                   disabled={addingReceipt || busy}
                 >
                   <Icon name={addingReceipt ? 'progress_activity' : 'add'} size={14} style={{ marginRight: 4 }} />
-                  {addingReceipt ? 'Загрузка…' : 'Добавить чек'}
+                  {addingReceipt ? 'Загрузка…' : 'Добавить чеки'}
                 </button>
-                <input ref={receiptInputRef} type="file" hidden accept="image/*,.pdf" onChange={onAddReceiptFile} />
+                {/* accept повторяет серверный фильтр (payments.controller.ts):
+                    image/* пропускал бы, например, SVG и GIF, которые бэкенд
+                    отбивает — менеджер выбирал бы файл и получал отказ уже
+                    после загрузки. DOCX добавлен по ТЗ v3 раздел 2. */}
+                <input
+                  ref={receiptInputRef}
+                  type="file"
+                  hidden
+                  multiple
+                  accept={
+                    'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,' +
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' +
+                    '.jpg,.jpeg,.png,.webp,.heic,.heif,.pdf,.docx'
+                  }
+                  onChange={onAddReceiptFiles}
+                />
               </>
             )}
           </div>
         ) : (
           <ReceiptDropzone
-            file={file}
-            onChange={setFile}
+            files={files}
+            onChange={setFiles}
+            disabled={busy}
             hint={
               requiresReceiptAlways
                 ? undefined // причина уже объяснена подписью под кнопками (receiptRequiredCaption) — не дублируем текст
                 : 'Обязателен для отправки на одобрение; черновик можно сохранить и без него.'
             }
-            error={requiresReceiptAlways && !file ? receiptRequiredCaption : undefined}
+            error={requiresReceiptAlways && files.length === 0 ? receiptRequiredCaption : undefined}
           />
         )}
 

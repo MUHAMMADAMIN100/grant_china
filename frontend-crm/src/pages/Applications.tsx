@@ -312,10 +312,19 @@ export default function Applications() {
         </div>
 
         <div className="filters">
+          {/* ТЗ v3 раздел 1. Подпись перечисляет ровно то, что ищет
+              applications.service (buildFilterConditions): ФИО, email и
+              телефон. По телефону сервис бьёт не только в сырое поле
+              Application.phone, но и в phoneNormalized — цифрами запроса и теми
+              же цифрами после normalizePhone. Отсюда «в любом формате»:
+              «+992 90 123-45-67» находится и по «901234567», и по
+              «992901234567». Раньше был только `phone contains`, и подпись
+              «телефону» обещала больше, чем сервис умел. */}
           <input
-            placeholder="Поиск по ФИО, телефону, email..."
+            placeholder="Поиск по ФИО, email или телефону в любом формате..."
             value={search}
             onChange={(e) => onFilterChange('search', e.target.value)}
+            title="Телефон можно вводить в любом виде: +992 90 123-45-67, 992901234567 или 901234567"
           />
           <select value={status} onChange={(e) => onFilterChange('status', e.target.value)}>
             <option value="">Все статусы</option>

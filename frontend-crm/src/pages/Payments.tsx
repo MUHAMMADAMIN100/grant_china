@@ -266,8 +266,13 @@ export default function Payments() {
         {tab === 'all' ? (
           <>
             <div className="filters">
+              {/* ТЗ v3 раздел 1. payments.service.findAll ищет по
+                  Payment.reference (номер квитанции/банковской транзакции —
+                  им Основатель сверяет безнал с выпиской), по student.fullName
+                  и по student.phoneSearch. Подпись обещает ровно это. */}
               <input
-                placeholder="Поиск: студент или номер квитанции..."
+                placeholder="Поиск по ФИО, телефону или номеру квитанции..."
+                title="Телефон можно вводить в любом формате: +992 90 123-45-67, 992901234567, 901234567"
                 value={search}
                 onChange={(e) => onFilterChange('search', e.target.value)}
               />

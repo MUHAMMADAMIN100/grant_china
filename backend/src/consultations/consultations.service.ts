@@ -12,7 +12,7 @@ import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
-import { normalizePhone } from '../common/phone';
+import { normalizePhone, phoneContainsConditions } from '../common/phone';
 import { normalizeSource } from '../common/lead-source';
 import { findRepeatOfId } from '../common/application-repeat';
 import { claimFirstTouch } from '../common/lead-touch';
@@ -187,12 +187,25 @@ export class ConsultationsService {
       and.push({ heldAt });
     }
     if (filters.search) {
-      and.push({
-        OR: [
-          { fullName: { contains: filters.search, mode: 'insensitive' } },
-          { phone: { contains: filters.search, mode: 'insensitive' } },
-        ],
-      });
+      // ТЗ v3 раздел 1 — тот же приём, что в applications.service.ts
+      // (buildFilterConditions): консультация несёт собственные phone (сырой
+      // ввод менеджера) и phoneNormalized (результат normalizePhone).
+      //
+      // Сырое поле само по себе не ищет: «+992 90 123-45-67» не совпадает с
+      // «901234567» из-за пробелов и дефисов. Поэтому добавляем поиск по
+      // phoneNormalized в ДВУХ формах — цифры запроса как есть (ввод без кода
+      // страны и частичный ввод) и те же цифры, прогнанные через normalizePhone
+      // (ввод С кодом страны: «992901234567» → «901234567», а в колонке лежит
+      // именно национальный номер). Разбор — в комментарии applications.service.
+      const or: Prisma.ConsultationWhereInput[] = [
+        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        // Оставляем как запасной путь для строк, где phoneNormalized = null
+        // (номер не распознан normalizePhone — короче 7 цифр).
+        { phone: { contains: filters.search, mode: 'insensitive' } },
+        // Обе формы запроса. Пустой массив при поиске по имени.
+        ...phoneContainsConditions('phoneNormalized', filters.search),
+      ];
+      and.push({ OR: or });
     }
     if (and.length) where.AND = and;
 

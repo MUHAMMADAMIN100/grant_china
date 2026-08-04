@@ -19,6 +19,26 @@ export const REQUIRED_DOCUMENTS: { type: string; label: string; hint?: string }[
   { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
 ];
 
+/**
+ * ТЗ v3 раздел 2, критерий приёмки (решение заказчика): до 15 файлов ЗА ОДНУ
+ * загрузку. Ограничение на порцию, а не на студента — общее количество
+ * документов не ограничено, следующие пятнадцать грузятся следующим выбором.
+ * Причина границы прозаична: файлы уходят последовательно, и пачка из ста
+ * штук выглядела бы как намертво зависший интерфейс.
+ */
+const MAX_UPLOAD_FILES = 15;
+
+/**
+ * ТЗ v3 раздел 2 — форматы документов студента: PDF, JPG, PNG, WEBP, HEIC, DOCX.
+ * Указываем и MIME, и расширения: HEIC с iPhone часть браузеров отдаёт с пустым
+ * type, и по одному MIME диалог выбора такие файлы просто не покажет.
+ *
+ * Раздел «Прочие документы» пользуется своим, более широким списком — там
+ * разрешены ещё и видео-презентации.
+ */
+const DOC_ACCEPT =
+  '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
 const fmtBytes = (b: number) => {
   if (b < 1024) return `${b} Б`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} КБ`;
@@ -40,6 +60,8 @@ const sanitizeFileName = (s: string) =>
 export default function DocumentsChecklist({ studentId, studentName, documents, applicationForm, onChange, editable }: Props) {
   const { confirm, toast } = useUI();
   const [uploadingType, setUploadingType] = useState<string | null>(null);
+  /** Счётчик «загружено N из M» — файлы уходят последовательно, без него пачка выглядит как зависание. */
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [zipping, setZipping] = useState(false);
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const otherRef = useRef<HTMLInputElement>(null);
@@ -52,41 +74,176 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
   const total = REQUIRED_DOCUMENTS.length;
   const percent = Math.round((uploadedCount / total) * 100);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
+  /**
+   * ТЗ v3 раздел 2 — «предварительный просмотр списка прикреплённых файлов
+   * ПЕРЕД СОХРАНЕНИЕМ с кнопкой удаления конкретного файла».
+   *
+   * Раньше выбор файла означал немедленную отправку: ошибиться и передумать
+   * было негде, «удалить» означало удалить уже загруженный документ. Теперь
+   * выбранные файлы сначала попадают сюда, менеджер видит список, может
+   * выкинуть лишнее, и только потом нажимает «Загрузить».
+   *
+   * Одна область на весь чек-лист, а не по одной на каждый из десяти типов:
+   * выбрать файлы сразу в двух слотах физически нельзя (диалог модальный), а
+   * десять независимых состояний означали бы десять способов забыть про
+   * незавершённый выбор.
+   */
+  const [pending, setPending] = useState<{ type: string; files: File[] } | null>(null);
+
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
     const files = Array.from(e.target.files || []);
+    // Сбрасываем значение СРАЗУ: иначе повторный выбор того же файла (например
+    // после того, как его выкинули из списка) не вызвал бы onChange вовсе.
+    e.target.value = '';
     if (files.length === 0) return;
 
-    // Раздел "Прочие документы" допускает видео-презентации, поэтому ограничиваем
-    // размер каждого файла 100 МБ. Backend MAX_FILE_SIZE = 200 МБ — это
-    // дополнительная клиентская граница, чтобы менеджер сразу видел ошибку.
+    // Проверки делаем ДО показа списка — бессмысленно давать вычёркивать файлы
+    // из набора, который целиком не будет принят.
+    if (files.length > MAX_UPLOAD_FILES) {
+      toast(
+        `За один раз можно загрузить не более ${MAX_UPLOAD_FILES} файлов — выбрано ${files.length}. Загрузите их в несколько приёмов.`,
+        'error',
+      );
+      return;
+    }
     if (type === 'OTHER') {
       const MAX_OTHER_BYTES = 100 * 1024 * 1024;
       const tooBig = files.find((f) => f.size > MAX_OTHER_BYTES);
       if (tooBig) {
-        const sizeMb = (tooBig.size / 1024 / 1024).toFixed(1);
         toast(
-          `Файл "${tooBig.name}" слишком большой (${sizeMb} МБ). Максимум: 100 МБ.`,
+          `Файл "${tooBig.name}" слишком большой (${(tooBig.size / 1024 / 1024).toFixed(1)} МБ). Максимум: 100 МБ.`,
           'error',
         );
-        e.target.value = '';
         return;
       }
     }
 
-    setUploadingType(type);
-    try {
-      for (const file of files) {
-        await uploadDocument(studentId, file, type);
+    // Добавляем к уже выбранным, если это тот же слот: менеджер может набирать
+    // документы из разных папок. Дубликаты по имени+размеру отсекаем — иначе
+    // один и тот же паспорт легко уходит на сервер дважды.
+    setPending((prev) => {
+      const base = prev && prev.type === type ? prev.files : [];
+      const seen = new Set(base.map((f) => `${f.name}:${f.size}`));
+      const merged = [...base];
+      for (const f of files) {
+        const key = `${f.name}:${f.size}`;
+        if (!seen.has(key)) { seen.add(key); merged.push(f); }
       }
+      return { type, files: merged.slice(0, MAX_UPLOAD_FILES) };
+    });
+  };
+
+  /** Выкинуть один файл из ещё не отправленного набора (кнопка ✕ в списке). */
+  const removePending = (index: number) => {
+    setPending((prev) => {
+      if (!prev) return prev;
+      const files = prev.files.filter((_, i) => i !== index);
+      return files.length ? { ...prev, files } : null;
+    });
+  };
+
+  /**
+   * Отправка уже подтверждённого набора. Проверки количества и размера
+   * остались на шаге выбора (onPick) — здесь набор заведомо валидный.
+   */
+  const handleUpload = async (files: File[], type: string) => {
+    if (files.length === 0) return;
+
+    setUploadingType(type);
+    setUploadProgress({ done: 0, total: files.length });
+
+    // Отказ одного файла больше не отменяет остальные. Раньше цикл падал на
+    // первой ошибке, и менеджер не знал, что часть документов всё же легла:
+    // повторная загрузка «всей пачки» плодила дубликаты. Копим неудачные и
+    // показываем их списком — так видно, что именно нужно перевыбрать.
+    const failed: string[] = [];
+    let firstError = '';
+    for (const file of files) {
+      try {
+        await uploadDocument(studentId, file, type);
+      } catch (err: any) {
+        failed.push(file.name);
+        if (!firstError) firstError = err?.response?.data?.message || '';
+      }
+      setUploadProgress((p) => (p ? { done: p.done + 1, total: p.total } : p));
+    }
+
+    setUploadingType(null);
+    setUploadProgress(null);
+
+    // Список перечитываем, если легло хоть что-то — иначе успешно загруженные
+    // файлы не появились бы в чек-листе до перезагрузки страницы.
+    if (failed.length < files.length) onChange();
+
+    if (failed.length === 0) {
+      // Набор ушёл целиком — область выбора больше не нужна.
+      setPending(null);
       toast(files.length > 1 ? `Загружено: ${files.length}` : 'Документ загружен', 'success');
-      onChange();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Ошибка загрузки', 'error');
-    } finally {
-      setUploadingType(null);
-      e.target.value = '';
+    } else {
+      // Оставляем в области выбора ТОЛЬКО неудачные: успешные уже на сервере,
+      // и повторная отправка всего набора создала бы дубликаты — ровно та
+      // ошибка, из-за которой раньше в карточке появлялось по два паспорта.
+      setPending({ type, files: files.filter((f) => failed.includes(f.name)) });
+      toast(
+        `Не удалось загрузить (${failed.length} из ${files.length}): ${failed.join(', ')}${firstError ? ` — ${firstError}` : ''}`,
+        'error',
+      );
     }
   };
+
+  /**
+   * ТЗ v3 раздел 2 — список выбранных, но ещё НЕ отправленных файлов.
+   * Рисуется прямо под кнопкой того слота, куда их выбрали, чтобы не гадать,
+   * к какому документу относится набор.
+   */
+  const renderPending = (type: string) => {
+    if (!pending || pending.type !== type) return null;
+    const busy = uploadingType === type;
+    return (
+      <div className="doc-pending">
+        <div className="doc-pending-head">
+          Выбрано файлов: {pending.files.length} из {MAX_UPLOAD_FILES}
+        </div>
+        <div className="doc-pending-list">
+          {pending.files.map((f, i) => (
+            <div key={`${f.name}:${f.size}:${i}`} className="doc-pending-item">
+              <Icon name={f.type.startsWith('image/') ? 'image' : 'description'} size={16} />
+              <span className="doc-pending-name" title={f.name}>{f.name}</span>
+              <span className="doc-pending-size">{fmtBytes(f.size)}</span>
+              <button
+                type="button"
+                className="doc-pending-del"
+                title="Убрать файл"
+                onClick={() => removePending(i)}
+                disabled={busy}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="doc-pending-actions">
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => handleUpload(pending.files, type)}
+            disabled={busy}
+          >
+            <Icon name={busy ? 'progress_activity' : 'cloud_upload'} size={15} style={{ marginRight: 4 }} />
+            {busy ? uploadingLabel() : `Загрузить (${pending.files.length})`}
+          </button>
+          <button className="btn btn-sm btn-secondary" onClick={() => setPending(null)} disabled={busy}>
+            Отмена
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  /** «Загрузка 3 из 15…» вместо безликого «Загрузка...» — файлы идут последовательно и долго. */
+  const uploadingLabel = () =>
+    uploadProgress && uploadProgress.total > 1
+      ? `Загрузка ${Math.min(uploadProgress.done + 1, uploadProgress.total)} из ${uploadProgress.total}…`
+      : 'Загрузка...';
 
   const handleDownloadZip = async () => {
     if (documents.length === 0 && !applicationForm) return;
@@ -293,7 +450,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
                       disabled={isUploading}
                     >
                       <Icon name={isUploading ? 'progress_activity' : 'add'} size={16} style={{ marginRight: 4 }} />
-                      {isUploading ? 'Загрузка...' : 'Добавить ещё'}
+                      {isUploading ? uploadingLabel() : 'Добавить ещё'}
                     </button>
                   )}
                 </>
@@ -304,7 +461,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
                   disabled={isUploading}
                 >
                   <Icon name={isUploading ? 'progress_activity' : 'upload'} size={18} style={{ marginRight: 6 }} />
-                  {isUploading ? 'Загрузка...' : 'Загрузить'}
+                  {isUploading ? uploadingLabel() : 'Загрузить'}
                 </button>
               ) : (
                 <div className="doc-slot-empty">Не загружено</div>
@@ -314,9 +471,12 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
                 ref={(el) => { inputRefs.current[req.type] = el; }}
                 type="file"
                 multiple
+                accept={DOC_ACCEPT}
                 hidden
-                onChange={(e) => handleUpload(e, req.type)}
+                onChange={(e) => onPick(e, req.type)}
               />
+
+              {renderPending(req.type)}
             </motion.div>
           );
         })}
@@ -359,7 +519,7 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
                 size={16}
                 style={{ marginRight: 4 }}
               />
-              {uploadingType === 'OTHER' ? 'Загрузка...' : 'Загрузить другой документ'}
+              {uploadingType === 'OTHER' ? uploadingLabel() : 'Загрузить другие документы'}
             </button>
             <div
               style={{
@@ -379,16 +539,24 @@ export default function DocumentsChecklist({ studentId, studentName, documents, 
               />
               <span>
                 Можно загрузить <b>видео-презентацию студента</b> (mp4, mov, webm) или любой
-                другой документ. <b>Максимум 100 МБ</b> на файл.
+                другой документ. <b>Максимум 100 МБ</b> на файл, до <b>{MAX_UPLOAD_FILES} файлов</b> за раз —
+                выделяйте сразу несколько.
               </span>
             </div>
+            {/* multiple по ТЗ v3 раздел 2. У обязательных типов выше он был
+                изначально, а «Прочие документы» — единственный блок, где файлы
+                грузились строго по одному: чтобы приложить пять справок,
+                менеджеру приходилось пять раз открывать диалог выбора. */}
             <input
               ref={otherRef}
               type="file"
+              multiple
               accept="video/mp4,video/quicktime,video/webm,video/*,image/*,application/pdf,.doc,.docx"
               hidden
-              onChange={(e) => handleUpload(e, 'OTHER')}
+              onChange={(e) => onPick(e, 'OTHER')}
             />
+
+            {renderPending('OTHER')}
           </div>
         )}
       </div>

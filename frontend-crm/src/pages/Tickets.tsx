@@ -122,18 +122,33 @@ export default function Tickets() {
     [search, city, status, periodRange],
   );
 
+  // Счётчик поколений запросов списка — тот же приём, что в Students.tsx и
+  // Applications.tsx. debounce ниже откладывает СТАРТ запроса, но уже улетевший
+  // не отменяет: при быстром наборе медленный ответ по «Ива» приходил после
+  // быстрого по «Иванов» и перерисовывал таблицу чужими билетами, а пагинация
+  // считалась по чужому total — то есть сервер находил нужное, а экран это
+  // молча затирал. Ответ с устаревшим номером отбрасываем; это же снимает
+  // гонку с realtime-перезагрузкой по 'ticket:updated'.
+  const reqRef = useRef(0);
+
   const load = () => {
+    const my = ++reqRef.current;
     setLoading(true);
     listTickets({ ...queryFilters, page, pageSize: PAGE_SIZE })
       .then((res) => {
+        if (my !== reqRef.current) return;
         setItems(res.items);
         setTotal(res.total);
       })
       .catch(() => {
+        if (my !== reqRef.current) return;
         setItems([]);
         setTotal(0);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (my !== reqRef.current) return;
+        setLoading(false);
+      });
   };
 
   const loadStats = () => {
@@ -364,10 +379,18 @@ export default function Tickets() {
 
         <div className="card-body">
           <div className="filters">
+            {/* ТЗ v3 раздел 1. tickets.service.findAll ищет по четырём полям:
+                flightNumber, airline, student.fullName и student.phoneSearch
+                (обе формы номера — с кодом страны и без, см. buildPhoneSearch).
+                Авиакомпания в старой подписи не упоминалась — менеджер не знал,
+                что «Somon Air» вообще можно набрать.
+                «В любом формате» ушло в title, а не в placeholder: полей уже
+                четыре, и строка перестала бы помещаться в поле фильтра. */}
             <input
-              placeholder="ФИО студента или номер рейса..."
+              placeholder="Поиск по ФИО, телефону, рейсу или авиакомпании..."
               value={search}
               onChange={(e) => onFilterChange('search', e.target.value)}
+              title="Телефон можно вводить в любом виде: +992 90 123-45-67, 992901234567 или 901234567"
             />
             <select value={city} onChange={(e) => onFilterChange('city', e.target.value)}>
               <option value="">Все города</option>

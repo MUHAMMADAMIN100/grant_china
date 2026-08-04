@@ -31,6 +31,23 @@ const STATUS_LABEL: Record<string, string> = {
   ARCHIVED: 'В архиве',
 };
 
+/**
+ * Раздел 5 ТЗ — индикатор статуса визы в личном кабинете.
+ *
+ * Оформлен «кнопкой» (пилюля с иконкой), как просил заказчик, но НЕ является
+ * кнопкой в разметке: студент статус визы не меняет — его переключает менеджер
+ * в CRM. Ставить сюда <button>, который ничего не делает (или делает 403),
+ * значит обманывать и мышь, и скринридер, поэтому это <div role="status">.
+ *
+ * Цвета инлайном, а не классами в index.css: индикатор существует ровно
+ * в одном месте кабинета, и держать его правила рядом с разметкой честнее,
+ * чем плодить в общем файле стилей пару классов на один компонент.
+ */
+const VISA_STYLE = {
+  yes: { background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' },
+  no: { background: '#f9fafb', color: '#4b5563', border: '1px solid #e5e7eb' },
+} as const;
+
 const REQUIRED_DOCS = [
   { type: 'PHOTO', label: 'Фото 3/4', hint: 'В электронном формате' },
   { type: 'PASSPORT', label: 'Загран паспорт' },
@@ -118,17 +135,36 @@ export default function StudentCabinet() {
     }
 
     setUploading(type);
-    try {
-      for (const file of files) {
+    // try/catch ВНУТРИ цикла, а не снаружи. Общий catch прерывал пачку на
+    // первом сбое: уже загруженные файлы оставались на сервере, а студент
+    // видел только «Ошибка загрузки» — повторный выбор той же пачки создавал
+    // дубликаты. Теперь отказ одного файла не отменяет остальные, и в
+    // сообщении видно, что именно нужно перевыбрать. Тот же приём, что в
+    // DocumentsChecklist.tsx на стороне CRM.
+    const failed: string[] = [];
+    let firstError = '';
+    for (const file of files) {
+      try {
         await studentUploadDocument(file, type);
+      } catch (err: any) {
+        failed.push(file.name);
+        if (!firstError) firstError = err?.response?.data?.message || '';
       }
+    }
+    setUploading(null);
+    e.target.value = '';
+
+    // Перечитываем, если легло хоть что-то — иначе успешные загрузки не
+    // появились бы в кабинете до перезагрузки страницы.
+    if (failed.length < files.length) await load();
+
+    if (failed.length === 0) {
       showToast('ok', files.length > 1 ? `Загружено: ${files.length}` : 'Документ загружен');
-      await load();
-    } catch (err: any) {
-      showToast('err', err?.response?.data?.message || 'Ошибка загрузки');
-    } finally {
-      setUploading(null);
-      e.target.value = '';
+    } else {
+      showToast(
+        'err',
+        `Не удалось загрузить (${failed.length} из ${files.length}): ${failed.join(', ')}${firstError ? ` — ${firstError}` : ''}`,
+      );
     }
   };
 
@@ -326,6 +362,40 @@ export default function StudentCabinet() {
               <div className="stu-profile-grid">
                 <div><span>Email:</span> <b>{me.email}</b></div>
                 <div><span>Телефоны:</span> <b>{me.phones.join(', ') || '—'}</b></div>
+              </div>
+
+              {/* Раздел 5 ТЗ — текущий статус визы. Виден всегда, в обоих
+                  состояниях: «виза ещё не получена» — такой же ответ на вопрос
+                  студента, как и «получена». Показывать индикатор только при
+                  «Да» означало бы, что отсутствие блока читается как ошибка
+                  загрузки, а не как честное «пока нет». */}
+              <div
+                role="status"
+                aria-label={me.visaReceived ? 'Виза получена' : 'Виза ещё не получена'}
+                style={{
+                  ...(me.visaReceived ? VISA_STYLE.yes : VISA_STYLE.no),
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  marginTop: 14,
+                  padding: '10px 16px',
+                  borderRadius: 999,
+                  maxWidth: '100%',
+                }}
+              >
+                <Icon name={me.visaReceived ? 'verified' : 'schedule'} size={22} />
+                <div style={{ lineHeight: 1.35 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>
+                    {me.visaReceived ? 'Виза получена' : 'Виза ещё не получена'}
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>
+                    {me.visaReceived
+                      ? me.visaReceivedAt
+                        ? `Отмечено ${new Date(me.visaReceivedAt).toLocaleDateString('ru-RU')}`
+                        : 'Подтверждено вашим менеджером'
+                      : 'Менеджер отметит здесь, как только виза будет готова'}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

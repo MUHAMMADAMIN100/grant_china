@@ -105,6 +105,15 @@ export type StudentMe = {
   status: 'ACTIVE' | 'PAUSED' | 'GRADUATED' | 'ARCHIVED';
   comment: string | null;
   photoUrl: string | null;
+  /**
+   * ТЗ v3 раздел 5 — статус визы студента. Скалярное поле Student, поэтому
+   * приходит в /student-auth/me автоматически (там `include`); попадание
+   * в ответ — требование ТЗ, а не утечка: индикатор визы обязан быть
+   * в личном кабинете. Всегда булево (@default(false) в схеме), не `?`.
+   */
+  visaReceived: boolean;
+  /** Когда визу отметили полученной. null — визы ещё нет. */
+  visaReceivedAt: string | null;
   documents: StudentDoc[];
   manager: { id: string; fullName: string; email: string } | null;
   chinaManager: { id: string; fullName: string; email: string } | null;

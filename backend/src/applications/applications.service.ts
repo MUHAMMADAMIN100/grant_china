@@ -15,7 +15,7 @@ import { canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
-import { normalizePhone } from '../common/phone';
+import { buildPhoneSearch, normalizePhone, phoneContainsConditions } from '../common/phone';
 import { normalizeSource } from '../common/lead-source';
 import { findRepeatOfId } from '../common/application-repeat';
 import { claimEnrolled, claimFirstTouch } from '../common/lead-touch';
@@ -354,13 +354,40 @@ export class ApplicationsService implements OnModuleInit {
     }
     if (filters.repeat) and.push({ repeatOfId: { not: null } });
     if (filters.search) {
-      and.push({
-        OR: [
-          { fullName: { contains: filters.search, mode: 'insensitive' } },
-          { phone: { contains: filters.search, mode: 'insensitive' } },
-          { email: { contains: filters.search, mode: 'insensitive' } },
-        ],
-      });
+      // ТЗ v3 раздел 1 — «поиск должен находить записи независимо от формата
+      // ввода (+992, +86, пробелы, дефисы или без них)».
+      //
+      // Одного `phone: { contains: search }` для этого мало: phone хранит
+      // СЫРУЮ строку в том виде, как её напечатал менеджер («+992 90 123-45-67»),
+      // и запрос «901234567» по ней не находит ничего — между цифрами стоят
+      // пробелы и дефисы. Поэтому ищем ещё и по phoneNormalized (только цифры).
+      //
+      // ДВА варианта цифр, а не один. phoneNormalized хранит НАЦИОНАЛЬНЫЙ
+      // номер БЕЗ кода страны (см. normalizePhone), а пользователь одинаково
+      // часто вводит и с кодом, и без:
+      //   - digits   — цифры запроса как есть: покрывает ввод БЕЗ кода
+      //                («901234567») и любой ЧАСТИЧНЫЙ ввод («1234»), для
+      //                которого normalizePhone вернёт null (короче 7 цифр);
+      //   - national — тот же normalizePhone, что применялся при записи:
+      //                покрывает ввод С кодом («+992 90 123-45-67» →
+      //                «992901234567» → «901234567»), который иначе не совпал
+      //                бы с хранимым значением ни одной своей подстрокой.
+      // Обе формы прогоняются через ту же функцию, что заполняла колонку, —
+      // поэтому запрос и хранимое значение гарантированно приводятся к одному
+      // виду, а не к двум похожим.
+      const or: Prisma.ApplicationWhereInput[] = [
+        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        // Сырое поле оставляем: у заявок, заведённых из students.service
+        // (`phones[0] || ''`), и у части исторических строк phoneNormalized
+        // остаётся null — по ним ищет только эта ветка.
+        { phone: { contains: filters.search, mode: 'insensitive' } },
+        { email: { contains: filters.search, mode: 'insensitive' } },
+        // Обе формы запроса разом. Пустой массив при текстовом запросе
+        // («Иван»): `contains ''` совпало бы с каждой заявкой с распознанным
+        // телефоном, и поиск по имени вернул бы всю базу.
+        ...phoneContainsConditions('phoneNormalized', filters.search),
+      ];
+      and.push({ OR: or });
     }
     return and;
   }
@@ -538,6 +565,13 @@ export class ApplicationsService implements OnModuleInit {
         const studentData: any = {
           fullName: existing.fullName,
           phones: [existing.phone],
+          // ТЗ v3 раздел 1. Это ОСНОВНОЙ путь появления студента в CRM —
+          // заявка переходит в DOCS_REVIEW и превращается в карточку. Без
+          // явной установки поле осталось бы null, и такой студент НЕ находился
+          // бы по телефону нигде: и students, и договоры, и гранты, и билеты
+          // ищут исключительно по phoneSearch. Отказ был бы молчаливым —
+          // ничего не падает, в логах пусто, просто поиск не находит.
+          phoneSearch: buildPhoneSearch([existing.phone]),
           email: existing.email,
           direction: existing.direction,
           cabinet: CABINET_BY_DIRECTION[existing.direction],
