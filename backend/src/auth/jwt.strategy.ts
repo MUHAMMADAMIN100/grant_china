@@ -3,7 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
-import { Role } from '@prisma/client';
+import { Region, Role } from '@prisma/client';
 import { AUTH_COOKIE_NAME } from './cookie-helpers';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -38,6 +38,12 @@ const ROLE_CACHE_TTL_MS = 30_000;
 
 export interface CachedUserState {
   role: Role;
+  // ТЗ v3 раздел 4 — регион менеджера. Живёт ЗДЕСЬ, а не в JWT-payload, по той
+  // же причине, что и роль: payload действует 7 дней и не сверяется с БД, а
+  // смена региона обязана применяться сразу (иначе менеджер неделю видел бы
+  // студентов чужой страны). invalidateUserCache() уже вызывается при
+  // обновлении сотрудника, так что отдельного механизма не нужно.
+  region: Region;
   deletedAt: Date | null;
   ts: number;
 }
@@ -97,13 +103,13 @@ export async function getStaffState(prisma: PrismaService, userId: string): Prom
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true, deletedAt: true },
+      select: { role: true, region: true, deletedAt: true },
     });
     if (!user) {
       userStateCache.delete(userId);
       return null;
     }
-    const state: CachedUserState = { role: user.role, deletedAt: user.deletedAt, ts: now };
+    const state: CachedUserState = { role: user.role, region: user.region, deletedAt: user.deletedAt, ts: now };
     userStateCache.set(userId, state);
     return state;
   } catch {
@@ -154,6 +160,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       sub: payload.sub, // для обратной совместимости со старым кодом
       email: payload.email,
       role: state.role, // актуальная роль из БД, а не из JWT-payload
+      region: state.region, // ТЗ v3 р4 — тоже из БД, по той же причине
     };
   }
 }

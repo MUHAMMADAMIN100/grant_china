@@ -100,6 +100,7 @@ export class StudentsController {
       managerUserId: manager || undefined,
       currentUserId: user?.id,
       currentUserRole: user?.role,
+      currentUserRegion: user?.region,
       stage: stage || undefined,
       grant: grant === 'multi' || grant === 'any' || grant === 'none' ? grant : undefined,
       page: parsePage(page),

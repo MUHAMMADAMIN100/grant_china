@@ -25,9 +25,19 @@ import { parsePage, parsePageSize } from '../common/pagination';
  * (см. accessModel проекта архитектора).
  *
  * ФИКСАЦИЯ ВЫПЛАТЫ — ТОЛЬКО FOUNDER (ТЗ 1.1: деньги подтверждает Основатель).
- * УТВЕРЖДЕНИЕ — FOUNDER+ADMIN, но анти-самоутверждение и запрет ADMIN
- * утверждать листы ADMIN проверяются В СЕРВИСЕ (payslips.service.approve),
- * не только ролью.
+ *
+ * ТЗ v3 раздел 4 (критерий приёмки №4): ВСЕ операции записи — генерация,
+ * пересчёт, утверждение — сузились до FOUNDER. Администратору осталось
+ * только чтение (@Roles(FOUNDER, ADMIN) на GET-методах): по таблице ролей он
+ * «видит финансовую аналитику и платежи, но не может ничего изменять».
+ *
+ * Классовый @Roles(FOUNDER, ADMIN) оставлен как БАЗОВАЯ линия для GET'ов;
+ * методы записи перекрывают его собственным @Roles(FOUNDER).
+ *
+ * Следствие: проверка `actor.role === ADMIN` внутри payslips.service.approve
+ * стала недостижимой — ADMIN до сервиса больше не доходит. Она намеренно
+ * оставлена на месте: это защита в глубину на случай, если классовый @Roles
+ * однажды расширят, а про сервис забудут.
  */
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.FOUNDER, Role.ADMIN)
@@ -65,8 +75,11 @@ export class PayrollAdminController {
     return this.payslips.findOneForAdmin(id);
   }
 
+  // ТЗ v3 раздел 4: зарплата — часть финансового контура, Администратор в нём
+  // только смотрит. GET-методы выше остаются ему доступны («видит финансовую
+  // аналитику»), а генерация, пересчёт и утверждение начислений — нет.
   @Post('payslips/generate')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   generate(@Body() dto: GeneratePayslipsDto, @CurrentUser() user: any) {
     return this.payslips.generate(dto.period, user);
   }
@@ -78,7 +91,7 @@ export class PayrollAdminController {
   }
 
   @Post('payslips/:id/recalculate')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   recalculate(@Param('id') id: string, @CurrentUser() user: any) {
     return this.payslips.recalculate(id, user);
   }
@@ -90,7 +103,7 @@ export class PayrollAdminController {
   }
 
   @Post('payslips/:id/approve')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   approve(@Param('id') id: string, @Body() dto: ApprovePayslipDto, @CurrentUser() user: any) {
     return this.payslips.approve(id, dto, user);
   }

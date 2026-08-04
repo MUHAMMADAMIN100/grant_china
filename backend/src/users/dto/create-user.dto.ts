@@ -1,6 +1,6 @@
-import { IsEmail, IsEnum, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { Role } from '@prisma/client';
+import { Region, Role } from '@prisma/client';
 
 export class CreateUserDto {
   @Transform(({ value }) =>
@@ -26,4 +26,12 @@ export class CreateUserDto {
 
   @IsEnum(Role)
   role: Role;
+
+  // ТЗ v3 раздел 4. @IsOptional: старые клиенты (и внутренние скрипты вроде
+  // prisma/create-founder.ts) поле не шлют, а падать на этом нельзя — БД
+  // подставит @default(BOTH). Значим только для EMPLOYEE: FOUNDER и ADMIN по
+  // ТЗ видят всех студентов независимо от региона.
+  @IsOptional()
+  @IsEnum(Region)
+  region?: Region;
 }

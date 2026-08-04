@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Contract, PaymentScheduleRow, Student } from '../api/types';
-import { isFounder, isPrivileged } from '../api/types';
-import { completeContract, deleteContract, getContract, linkContractPayments, terminateContract } from '../api/contracts';
+import { canManageFinance, canWriteFinance, isPrivileged } from '../api/types';
+import { completeContract, deleteContract, getContract, linkContractPayments, signContract, terminateContract } from '../api/contracts';
 import { getPaymentSchedule } from '../api/payments';
 import { getStudent } from '../api/students';
 import { useAuth } from '../store/auth';
@@ -13,6 +13,7 @@ import { formatMoney } from '../utils/money';
 import BackButton from '../components/BackButton';
 import ContractStatusBadge from '../components/ContractStatusBadge';
 import ContractFormModal from '../components/ContractFormModal';
+import { SignDatePrompt } from '../components/ContractCard';
 import PaymentReasonPrompt from '../components/PaymentReasonPrompt';
 import Icon from '../Icon';
 
@@ -34,7 +35,7 @@ export default function ContractDetail() {
   const [student, setStudent] = useState<Student | null>(null);
   const [schedule, setSchedule] = useState<PaymentScheduleRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [modal, setModal] = useState<'edit' | 'terminate' | null>(null);
+  const [modal, setModal] = useState<'edit' | 'terminate' | 'sign' | null>(null);
   const [busy, setBusy] = useState(false);
 
   const reload = async () => {
@@ -64,8 +65,14 @@ export default function ContractDetail() {
   if (error) return <div className="error-banner">{error}</div>;
   if (!contract) return <div className="empty">Загрузка...</div>;
 
+  // isPriv отвечает ТОЛЬКО на вопрос «видна ли пользователю карточка этого
+  // студента» — Администратор видит всех, и договоры ему тоже показывают.
+  // Права на ДЕЙСТВИЯ считаются отдельно: ТЗ v3 раздел 4, критерий приёмки №4
+  // оставляет Администратору финансы строго в режиме чтения, и эндпоинты
+  // договора теперь отвечают ему 403. Смешивать эти две границы нельзя.
   const isPriv = isPrivileged(me?.role);
-  const isFdr = isFounder(me?.role);
+  const canWrite = canWriteFinance(me?.role);   // создание/правка — @Roles(FOUNDER, EMPLOYEE)
+  const canManage = canManageFinance(me?.role); // подписание/расторжение/исполнение/удаление/привязка — @Roles(FOUNDER)
   const assigned = !!student?.managerId || !!student?.chinaManagerId;
   const isMine = !assigned || student?.managerId === me?.id || student?.chinaManagerId === me?.id;
   const canEdit = isPriv || isMine;
@@ -73,6 +80,27 @@ export default function ContractDetail() {
   const linked = schedule.filter((r) => r.contractId === contract.id);
   const unlinked = schedule.filter((r) => r.contractId === null);
   const otherContract = schedule.filter((r) => r.contractId && r.contractId !== contract.id);
+
+  /**
+   * ТЗ v3 р4 — подписание закрыто @Roles(FOUNDER). Действие продублировано
+   * здесь, потому что до этого его на странице договора не было: Основатель,
+   * открывший договор из общего списка /contracts, мог его изменить, исполнить
+   * и расторгнуть, но не подписать — для этого приходилось искать студента и
+   * открывать его карточку.
+   */
+  const onSign = async (signedAt: string) => {
+    setBusy(true);
+    try {
+      await signContract(contract.id, signedAt);
+      toast('Договор подписан', 'success');
+      setModal(null);
+      reload();
+    } catch (e: any) {
+      toast(e?.response?.data?.message || 'Ошибка подписания договора', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onTerminate = async (reason: string) => {
     setBusy(true);
@@ -153,16 +181,28 @@ export default function ContractDetail() {
             <ContractStatusBadge status={contract.status} />
           </h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {(contract.status === 'DRAFT' || isFdr) && canEdit && (
+            {/* Черновик правит и назначенный менеджер, после подписания
+                сумму/заявку/ответственного меняет только Основатель — та же
+                развилка, что в contracts.service.ts update(). */}
+            {/* Подписание — только Основатель (POST /contracts/:id/sign под
+                @Roles(FOUNDER)). Второй участник цепочки: черновик с суммой
+                готовит менеджер, подтверждает не он. */}
+            {contract.status === 'DRAFT' && canManage && (
+              <button className="btn btn-sm btn-primary" onClick={() => setModal('sign')} disabled={busy}>
+                <Icon name="draw" size={15} style={{ marginRight: 4 }} />
+                Отметить подписанным
+              </button>
+            )}
+            {canEdit && (contract.status === 'DRAFT' ? canWrite : canManage) && (
               <button className="btn btn-sm btn-secondary" onClick={() => setModal('edit')}>Изменить</button>
             )}
-            {contract.status === 'SIGNED' && isPriv && (
+            {contract.status === 'SIGNED' && canManage && (
               <button className="btn btn-sm btn-secondary" onClick={onComplete} disabled={busy}>Исполнен</button>
             )}
-            {contract.status === 'SIGNED' && isPriv && (
+            {contract.status === 'SIGNED' && canManage && (
               <button className="btn btn-sm btn-danger" onClick={() => setModal('terminate')} disabled={busy}>Расторгнуть</button>
             )}
-            {contract.status === 'DRAFT' && isFdr && (
+            {contract.status === 'DRAFT' && canManage && (
               <button className="btn btn-sm btn-danger" onClick={onDelete}>Удалить</button>
             )}
           </div>
@@ -214,7 +254,7 @@ export default function ContractDetail() {
                 Привязано к этому договору: {linked.length} из {schedule.length} строк графика.
                 {otherContract.length > 0 && ` К другим договорам: ${otherContract.length}.`}
               </div>
-              {(contract.status === 'SIGNED' || contract.status === 'COMPLETED') && isFdr && unlinked.length > 0 && (
+              {(contract.status === 'SIGNED' || contract.status === 'COMPLETED') && canManage && unlinked.length > 0 && (
                 <button className="btn btn-sm btn-secondary" style={{ marginTop: 10 }} onClick={onLinkPayments} disabled={busy}>
                   <Icon name="link" size={15} style={{ marginRight: 4 }} />
                   Привязать неразмеченные платежи и график к этому договору
@@ -235,6 +275,9 @@ export default function ContractDetail() {
             onClose={() => setModal(null)}
             onSaved={reload}
           />
+        )}
+        {modal === 'sign' && (
+          <SignDatePrompt key="sign" onCancel={() => setModal(null)} onConfirm={onSign} />
         )}
         {modal === 'terminate' && (
           <PaymentReasonPrompt

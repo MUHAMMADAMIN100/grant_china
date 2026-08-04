@@ -4,7 +4,7 @@ import { assignApplicationManager, clearRepeatApplication, deleteApplication, ge
 import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import { listContracts } from '../api/contracts';
 import type { Application, ApplicationStatus, Contract, Direction, Student, StudentStatus } from '../api/types';
-import { APPLICATION_STAGES, DIRECTION_LABEL, LEAD_SOURCES, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, isPrivileged, leadSourceLabel } from '../api/types';
+import { APPLICATION_STAGES, DIRECTION_LABEL, LEAD_SOURCES, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, canWriteFinance, isPrivileged, leadSourceLabel } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -371,6 +371,11 @@ export default function ApplicationDetail() {
   // Админ и назначенный менеджер (TJ/CN) могут редактировать заявку на любом этапе
   // — как данные студента, так и анкету.
   const canEdit = !!student && canAct;
+  // Договор — это финансы, а ТЗ v3 раздел 4 (критерий приёмки №4) оставляет
+  // Администратору финансовую часть строго на чтение: POST /contracts закрыт
+  // @Roles(FOUNDER, EMPLOYEE). Прав на саму заявку (canEdit) здесь мало —
+  // иначе Администратор жал бы «Оформить договор» и получал 403 при сохранении.
+  const canCreateContract = canEdit && canWriteFinance(me?.role);
   const nextStage = APPLICATION_STAGES[currentIdx + 1];
   const prevStage = currentIdx > 0 ? APPLICATION_STAGES[currentIdx - 1] : null;
 
@@ -693,7 +698,7 @@ export default function ApplicationDetail() {
                     <ContractStatusBadge status={contract.status} />
                     {contract.signedAt && ` от ${new Date(contract.signedAt).toLocaleDateString('ru-RU')}`}
                   </>
-                ) : canEdit ? (
+                ) : canCreateContract ? (
                   <button className="btn btn-sm btn-secondary" onClick={() => setContractModalOpen(true)}>
                     <Icon name="description" size={15} style={{ marginRight: 4 }} />
                     Оформить договор

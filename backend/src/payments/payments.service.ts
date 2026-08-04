@@ -19,7 +19,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FileResolverService } from '../files/file-resolver.service';
-import { isPrivileged } from '../common/roles';
+import { canManageFinance, canWriteFinance, isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { localDayStart } from '../scheduler/time';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -35,6 +35,8 @@ import {
   STAGE_LABEL,
   STAGE_ORDER,
   assertReceiptInvariant,
+  assertPurposeAllowedForRole,
+  assertPurposeSelectable,
   isPurposeAllowedForStage,
 } from './payment-rules';
 
@@ -311,13 +313,38 @@ export class PaymentsService {
   }
 
   /**
+   * ТЗ v3 раздел 4, критерий приёмки №4 — Администратор в финансах ТОЛЬКО
+   * читает. Защита в глубину поверх @Roles на контроллере: декоратор легко
+   * забыть на новом методе (именно так и появилась исходная дыра — восемь
+   * методов записи стояли вообще без @Roles), а этот вызов стоит внутри
+   * самих операций и сработает при любом способе их вызова.
+   *
+   * Бросаем 403 с прямым текстом, а не 404: Администратор эти платежи ВИДИТ,
+   * прятать их от него бессмысленно — ему надо объяснить, почему кнопка не
+   * сработала.
+   */
+  private assertCanWriteFinance(user: CurrentUser) {
+    if (!canWriteFinance(user.role)) {
+      throw new ForbiddenException(
+        'Администратор работает с финансами в режиме просмотра. Внести или изменить платёж может Основатель или назначенный менеджер студента.',
+      );
+    }
+  }
+
+  /**
    * Права на мутацию платежа (редактирование/подача/удаление/чеки): только
    * автор записи (createdById) либо ADMIN/FOUNDER. Строже, чем доступ на
    * СОЗДАНИЕ (там достаточно быть назначенным менеджером студента) —
    * поменять/удалить уже внесённые кем-то данные должен именно тот, кто их
    * внёс, иначе один менеджер сможет незаметно поправить черновик другого.
+   *
+   * ТЗ v3: сюда добавлен assertCanWriteFinance — раньше isPrivileged() пускал
+   * ADMIN к правке ЛЮБОГО чужого платежа. Порядок вызовов важен: сначала
+   * проверка роли, потом загрузка записи, иначе Администратор по коду ответа
+   * (403 против 404) отличал бы существующие платежи от несуществующих.
    */
   private async loadPaymentForMutation(id: string, user: CurrentUser): Promise<PaymentRow> {
+    this.assertCanWriteFinance(user);
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
     const allowed = payment && (isPrivileged(user.role) || payment.createdById === user.id);
     // Проблема 9 аудита волны 1: раньше «платёж не найден» (404) и «платёж
@@ -607,10 +634,21 @@ export class PaymentsService {
   // ------------------------------------------------------------------
 
   async create(dto: CreatePaymentDto, file: ReceiptFileInput | undefined, user: CurrentUser) {
+    // ТЗ v3 раздел 4 — первой строкой, ДО загрузки студента: Администратор не
+    // должен даже по коду ответа отличать существующего студента от
+    // несуществующего, раз вносить платежи ему всё равно запрещено.
+    this.assertCanWriteFinance(user);
     const student = await this.loadStudentScope(dto.studentId);
     if (!(isPrivileged(user.role) || canAccessStudentRecord(student, user))) {
-      throw new ForbiddenException('Только назначенные менеджеры или администратор могут вносить платежи по этому студенту');
+      throw new ForbiddenException('Вносить платежи по этому студенту может только назначенный ему менеджер или Основатель');
     }
+
+    // ТЗ v3 раздел 3 — новый платёж может нести только один из пяти
+    // действующих типов, а «Оплата за регистрацию в университете» — ещё и
+    // только от Основателя. Обе проверки ДО проверки этапа: сообщение
+    // «этот тип больше не используется» полезнее, чем «не соответствует этапу».
+    assertPurposeSelectable(dto.purpose);
+    assertPurposeAllowedForRole(dto.purpose, user.role);
 
     if (!isPurposeAllowedForStage(dto.stage, dto.purpose)) {
       throw new BadRequestException('Назначение платежа не соответствует выбранному этапу');
@@ -760,6 +798,19 @@ export class PaymentsService {
 
     const nextStage = dto.stage ?? payment.stage;
     const nextPurpose = dto.purpose ?? payment.purpose;
+    // ТЗ v3 раздел 3. Проверяем ТОЛЬКО если тип реально меняют: платёж с
+    // историческим типом (CONSULTATION/OTHER — в боевой базе таких 10 штук)
+    // обязан оставаться редактируемым по сумме и дате, иначе переход на новый
+    // список заморозил бы существующие записи.
+    if (dto.purpose !== undefined && dto.purpose !== payment.purpose) {
+      assertPurposeSelectable(dto.purpose);
+      assertPurposeAllowedForRole(dto.purpose, user.role);
+    }
+    // Тип «Оплата за регистрацию в университете» защищаем и от правки СУММЫ
+    // не-Основателем: иначе запрет на его проведение обходился бы созданием
+    // платежа с другим типом и последующей сменой одного поля.
+    assertPurposeAllowedForRole(nextPurpose, user.role);
+
     if (!isPurposeAllowedForStage(nextStage, nextPurpose)) {
       throw new BadRequestException('Назначение платежа не соответствует выбранному этапу');
     }
@@ -856,6 +907,11 @@ export class PaymentsService {
    * canAccessStudentRecord() всегда true для ADMIN/FOUNDER.
    */
   private async loadPaymentForSubmit(id: string, user: CurrentUser): Promise<PaymentRow> {
+    // ТЗ v3 раздел 4: «подать на одобрение» — это изменение финансовых данных
+    // (платёж уходит в очередь к Основателю), Администратору оно закрыто.
+    // Комментарий выше про «менеджер внёс, администратор подал» описывал
+    // прежнее поведение и больше не действует.
+    this.assertCanWriteFinance(user);
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
     // Требуем ЯВНОГО назначения, а не canAccessStudentRecord(): та формула
     // считает студента без менеджеров доступным всем — это верно для
@@ -917,6 +973,9 @@ export class PaymentsService {
   }
 
   async recall(id: string, user: CurrentUser) {
+    // ТЗ v3 раздел 4: отзыв снимает платёж из очереди на одобрение — изменение
+    // состояния денег, Администратору закрыто.
+    this.assertCanWriteFinance(user);
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
     if (!payment) throw new NotFoundException('Платёж не найден');
     const allowed = isPrivileged(user.role) || payment.submittedById === user.id;
@@ -1257,6 +1316,15 @@ export class PaymentsService {
   // ------------------------------------------------------------------
 
   async setSchedule(dto: SetScheduleDto, user: CurrentUser) {
+    // Плановая сумма и срок — управленческая настройка финансового контура:
+    // от неё считается остаток долга студента и KPI «своевременность сбора
+    // оплат» (ТЗ 5.1). По таблице ролей ТЗ v3 это «полное управление», то есть
+    // только Основатель. Раньше в этом методе не было НИКАКОЙ проверки доступа
+    // (loadStudentScope лишь убеждается, что студент существует) — план правил
+    // любой, кого пустил контроллер.
+    if (!canManageFinance(user.role)) {
+      throw new ForbiddenException('Изменять график платежей может только Основатель');
+    }
     if (STAGE_KIND[dto.stage] !== 'SCHEDULE') {
       throw new BadRequestException('У расходов на месте (Этап 4) нет плановой суммы — это фактические расходы, а не график');
     }

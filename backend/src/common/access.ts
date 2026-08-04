@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { Region, Role } from '@prisma/client';
 import { isPrivileged } from './roles';
 
 /**
@@ -18,19 +18,63 @@ export interface AssignableRecord {
 export interface AccessUser {
   id: string;
   role: Role | string;
+  /**
+   * ТЗ v3 раздел 4. Необязательное намеренно: у студенческих сессий
+   * (student-auth) региона нет вовсе, а часть внутренних вызовов передаёт
+   * сюда объект, собранный не из JWT. Отсутствие трактуется как BOTH —
+   * то есть как поведение до появления регионов, а не как «ничего не видно».
+   */
+  region?: Region | string | null;
+}
+
+/**
+ * ТЗ v3 раздел 4 — «Менеджер (Китай): только прикреплённые студенты из Китая»,
+ * «Менеджер (Таджикистан): только прикреплённые студенты из Таджикистана».
+ *
+ * Регион студента в системе не хранится и не нужен: страна выводится из ТОГО,
+ * в какое поле вписан менеджер. managerId — ведение в Таджикистане (набор,
+ * документы, виза), chinaManagerId — сопровождение уже в Китае. Поэтому
+ * «студенты моего региона» и «студенты, назначенные мне по профильному полю» —
+ * это одно и то же множество, и отдельная колонка Student.region только
+ * плодила бы источник рассинхрона.
+ *
+ * Возвращает массив условий для OR. Используется и списком (Prisma where), и
+ * поштучной проверкой (canAccessStudentRecord) — формула ОДНА, иначе список
+ * и карточка однажды разойдутся.
+ */
+export function assignedFieldsForRegion(region: Region | string | null | undefined): Array<'managerId' | 'chinaManagerId'> {
+  if (region === 'TJ') return ['managerId'];
+  if (region === 'CN') return ['chinaManagerId'];
+  return ['managerId', 'chinaManagerId'];
+}
+
+/** Условие Prisma «назначено этому сотруднику в рамках его региона». */
+export function assignedToUserFilter(user: AccessUser): Array<Record<string, string>> {
+  return assignedFieldsForRegion(user.region).map((field) => ({ [field]: user.id }));
 }
 
 /**
  * true если пользователь может видеть/редактировать запись:
- *  - FOUNDER и ADMIN — всегда;
- *  - EMPLOYEE — только назначенные лично ему (managerId/chinaManagerId),
- *    либо ещё никому не назначенные («свободные» — их может взять любой).
+ *  - FOUNDER и ADMIN — всегда (ТЗ v3: оба видят всех студентов Таджикистана
+ *    и Китая; регион на них не влияет);
+ *  - EMPLOYEE — только назначенные лично ему по профильному для его региона
+ *    полю, либо ещё никому не назначенные («свободные» — их может взять любой).
+ *
+ * ПОЧЕМУ «СВОБОДНЫЕ» ОСТАЛИСЬ ДОСТУПНЫ ВСЕМ, хотя ТЗ v3 говорит «только
+ * прикреплённые»: эта же функция обслуживает ЗАЯВКИ, а свободная заявка —
+ * это новый лид, который по разделу 3 ТЗ любой менеджер берёт в работу. Закрыть
+ * их означало бы сломать приём лидов. На студентах эффект нулевой: в боевой
+ * базе таких записей ровно одна из 201.
  */
 export function canAccessStudentRecord(record: AssignableRecord, user: AccessUser): boolean {
   if (isPrivileged(user.role)) return true;
   const assigned = record.managerId || record.chinaManagerId;
   if (!assigned) return true;
-  return record.managerId === user.id || record.chinaManagerId === user.id;
+  return assignedFieldsForRegion(user.region).some((field) =>
+    field === 'managerId'
+      ? record.managerId === user.id
+      : record.chinaManagerId === user.id,
+  );
 }
 
 /**

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Payslip, PayslipStatus } from '../api/types';
-import { PAYSLIP_STATUS_LABEL, isFounder } from '../api/types';
+import { PAYSLIP_STATUS_LABEL, canManageFinance } from '../api/types';
 import {
   approvePayslip,
   deletePayslip,
@@ -40,7 +40,13 @@ const STATUS_OPTIONS: PayslipStatus[] = ['DRAFT', 'APPROVED', 'PAID', 'VOID'];
 export default function Payroll() {
   const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
-  const isFdr = isFounder(me?.role);
+  // ТЗ v3 раздел 4, критерий приёмки №4: Администратор видит финансы строго
+  // read-only. В payroll-admin.controller.ts чтение (summary/kpi/payslips)
+  // помечено @Roles(FOUNDER, ADMIN), а КАЖДАЯ мутация — @Roles(FOUNDER).
+  // Поэтому вся запись на этой странице живёт под одним флагом-зеркалом
+  // canManageFinance: раньше Администратор ещё утверждал листы менеджеров,
+  // теперь эта ветка на бэкенде недостижима и кнопка вела бы в 403.
+  const canManage = canManageFinance(me?.role);
 
   const defaults = useMemo(() => ({ period: currentMonthKey(), status: '' }), []);
   const [filters, setFilter] = useUrlFilter(defaults);
@@ -68,6 +74,15 @@ export default function Payroll() {
   });
 
   const items = summary ? summary.items.filter((p) => !status || p.status === status) : [];
+
+  // Единый источник правды и для кнопки «Утвердить все (N)», и для самой
+  // операции: раньше счётчик считал ВСЕ черновики, а обработчик пропускал
+  // собственный лист — у Основателя с черновиком на себя кнопка обещала
+  // «Утвердить все (1)» и не делала ничего. Собственный лист бэкенд отбивает
+  // 409 (payslips.service.ts:820), а не 403, но кнопка всё равно бессмысленна.
+  const approvable = canManage
+    ? items.filter((p) => p.status === 'DRAFT' && p.userId !== me?.id)
+    : [];
 
   const onGenerate = async () => {
     const ok = await confirm({
@@ -118,11 +133,10 @@ export default function Payroll() {
   };
 
   const onBulkApprove = async () => {
-    const approvable = items.filter((p) => p.status === 'DRAFT' && p.userId !== me?.id && (isFdr || p.user.role === 'EMPLOYEE'));
     if (approvable.length === 0) return;
     const ok = await confirm({
       title: 'Утвердить все черновики',
-      message: `Будет утверждено ${approvable.length} листов по одному запросу на каждый — свои листы и листы администраторов (для роли Администратор) пропускаются автоматически.`,
+      message: `Будет утверждено ${approvable.length} листов по одному запросу на каждый — ваш собственный лист пропускается автоматически.`,
       confirmText: 'Утвердить все',
     });
     if (!ok) return;
@@ -215,8 +229,6 @@ export default function Payroll() {
     }
   };
 
-  const draftCount = items.filter((p) => p.status === 'DRAFT').length;
-
   return (
     <motion.div className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="card-header">
@@ -226,7 +238,7 @@ export default function Payroll() {
             <Icon name="tune" size={16} style={{ marginRight: 4 }} />
             Формулы бонусов
           </Link>
-          {isFdr && (
+          {canManage && (
             <button className="btn btn-sm btn-secondary" onClick={() => setCompensationOpen(true)}>
               <Icon name="badge" size={16} style={{ marginRight: 4 }} />
               Оклады
@@ -247,16 +259,22 @@ export default function Payroll() {
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' }}>
-            <button className="btn btn-sm btn-secondary" onClick={onGenerate}>
-              <Icon name="playlist_add" size={16} style={{ marginRight: 4 }} />
-              Сгенерировать листы
-            </button>
-            {draftCount > 0 && (
-              <button className="btn btn-sm btn-primary" onClick={onBulkApprove} disabled={bulkApproving}>
-                <Icon name="task_alt" size={16} style={{ marginRight: 4 }} />
-                {bulkApproving ? 'Утверждение…' : `Утвердить все (${draftCount})`}
+            {canManage && (
+              <button className="btn btn-sm btn-secondary" onClick={onGenerate}>
+                <Icon name="playlist_add" size={16} style={{ marginRight: 4 }} />
+                Сгенерировать листы
               </button>
             )}
+            {/* approvable уже пуст у всех, кроме Основателя, — отдельная
+                проверка роли здесь была бы дублирующей. */}
+            {approvable.length > 0 && (
+              <button className="btn btn-sm btn-primary" onClick={onBulkApprove} disabled={bulkApproving}>
+                <Icon name="task_alt" size={16} style={{ marginRight: 4 }} />
+                {bulkApproving ? 'Утверждение…' : `Утвердить все (${approvable.length})`}
+              </button>
+            )}
+            {/* Выгрузка остаётся всем: это чтение, а ТЗ прямо оставляет
+                Администратору финансовую аналитику. */}
             {items.length > 0 && (
               <button className="btn btn-sm btn-secondary" onClick={() => exportPayrollCsv(items, period)}>
                 <Icon name="download" size={16} style={{ marginRight: 4 }} />
@@ -265,6 +283,14 @@ export default function Payroll() {
             )}
           </div>
         </div>
+
+        {/* Без этой строки страница у Администратора выглядит поломанной: цифры
+            и таблица на месте, а ни одной кнопки нет и непонятно почему. */}
+        {!canManage && (
+          <div className="receipt-dropzone-hint" style={{ marginTop: 4, marginBottom: 12 }}>
+            Ведомость открыта вам для просмотра и выгрузки. Генерация, пересчёт, утверждение и выплата расчётных листов закреплены за Основателем (ТЗ v3, раздел 4).
+          </div>
+        )}
 
         {summary && (
           <div className="payments-totals" style={{ marginTop: 4, marginBottom: 16 }}>
@@ -285,12 +311,14 @@ export default function Payroll() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Сотрудник</th><th>Оклад</th><th>Бонус</th><th>Премия KPI</th><th>Корректировка</th><th>Итого</th><th>Статус</th><th>Действия</th>
+                  {/* Все действия над листом — @Roles(FOUNDER), так что у
+                      Администратора колонка была бы столбцом пустых ячеек. */}
+                  <th>Сотрудник</th><th>Оклад</th><th>Бонус</th><th>Премия KPI</th><th>Корректировка</th><th>Итого</th><th>Статус</th>{canManage && <th>Действия</th>}
                 </tr>
               </thead>
               <tbody>
                 {items.map((p) => {
-                  const canApprove = p.status === 'DRAFT' && p.userId !== me?.id && (isFdr || p.user.role === 'EMPLOYEE');
+                  const canApprove = canManage && p.status === 'DRAFT' && p.userId !== me?.id;
                   return (
                     <tr key={p.id} className={p.needsReview ? 'payroll-row-review' : undefined} onClick={() => setDetail(p)} style={{ cursor: 'pointer' }}>
                       <td>
@@ -309,34 +337,36 @@ export default function Payroll() {
                       <td data-label="Корректировка">{formatMoney(p.adjustmentAmount)}</td>
                       <td data-label="Итого"><strong>{formatMoney(p.totalAmount)}</strong>{p.needsReview && <Icon name="warning" size={14} style={{ color: 'var(--danger)', marginLeft: 4 }} />}</td>
                       <td data-label="Статус"><PayslipStatusBadge status={p.status} /></td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <div className="payment-row-actions">
-                          {p.status === 'DRAFT' && (
-                            <button className="btn btn-sm btn-secondary" onClick={() => onRecalculate(p)} disabled={busyId === p.id}>Пересчитать</button>
-                          )}
-                          {p.status === 'DRAFT' && isFdr && (
-                            <button className="btn btn-sm btn-secondary" onClick={() => setAdjustTarget(p)} disabled={busyId === p.id}>Корректировка</button>
-                          )}
-                          {canApprove && (
-                            <button className="btn btn-sm btn-primary" onClick={() => onApprove(p)} disabled={busyId === p.id}>Утвердить</button>
-                          )}
-                          {p.status === 'DRAFT' && isFdr && (
-                            <button className="btn btn-sm btn-danger" onClick={() => onDeleteDraft(p)} disabled={busyId === p.id}>Удалить</button>
-                          )}
-                          {p.status === 'APPROVED' && isFdr && (
-                            <button className="btn btn-sm btn-secondary" onClick={() => setRecallTarget(p)} disabled={busyId === p.id}>В черновик</button>
-                          )}
-                          {p.status === 'APPROVED' && isFdr && (
-                            <button className="btn btn-sm btn-primary" onClick={() => onPay(p)} disabled={busyId === p.id}>Выплатить</button>
-                          )}
-                          {(p.status === 'APPROVED' || p.status === 'PAID') && isFdr && (
-                            <button className="btn btn-sm btn-danger" onClick={() => setVoidTarget(p)} disabled={busyId === p.id}>Аннулировать</button>
-                          )}
-                          {p.status === 'VOID' && isFdr && (
-                            <button className="btn btn-sm btn-secondary" onClick={() => onReissue(p)} disabled={busyId === p.id}>Переиздать</button>
-                          )}
-                        </div>
-                      </td>
+                      {canManage && (
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <div className="payment-row-actions">
+                            {p.status === 'DRAFT' && (
+                              <button className="btn btn-sm btn-secondary" onClick={() => onRecalculate(p)} disabled={busyId === p.id}>Пересчитать</button>
+                            )}
+                            {p.status === 'DRAFT' && (
+                              <button className="btn btn-sm btn-secondary" onClick={() => setAdjustTarget(p)} disabled={busyId === p.id}>Корректировка</button>
+                            )}
+                            {canApprove && (
+                              <button className="btn btn-sm btn-primary" onClick={() => onApprove(p)} disabled={busyId === p.id}>Утвердить</button>
+                            )}
+                            {p.status === 'DRAFT' && (
+                              <button className="btn btn-sm btn-danger" onClick={() => onDeleteDraft(p)} disabled={busyId === p.id}>Удалить</button>
+                            )}
+                            {p.status === 'APPROVED' && (
+                              <button className="btn btn-sm btn-secondary" onClick={() => setRecallTarget(p)} disabled={busyId === p.id}>В черновик</button>
+                            )}
+                            {p.status === 'APPROVED' && (
+                              <button className="btn btn-sm btn-primary" onClick={() => onPay(p)} disabled={busyId === p.id}>Выплатить</button>
+                            )}
+                            {(p.status === 'APPROVED' || p.status === 'PAID') && (
+                              <button className="btn btn-sm btn-danger" onClick={() => setVoidTarget(p)} disabled={busyId === p.id}>Аннулировать</button>
+                            )}
+                            {p.status === 'VOID' && (
+                              <button className="btn btn-sm btn-secondary" onClick={() => onReissue(p)} disabled={busyId === p.id}>Переиздать</button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

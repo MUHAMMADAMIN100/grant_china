@@ -29,6 +29,10 @@ export type ActivityAction =
   // @Roles(FOUNDER) в users.controller.ts).
   | 'USER_CREATE'
   | 'USER_ROLE_CHANGE'
+  // ТЗ v3 раздел 4 — смена региона менеджера. Отдельное действие, а не
+  // USER_ROLE_CHANGE: роль и регион меняются независимо, и в журнале
+  // Основателя должно быть видно, что именно изменилось.
+  | 'USER_REGION_CHANGE'
   | 'USER_DELETE'
   // Раздел 3 ТЗ (волна 3) — заявки: архив/источник. Пишутся из
   // applications.service.ts.

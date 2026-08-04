@@ -52,9 +52,24 @@ export const STAGE_LABEL: Record<PaymentStage, string> = {
   LIVING_EXPENSES: 'Этап 4. Расходы на месте',
 };
 
+/**
+ * ТЗ v3 раздел 3. Первые пять — актуальный список выбора. Остальные значения
+ * остаются в enum ради читаемости старых записей (см. комментарий к
+ * PaymentPurpose в schema.prisma) и в новый платёж не попадают.
+ *
+ * Подписи старых значений НЕ переименованы намеренно: если в базе после
+ * перевода истории что-то осталось со старым типом, в интерфейсе должно быть
+ * видно РОВНО то, чем этот платёж был, а не подставленное новое название.
+ */
 export const PURPOSE_LABEL: Record<PaymentPurpose, string> = {
-  REGISTRATION: 'Регистрация студента',
+  // Пять пунктов ТЗ v3 — порядок совпадает с порядком в выпадающем списке.
+  PREPAYMENT: 'Предоплата',
+  UNIVERSITY_REGISTRATION: 'Оплата за регистрацию в университете',
   DOCUMENTATION: 'Документация',
+  FULL_PAYMENT: 'Полная оплата',
+  TUITION_ACCOMMODATION: 'Оплата за обучение и проживание',
+  // Историческе значения — только для чтения старых записей.
+  REGISTRATION: 'Регистрация студента',
   ENROLLMENT: 'Зачисление в университет',
   RELOCATION: 'После переезда',
   ACCOMMODATION: 'Проживание',
@@ -62,6 +77,38 @@ export const PURPOSE_LABEL: Record<PaymentPurpose, string> = {
   CONSULTATION: 'Консультация',
   OTHER: 'Другое',
 };
+
+/**
+ * Ровно пять пунктов выпадающего списка из ТЗ v3 раздел 3, в порядке ТЗ.
+ * Единственный источник истины: и валидация DTO, и фронтенд обязаны брать
+ * список отсюда, иначе один из них однажды разрешит выбрать исторический тип.
+ */
+export const SELECTABLE_PURPOSES: PaymentPurpose[] = [
+  'PREPAYMENT',
+  'UNIVERSITY_REGISTRATION',
+  'DOCUMENTATION',
+  'FULL_PAYMENT',
+  'TUITION_ACCOMMODATION',
+];
+
+const SELECTABLE_PURPOSE_SET = new Set<PaymentPurpose>(SELECTABLE_PURPOSES);
+
+/** true, если этот тип можно выбрать для НОВОГО платежа (а не только прочитать в старом). */
+export function isSelectablePurpose(purpose: PaymentPurpose): boolean {
+  return SELECTABLE_PURPOSE_SET.has(purpose);
+}
+
+/**
+ * ТЗ v3 раздел 3, строка 2 таблицы: «Оплата за регистрацию в университете —
+ * право проведения ТОЛЬКО у Основателя (Администратор и Менеджеры только
+ * видят)».
+ *
+ * Именно «проведения», а не «просмотра»: платежи этого типа менеджер видит в
+ * карточке студента и в списке финансов, но создать или изменить такой платёж
+ * не может. Множество, а не одно значение — чтобы при появлении второго
+ * такого пункта не пришлось искать все места сравнения.
+ */
+export const FOUNDER_ONLY_PURPOSES = new Set<PaymentPurpose>(['UNIVERSITY_REGISTRATION']);
 
 // Раздел 2.6 ТЗ (финансовая аналитика Основателя): подписи способа оплаты
 // для разбивки «наличные / безнал» — нужна Основателю для сверки с кассой
@@ -73,16 +120,36 @@ export const METHOD_LABEL: Record<PaymentMethod, string> = {
 };
 
 /**
- * purpose ↔ stage: назначения «Проживание»/«Питание» имеют смысл только для
- * расходов на месте (LIVING_EXPENSES), а «Регистрация»/«Документация»/
- * «Зачисление»/«После переезда» — только для платежей по графику (ТЗ 1.2/1.3
- * описывают их как соответствующие этапы). «Консультация» и «Другое» не
- * привязаны к конкретному этапу и разрешены в обоих блоках.
+ * purpose ↔ stage: платежи по графику и расходы на месте — разные блоки, и
+ * назначение обязано соответствовать блоку.
+ *
+ * ТЗ v3 раздел 3: из пяти новых типов к расходам на месте относится только
+ * «Оплата за обучение и проживание» — единственный, где вообще упомянуто
+ * проживание в КНР. Остальные четыре — взносы агентству по графику.
+ *
+ * ИСТОРИЧЕСКИЕ ЗНАЧЕНИЯ ОСТАВЛЕНЫ В ОБОИХ МНОЖЕСТВАХ намеренно. Выбрать их
+ * для нового платежа нельзя (это ловит assertPurposeSelectable), но старый
+ * платёж с purpose='OTHER' обязан продолжать редактироваться: если убрать
+ * OTHER отсюда, любая правка суммы у десяти существующих таких платежей
+ * падала бы с «назначение не соответствует этапу», хотя пользователь
+ * назначение вообще не трогал.
  */
-const ON_SITE_PURPOSES = new Set<PaymentPurpose>(['ACCOMMODATION', 'FOOD', 'CONSULTATION', 'OTHER']);
+const ON_SITE_PURPOSES = new Set<PaymentPurpose>([
+  'TUITION_ACCOMMODATION',
+  // историческе
+  'ACCOMMODATION',
+  'FOOD',
+  'CONSULTATION',
+  'OTHER',
+]);
 const SCHEDULE_PURPOSES = new Set<PaymentPurpose>([
-  'REGISTRATION',
+  'PREPAYMENT',
+  'UNIVERSITY_REGISTRATION',
   'DOCUMENTATION',
+  'FULL_PAYMENT',
+  'TUITION_ACCOMMODATION',
+  // историческе
+  'REGISTRATION',
   'ENROLLMENT',
   'RELOCATION',
   'CONSULTATION',
@@ -91,6 +158,36 @@ const SCHEDULE_PURPOSES = new Set<PaymentPurpose>([
 
 export function isPurposeAllowedForStage(stage: PaymentStage, purpose: PaymentPurpose): boolean {
   return STAGE_KIND[stage] === 'ON_SITE' ? ON_SITE_PURPOSES.has(purpose) : SCHEDULE_PURPOSES.has(purpose);
+}
+
+/** Назначения, допустимые для выбора в конкретном блоке — для выпадающего списка. */
+export function selectablePurposesForStage(stage: PaymentStage): PaymentPurpose[] {
+  return SELECTABLE_PURPOSES.filter((p) => isPurposeAllowedForStage(stage, p));
+}
+
+/**
+ * ТЗ v3 раздел 3 — в новый платёж может попасть только один из пяти пунктов.
+ * Вызывается на создании и на смене назначения при правке; если поле purpose
+ * не передали, старое историческое значение остаётся как есть.
+ */
+export function assertPurposeSelectable(purpose: PaymentPurpose): void {
+  if (isSelectablePurpose(purpose)) return;
+  throw new BadRequestException(
+    `Тип оплаты «${PURPOSE_LABEL[purpose]}» больше не используется. Выберите один из действующих: ${SELECTABLE_PURPOSES.map((p) => PURPOSE_LABEL[p]).join(', ')}`,
+  );
+}
+
+/**
+ * ТЗ v3 раздел 3 — «Оплата за регистрацию в университете»: право проведения
+ * только у Основателя. Проверка на уровне правил, а не контроллера: тип
+ * платежа приходит в теле запроса, а @Roles умеет смотреть только на роль.
+ */
+export function assertPurposeAllowedForRole(purpose: PaymentPurpose, role: string): void {
+  if (!FOUNDER_ONLY_PURPOSES.has(purpose)) return;
+  if (role === 'FOUNDER') return;
+  throw new ForbiddenException(
+    `Платёж с типом «${PURPOSE_LABEL[purpose]}» может провести только Основатель`,
+  );
 }
 
 /**

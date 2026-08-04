@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
-import { Prisma, Role } from '@prisma/client';
+import { Prisma, Region, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -22,6 +22,14 @@ const ROLE_LABEL: Record<Role, string> = {
   FOUNDER: 'Основатель',
   ADMIN: 'Администратор',
   EMPLOYEE: 'Менеджер',
+};
+
+// ТЗ v3 раздел 4 — подписи регионов для журнала. Совпадают с
+// frontend-crm/src/api/types.ts REGION_LABEL.
+const REGION_LABEL: Record<Region, string> = {
+  TJ: 'Таджикистан',
+  CN: 'Китай',
+  BOTH: 'Оба региона',
 };
 
 type Actor = { id: string; role: Role };
@@ -47,7 +55,7 @@ export class UsersService {
     const users = await this.prisma.user.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      select: { id: true, email: true, fullName: true, role: true, createdAt: true },
+      select: { id: true, email: true, fullName: true, role: true, region: true, createdAt: true },
     });
     return users;
   }
@@ -55,7 +63,7 @@ export class UsersService {
   async findOne(id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, ...notDeleted },
-      select: { id: true, email: true, fullName: true, role: true, createdAt: true },
+      select: { id: true, email: true, fullName: true, role: true, region: true, createdAt: true },
     });
     if (!user) throw new NotFoundException('Пользователь не найден');
     return user;
@@ -126,8 +134,11 @@ export class UsersService {
 
     const password = await bcrypt.hash(rawPassword, 10);
     const user = await this.prisma.user.create({
-      data: { email, password, fullName: dto.fullName, role: dto.role },
-      select: { id: true, email: true, fullName: true, role: true, createdAt: true },
+      // region не передаём, если клиент его не прислал — пусть сработает
+      // @default(BOTH) из схемы, а не наше представление о «правильном»
+      // значении по умолчанию, разъехавшееся с БД.
+      data: { email, password, fullName: dto.fullName, role: dto.role, ...(dto.region ? { region: dto.region } : {}) },
+      select: { id: true, email: true, fullName: true, role: true, region: true, createdAt: true },
     });
 
     // 2.12 ТЗ: кадровое событие — Основатель должен видеть в журнале, кто и
@@ -154,6 +165,7 @@ export class UsersService {
     if (dto.email) data.email = dto.email.trim().toLowerCase();
     if (dto.fullName) data.fullName = dto.fullName.trim();
     if (dto.role) data.role = dto.role;
+    if (dto.region) data.region = dto.region;
 
     let passwordToVerify: string | null = null;
     if (dto.password) {
@@ -178,6 +190,7 @@ export class UsersService {
           email: true,
           fullName: true,
           role: true,
+          region: true,
           createdAt: true,
           password: passwordToVerify ? true : false,
         } as any,
@@ -209,7 +222,25 @@ export class UsersService {
     // БАГ 4 аудита: если роль сменилась — сбрасываем кэш JwtStrategy, иначе
     // до 30 секунд у пользователя ещё будет действовать старая роль во всех
     // проверках прав (см. auth/jwt.strategy.ts).
-    if (dto.role) invalidateUserCache(id);
+    //
+    // Регион (ТЗ v3 р4) лежит в том же кэше и по той же причине требует сброса:
+    // без него менеджер до 30 секунд продолжал бы видеть студентов страны, из
+    // которой его только что убрали.
+    if (dto.role || dto.region) invalidateUserCache(id);
+
+    // Смена региона — тоже кадровое событие: она меняет, каких студентов
+    // сотрудник видит и по каким может проводить платежи.
+    if (dto.region && dto.region !== (existing as any).region) {
+      this.activity
+        .log({
+          actorId: actor.id,
+          actorRole: actor.role,
+          action: 'USER_REGION_CHANGE',
+          details: `${user.fullName} (${user.email}): регион ${REGION_LABEL[(existing as any).region as Region] ?? '—'} → ${REGION_LABEL[dto.region]}`,
+          payload: { userId: id, before: (existing as any).region, after: dto.region },
+        })
+        .catch(() => undefined);
+    }
 
     // 2.12 ТЗ: кадровое событие — смена роли сотрудника обязана попасть в
     // журнал Основателя. Пишем только если роль реально изменилась (PATCH

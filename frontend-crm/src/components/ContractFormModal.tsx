@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { Contract } from '../api/types';
-import { PAYMENT_AMOUNT_RE, isPrivileged } from '../api/types';
+import { PAYMENT_AMOUNT_RE, canManageFinance } from '../api/types';
 import { createContract, updateContract } from '../api/contracts';
 import { listUsers } from '../api/users';
 import { useAuth } from '../store/auth';
@@ -32,10 +32,17 @@ export default function ContractFormModal({ studentId, applications = [], contra
   const me = useAuth((s) => s.user);
   const { toast } = useUI();
   const isEdit = !!contract;
-  const isPriv = isPrivileged(me?.role);
+  // Ответственный за договор — это тот, кому kpi.service.ts начислит бонус,
+  // поэтому назначать его может только Основатель: PATCH /contracts/:id
+  // требует одновременно canWriteFinance (FOUNDER, EMPLOYEE) и isPrivileged
+  // (FOUNDER, ADMIN), а пересечение этих множеств — ровно FOUNDER. Раньше
+  // селект показывался по isPrivileged, то есть и Администратору, которому
+  // ТЗ v3 раздел 4 оставил финансы только на чтение — он выбирал ответственного
+  // и получал 403 уже на сохранении, потеряв заполненную форму.
+  const canManage = canManageFinance(me?.role);
   // После подписания сумму/заявку/ответственного может менять только
   // FOUNDER (см. contracts.service.ts update()) — заморозка отражена и в форме.
-  const frozen = isEdit && contract!.status !== 'DRAFT' && me?.role !== 'FOUNDER';
+  const frozen = isEdit && contract!.status !== 'DRAFT' && !canManage;
 
   const [amount, setAmount] = useState(contract?.amount ?? '0');
   const [applicationId, setApplicationId] = useState(contract?.applicationId ?? defaultApplicationId ?? '');
@@ -46,8 +53,8 @@ export default function ContractFormModal({ studentId, applications = [], contra
   const [touched, setTouched] = useState(false);
 
   useEffect(() => {
-    if (isPriv) listUsers().then(setManagers).catch(() => {});
-  }, [isPriv]);
+    if (canManage) listUsers().then(setManagers).catch(() => {});
+  }, [canManage]);
 
   const amountValid = amount === '' || PAYMENT_AMOUNT_RE.test(amount);
   const formInvalid = !amountValid;
@@ -65,7 +72,7 @@ export default function ContractFormModal({ studentId, applications = [], contra
         saved = await updateContract(contract.id, {
           amount: frozen ? undefined : amount || undefined,
           applicationId: frozen ? undefined : applicationId || null,
-          managerId: frozen || !isPriv ? undefined : managerId || null,
+          managerId: frozen || !canManage ? undefined : managerId || null,
           note: note.trim() || null,
         });
         toast('Договор обновлён', 'success');
@@ -74,7 +81,7 @@ export default function ContractFormModal({ studentId, applications = [], contra
           studentId,
           applicationId: applicationId || undefined,
           amount: amount || undefined,
-          managerId: isPriv && managerId ? managerId : undefined,
+          managerId: canManage && managerId ? managerId : undefined,
           note: note.trim() || undefined,
         });
         toast('Договор создан (черновик)', 'success');
@@ -134,7 +141,7 @@ export default function ContractFormModal({ studentId, applications = [], contra
           </div>
         )}
 
-        {isPriv && (
+        {canManage && (
           <div className="form-group">
             <label>Ответственный за договор</label>
             <select value={managerId} onChange={(e) => setManagerId(e.target.value)} disabled={saving || frozen}>

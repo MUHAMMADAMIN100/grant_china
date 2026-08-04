@@ -3,7 +3,7 @@ import { ContractStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { isPrivileged, isFounder } from '../common/roles';
+import { isPrivileged, isFounder, canWriteFinance, canManageFinance } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { parseCalendarDate, formatDateRuShort } from '../grants/grant-year';
 import { AMOUNT_RE } from '../payments/dto/create-payment.dto';
@@ -83,6 +83,24 @@ export class ContractsService {
     return student;
   }
 
+  /**
+   * ТЗ v3 раздел 4, критерий приёмки №4 — Администратор в финансовой части
+   * только читает, а договор несёт сумму. Защита в глубину поверх @Roles на
+   * контроллере.
+   *
+   * Вызывается из самих операций записи, а НЕ из loadForMutation(): та же
+   * функция обслуживает findOne() (строка ниже по файлу), и проверка внутри
+   * неё закрыла бы Администратору просмотр договоров, который ТЗ ему прямо
+   * оставляет.
+   */
+  private assertCanWriteFinance(user: CurrentUser) {
+    if (!canWriteFinance(user.role)) {
+      throw new ForbiddenException(
+        'Администратор работает с договорами в режиме просмотра. Оформить или изменить договор может Основатель или назначенный менеджер студента.',
+      );
+    }
+  }
+
   /** Доступ к договору (чтение И запись): видимость по студенту, 404 (не 403) — не быть оракулом существования. */
   private async loadForMutation(id: string, user: CurrentUser): Promise<ContractRow> {
     const contract = await this.prisma.contract.findFirst({ where: { id, deletedAt: null }, include: CONTRACT_INCLUDE });
@@ -154,6 +172,7 @@ export class ContractsService {
   }
 
   async create(dto: CreateContractDto, user: CurrentUser) {
+    this.assertCanWriteFinance(user);
     const student = await this.loadStudentForLink(dto.studentId, user);
 
     let managerId: string | null = student.managerId ?? user.id;
@@ -220,6 +239,7 @@ export class ContractsService {
   }
 
   async update(id: string, dto: UpdateContractDto, user: CurrentUser) {
+    this.assertCanWriteFinance(user);
     const existing = await this.loadForMutation(id, user);
     const touchesFrozenField = dto.amount !== undefined || dto.applicationId !== undefined || dto.managerId !== undefined;
     if (existing.status !== 'DRAFT' && touchesFrozenField && !isFounder(user.role)) {
@@ -291,6 +311,11 @@ export class ContractsService {
 
   /** ИНВАРИАНТ: status = SIGNED ⟺ signedAt IS NOT NULL ⟺ activeSlot = 'ACTIVE' — ставится одной updateMany. */
   async sign(id: string, dto: SignContractDto, user: CurrentUser) {
+    // Подписание фиксирует сумму и запускает начисление бонуса менеджеру —
+    // «полное управление» финансами, то есть только Основатель (ТЗ v3 р4).
+    if (!canManageFinance(user.role)) {
+      throw new ForbiddenException('Подписать договор может только Основатель');
+    }
     const existing = await this.loadForMutation(id, user);
     if (existing.status !== 'DRAFT') throw new ConflictException('Подписать можно только черновик договора');
 
@@ -366,6 +391,9 @@ export class ContractsService {
   }
 
   async terminate(id: string, dto: TerminateContractDto, user: CurrentUser) {
+    if (!canManageFinance(user.role)) {
+      throw new ForbiddenException('Расторгнуть договор может только Основатель');
+    }
     const existing = await this.loadForMutation(id, user);
     if (existing.status !== 'SIGNED') throw new ConflictException('Расторгнуть можно только подписанный договор');
     const reason = dto.reason.trim();
@@ -392,6 +420,9 @@ export class ContractsService {
   }
 
   async complete(id: string, user: CurrentUser) {
+    if (!canManageFinance(user.role)) {
+      throw new ForbiddenException('Перевести договор в исполненные может только Основатель');
+    }
     const existing = await this.loadForMutation(id, user);
     if (existing.status !== 'SIGNED') throw new ConflictException('Завершить можно только подписанный договор');
 

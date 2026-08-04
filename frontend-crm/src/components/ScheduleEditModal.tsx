@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { PaymentStage, PaymentStageSummary } from '../api/types';
-import { PAYMENT_AMOUNT_RE, PAYMENT_STAGE_LABEL } from '../api/types';
+import { PAYMENT_AMOUNT_RE, PAYMENT_STAGE_LABEL, canManageFinance } from '../api/types';
 import { setPaymentSchedule } from '../api/payments';
+import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 
 type Props = {
@@ -15,12 +16,23 @@ type Props = {
 
 /**
  * Индивидуальная плановая сумма/срок этапа договора (ТЗ: суммы этапов
- * индивидуальные по каждому договору). Задаёт только FOUNDER/ADMIN —
- * рядовой менеджер видит план только для чтения (см. payments.controller.ts
- * PUT /payments/schedule — @Roles(FOUNDER, ADMIN)).
+ * индивидуальные по каждому договору). Задаёт ТОЛЬКО Основатель — см.
+ * payments.controller.ts, PUT /payments/schedule → @Roles(FOUNDER).
+ *
+ * Раньше здесь значился и ADMIN, но по ТЗ v3 раздел 4 (критерий приёмки №4)
+ * Администратор работает с финансами строго в режиме Read-Only, и бэкенд
+ * отвечает ему 403. Остальные роли видят план только для чтения.
  */
 export default function ScheduleEditModal({ studentId, stage, current, onClose, onSaved }: Props) {
+  const me = useAuth((s) => s.user);
   const { toast } = useUI();
+  /**
+   * Защита в глубину: путь сюда уже закрыт в PaymentsSection (карандаш правки
+   * плана показывается только Основателю), но кнопка записи живёт здесь —
+   * и не должна зависеть от того, кто открыл модалку. Скрываем, а не гасим:
+   * disabled-кнопка без объяснения читается как поломка.
+   */
+  const canManage = canManageFinance(me?.role);
   const [plannedAmount, setPlannedAmount] = useState(current.plannedAmount);
   const [dueDate, setDueDate] = useState(current.dueDate ? current.dueDate.slice(0, 10) : '');
   // Предзаполняем сохранённым комментарием: поле уходит на сервер безусловно
@@ -89,10 +101,16 @@ export default function ScheduleEditModal({ studentId, stage, current, onClose, 
           <textarea value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} disabled={saving} />
         </div>
         <div className="dialog-actions">
-          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Отмена</button>
-          <button className="btn btn-primary" onClick={onSave} disabled={saving}>
-            {saving ? 'Сохранение…' : 'Сохранить'}
+          {/* Без права записи единственное действие — уйти, и подпись «Отмена»
+              обманывала бы: отменять нечего. */}
+          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>
+            {canManage ? 'Отмена' : 'Закрыть'}
           </button>
+          {canManage && (
+            <button className="btn btn-primary" onClick={onSave} disabled={saving}>
+              {saving ? 'Сохранение…' : 'Сохранить'}
+            </button>
+          )}
         </div>
       </motion.div>
     </motion.div>

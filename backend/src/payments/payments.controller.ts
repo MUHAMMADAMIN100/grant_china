@@ -83,8 +83,20 @@ function parseDateParam(raw: string | undefined): Date | undefined {
  * Double Check (ТЗ 1.1): RolesGuard навешен явно на контроллер (он не
  * глобальный, см. auth/roles.guard.ts) — approve/reject/void закрыты
  * @Roles(Role.FOUNDER), очередь на одобрение и отчётные списки — @Roles(FOUNDER, ADMIN).
- * Остальные операции доступны любому аутентифицированному сотруднику, но
- * видимость/права внутри сервиса дополнительно сужены по canAccessStudentRecord.
+ *
+ * ТЗ v3 раздел 4 (критерий приёмки №4): «Администратор имеет доступ к финансам
+ * СТРОГО в режиме Read-Only». Раньше методы записи стояли вообще без @Roles, а
+ * RolesGuard без декоратора пропускает ЛЮБОГО авторизованного (см. `if (!required
+ * || required.length === 0) return true` в roles.guard.ts) — то есть Администратор
+ * свободно создавал, правил, подавал, отзывал и удалял платежи.
+ *
+ * Теперь на КАЖДОМ методе записи стоит @Roles(FOUNDER, EMPLOYEE) — явный список
+ * разрешённых, а не `кроме ADMIN`. Разница принципиальна: при появлении новой
+ * роли она по умолчанию окажется БЕЗ доступа к деньгам, а не с ним.
+ *
+ * EMPLOYEE в списке намеренно: по той же таблице ТЗ менеджер платежи проводить
+ * может, но только по своим студентам — это сужение делает сервис через
+ * canAccessStudentRecord, роль его не заменяет.
  */
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('payments')
@@ -151,8 +163,12 @@ export class PaymentsController {
     return this.payments.getSchedule(studentId, user);
   }
 
+  // График платежей — плановые суммы и сроки. Это управленческая настройка
+  // финансового контура («управленческие отчёты» в строке Основателя ТЗ v3),
+  // поэтому здесь только FOUNDER: ADMIN сюда больше не пускается, а EMPLOYEE
+  // не пускался и раньше.
   @Put('schedule')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   setSchedule(@Body() dto: SetScheduleDto, @CurrentUser() user: any) {
     return this.payments.setSchedule(dto, user);
   }
@@ -163,6 +179,7 @@ export class PaymentsController {
   }
 
   @Post()
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   @UseInterceptors(FileInterceptor('file', receiptUploadOptions))
   create(
     @UploadedFile() file: Express.Multer.File | undefined,
@@ -173,16 +190,19 @@ export class PaymentsController {
   }
 
   @Patch(':id')
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   update(@Param('id') id: string, @Body() dto: UpdatePaymentDto, @CurrentUser() user: any) {
     return this.payments.update(id, dto, user);
   }
 
   @Post(':id/submit')
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   submit(@Param('id') id: string, @CurrentUser() user: any) {
     return this.payments.submit(id, user);
   }
 
   @Post(':id/recall')
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   recall(@Param('id') id: string, @CurrentUser() user: any) {
     return this.payments.recall(id, user);
   }
@@ -206,11 +226,13 @@ export class PaymentsController {
   }
 
   @Delete(':id')
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   remove(@Param('id') id: string, @CurrentUser() user: any) {
     return this.payments.remove(id, user);
   }
 
   @Post(':id/receipts')
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   @UseInterceptors(FileInterceptor('file', receiptUploadOptions))
   addReceipt(
     @Param('id') id: string,
@@ -221,6 +243,7 @@ export class PaymentsController {
   }
 
   @Delete('receipts/:docId')
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   removeReceipt(@Param('docId') docId: string, @CurrentUser() user: any) {
     return this.payments.removeReceipt(docId, user);
   }

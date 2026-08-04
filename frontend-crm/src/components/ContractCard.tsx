@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Contract } from '../api/types';
-import { isFounder, isPrivileged } from '../api/types';
+import { canManageFinance, canWriteFinance } from '../api/types';
 import { completeContract, linkContractPayments, listContracts, signContract, terminateContract } from '../api/contracts';
 import { getPaymentSchedule } from '../api/payments';
 import type { PaymentScheduleRow } from '../api/types';
@@ -28,7 +28,15 @@ type Props = {
 const fmtDate = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '—');
 
 /** Небольшая модалка выбора даты подписания — тот же визуальный каркас, что у PaymentReasonPrompt. */
-function SignDatePrompt({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: (date: string) => void }) {
+/**
+ * Экспортируется наружу, потому что подписать договор можно из двух мест:
+ * из карточки студента (здесь) и со страницы самого договора
+ * (pages/ContractDetail.tsx). Раньше страница договора кнопки подписания не
+ * имела вовсе, и Основателю, открывшему договор из общего списка, приходилось
+ * возвращаться в карточку студента — бэкенд действие разрешал, а интерфейс
+ * на этом экране нет.
+ */
+export function SignDatePrompt({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: (date: string) => void }) {
   // Локальная дата, а не UTC: в Душанбе (UTC+5) до 05:00 toISOString() отдаёт
   // вчерашний день, и max гасил бы сегодняшнее число в календаре — договор,
   // подписанный сегодня утром, отметить было бы нечем. От signedAt считаются
@@ -82,8 +90,15 @@ export default function ContractCard({ studentId, applications = [], canEdit }: 
   >(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const isPriv = isPrivileged(me?.role);
-  const isFdr = isFounder(me?.role);
+  // ТЗ v3 раздел 4, критерий приёмки №4: Администратор работает с финансами
+  // СТРОГО в режиме чтения. Договор несёт сумму и запускает бонус менеджеру,
+  // поэтому он целиком внутри финансового контура, и роли здесь ровно те же,
+  // что на эндпоинтах: создание и правка — Основатель и менеджер
+  // (@Roles(FOUNDER, EMPLOYEE)), подписание/расторжение/исполнение и привязка
+  // платежей — только Основатель (@Roles(FOUNDER)). isPrivileged применять
+  // нельзя: он пускает ADMIN, которому бэкенд теперь отвечает 403.
+  const canWrite = canWriteFinance(me?.role);
+  const canManage = canManageFinance(me?.role);
 
   const load = () => {
     setLoading(true);
@@ -180,6 +195,17 @@ export default function ContractCard({ studentId, applications = [], canEdit }: 
   const renderContract = (c: Contract) => {
     const link = linkageFor(c);
     const showLinkage = c.status === 'SIGNED' || c.status === 'COMPLETED';
+    // Черновик правит и менеджер, а после подписания сумму/заявку/ответственного
+    // меняет только Основатель — ровно как в contracts.service.ts update().
+    const showEdit = c.status === 'DRAFT' ? canWrite : canManage;
+    const showSign = c.status === 'DRAFT' && canManage;
+    const showTerminate = c.status === 'SIGNED' && canManage;
+    const showComplete = c.status === 'SIGNED' && canManage;
+    const showLink = showLinkage && canManage && link.unlinkedTotal > 0;
+    // У Администратора после разделения прав не остаётся НИ ОДНОЙ кнопки.
+    // Без этой проверки под договором висел бы пустой ряд действий со своим
+    // отступом — читается как «кнопки не догрузились».
+    const anyAction = showEdit || showSign || showTerminate || showComplete || showLink;
     return (
       <motion.div key={c.id} className="grant-item" layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
         <div className="grant-item-head">
@@ -207,38 +233,33 @@ export default function ContractCard({ studentId, applications = [], canEdit }: 
 
         {c.note && <div className="grant-item-note">{c.note}</div>}
 
-        {canEdit && (
+        {canEdit && anyAction && (
           <div className="grant-item-actions">
-            {/* isPriv, как у «Расторгнуть»/«Исполнен» ниже: POST /contracts/:id/sign
-                закрыт @Roles(FOUNDER, ADMIN), и менеджер читал 403 как сбой — дата
-                подписания, от которой считаются KPI и бонус, фиксировалась с опозданием. */}
-            {c.status === 'DRAFT' && isPriv && (
+            {/* Подписание фиксирует сумму и запускает начисление бонуса — это
+                «полное управление» финансами, то есть только Основатель
+                (POST /contracts/:id/sign закрыт @Roles(FOUNDER)). */}
+            {showSign && (
               <button className="btn btn-sm btn-primary" onClick={() => setModal({ kind: 'sign', contract: c })} disabled={busyId === c.id}>
                 <Icon name="draw" size={15} style={{ marginRight: 4 }} />
                 Отметить подписанным
               </button>
             )}
-            {c.status === 'DRAFT' && (
+            {showEdit && (
               <button className="btn btn-sm btn-secondary" onClick={() => setModal({ kind: 'edit', contract: c })} disabled={busyId === c.id}>
                 Изменить
               </button>
             )}
-            {c.status !== 'DRAFT' && isFdr && (
-              <button className="btn btn-sm btn-secondary" onClick={() => setModal({ kind: 'edit', contract: c })} disabled={busyId === c.id}>
-                Изменить
-              </button>
-            )}
-            {c.status === 'SIGNED' && isPriv && (
+            {showTerminate && (
               <button className="btn btn-sm btn-danger" onClick={() => setModal({ kind: 'terminate', contract: c })} disabled={busyId === c.id}>
                 Расторгнуть
               </button>
             )}
-            {c.status === 'SIGNED' && isPriv && (
+            {showComplete && (
               <button className="btn btn-sm btn-secondary" onClick={() => onComplete(c)} disabled={busyId === c.id}>
                 Исполнен
               </button>
             )}
-            {(c.status === 'SIGNED' || c.status === 'COMPLETED') && isFdr && link.unlinkedTotal > 0 && (
+            {showLink && (
               <button className="btn btn-sm btn-secondary" onClick={() => onLinkPayments(c)} disabled={busyId === c.id}>
                 <Icon name="link" size={15} style={{ marginRight: 4 }} />
                 Привязать платежи
@@ -259,7 +280,9 @@ export default function ContractCard({ studentId, applications = [], canEdit }: 
           <Icon name="description" size={18} style={{ marginRight: 6 }} />
           {contracts.length > 1 ? 'Договоры' : 'Договор'}
         </div>
-        {canEdit && !hasActive && (
+        {/* POST /contracts закрыт @Roles(FOUNDER, EMPLOYEE): Администратору
+            кнопку не показываем, она вела бы прямо в 403. */}
+        {canEdit && canWrite && !hasActive && (
           <button className="btn btn-sm btn-secondary" onClick={() => setModal({ kind: 'create' })}>
             <Icon name="add" size={15} style={{ marginRight: 4 }} />
             Оформить договор

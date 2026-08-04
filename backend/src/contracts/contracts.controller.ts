@@ -65,17 +65,22 @@ export class ContractsController {
     return this.contracts.findOne(id, user);
   }
 
+  // ТЗ v3 раздел 4: договор несёт СУММУ, то есть относится к финансовой части,
+  // где Администратор работает только на просмотр. Менеджер черновик готовит
+  // (сумма по своему студенту), Основатель подписывает — Double Check цел.
   @Post()
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   create(@Body() dto: CreateContractDto, @CurrentUser() user: any) {
     return this.contracts.create(dto, user);
   }
 
   @Patch(':id')
+  @Roles(Role.FOUNDER, Role.EMPLOYEE)
   update(@Param('id') id: string, @Body() dto: UpdateContractDto, @CurrentUser() user: any) {
     return this.contracts.update(id, dto, user);
   }
 
-  // ПОДПИСАНИЕ — ТОЛЬКО FOUNDER/ADMIN, второй человек в цепочке.
+  // ПОДПИСАНИЕ — ТОЛЬКО FOUNDER, второй человек в цепочке.
   //
   // Договор — это база бонуса менеджера: от его суммы и факта подписания
   // считаются и конверсия, и процент к зарплате. Без этого ограничения
@@ -84,20 +89,24 @@ export class ContractsController {
   // ответственным и сам подписывает — второго участника нет вообще.
   // Это тот же принцип, что Double Check у платежей (ТЗ 1.1): вносит один,
   // подтверждает другой. Черновик менеджер по-прежнему готовит сам.
+  //
+  // ADMIN убран из списка по ТЗ v3 (критерий приёмки №4): подписание фиксирует
+  // сумму договора и запускает начисление бонуса — это изменение в финансовой
+  // части, а не просмотр. Второй участник цепочки теперь Основатель.
   @Post(':id/sign')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   sign(@Param('id') id: string, @Body() dto: SignContractDto, @CurrentUser() user: any) {
     return this.contracts.sign(id, dto, user);
   }
 
   @Post(':id/terminate')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   terminate(@Param('id') id: string, @Body() dto: TerminateContractDto, @CurrentUser() user: any) {
     return this.contracts.terminate(id, dto, user);
   }
 
   @Post(':id/complete')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   complete(@Param('id') id: string, @CurrentUser() user: any) {
     return this.contracts.complete(id, user);
   }

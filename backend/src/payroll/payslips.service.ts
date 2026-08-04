@@ -811,8 +811,12 @@ export class PayslipsService {
   /**
    * ТЗ 1.1-подобный Double Check для зарплаты: пересчёт ПЕРЕД заморозкой +
    * сверка с суммой, которую видел клиент (аналог updatedAtCheck в
-   * payments.service.approve) + запрет самоутверждения + ADMIN утверждает
-   * только листы EMPLOYEE (см. accessModel проекта архитектора).
+   * payments.service.approve) + запрет самоутверждения.
+   *
+   * Проверка «ADMIN утверждает только листы EMPLOYEE» ниже с переходом на
+   * ТЗ v3 недостижима: утверждение закрыто @Roles(FOUNDER), Администратор
+   * до сюда не доходит. Оставлена намеренно как защита в глубину — если
+   * классовый @Roles когда-нибудь расширят обратно, запрет сработает сам.
    */
   async approve(id: string, dto: ApprovePayslipDto, actor: CurrentUser) {
     const existing = await this.loadForAdminMutation(id);

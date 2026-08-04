@@ -1,6 +1,34 @@
 export type Role = 'FOUNDER' | 'ADMIN' | 'EMPLOYEE';
 
 /**
+ * ТЗ v3 раздел 4 — регион менеджера. Зеркало enum Region из schema.prisma.
+ * Значим только для EMPLOYEE: Основатель и Администратор по ТЗ видят всех
+ * студентов и Таджикистана, и Китая независимо от региона.
+ */
+export type Region = 'TJ' | 'CN' | 'BOTH';
+
+export const REGION_LABEL: Record<Region, string> = {
+  TJ: 'Таджикистан',
+  CN: 'Китай',
+  BOTH: 'Оба региона',
+};
+
+/** Пояснения к регионам на странице /users — чтобы не гадать, что изменится. */
+export const REGION_DESCRIPTION: Record<Region, string> = {
+  TJ: 'Видит только студентов, где он назначен менеджером по Таджикистану. Проводит платежи по ним.',
+  CN: 'Видит только студентов, где он назначен менеджером по Китаю. Проводит платежи по ним.',
+  BOTH: 'Видит студентов по обоим направлениям. Значение по умолчанию — так работала система до разделения по регионам.',
+};
+
+// badge-gray, а не badge-secondary: класса .badge-secondary в index.css нет,
+// и бейдж отрендерился бы без заливки — просто жирным текстом в потоке.
+export const REGION_BADGE: Record<Region, string> = {
+  TJ: 'badge-info',
+  CN: 'badge-warning',
+  BOTH: 'badge-gray',
+};
+
+/**
  * ТЗ раздел 2 требует именно «Менеджер» для роли EMPLOYEE — в БД значение
  * enum НЕ переименовываем (это только подпись для интерфейса). Все места,
  * где роль показывается пользователю, обязаны брать подпись отсюда, а не
@@ -45,6 +73,29 @@ export const isPrivileged = (role?: Role | null): boolean =>
  * ведущей к 403 (ADMIN видит, но бэкенд отклоняет), запрещён по правилам проекта.
  */
 export const isFounder = (role?: Role | null): boolean => role === 'FOUNDER';
+
+/**
+ * ТЗ v3 раздел 4, критерий приёмки №4 — «Администратор имеет доступ к финансам
+ * СТРОГО в режиме Read-Only». Зеркало canWriteFinance() из
+ * backend/src/common/roles.ts: любое расхождение между этими двумя функциями
+ * означает либо кнопку, ведущую в 403, либо скрытую кнопку у того, кому она
+ * положена.
+ *
+ * Используется для показа/скрытия кнопок «Внести оплату», «Редактировать»,
+ * «Подать», «Отозвать», «Удалить», «Оформить договор» и т.п. Показ кнопки,
+ * ведущей к 403, запрещён правилами проекта — поэтому проверять надо здесь,
+ * а не полагаться на ошибку с бэкенда.
+ */
+export const canWriteFinance = (role?: Role | null): boolean =>
+  role === 'FOUNDER' || role === 'EMPLOYEE';
+
+/**
+ * Полное управление финансовым контуром — только Основатель: одобрение
+ * платежей, график платежей, подписание/расторжение договоров, утверждение
+ * зарплатных листов, формулы бонусов. Зеркало canManageFinance() на бэкенде.
+ */
+export const canManageFinance = (role?: Role | null): boolean => role === 'FOUNDER';
+
 export type Direction =
   | 'BACHELOR'
   | 'MASTER'
@@ -89,6 +140,8 @@ export interface User {
   email: string;
   fullName: string;
   role: Role;
+  /** ТЗ v3 р4. Необязательное — старый бэкенд поля не отдаёт, читать как BOTH. */
+  region?: Region;
   createdAt?: string;
 }
 
@@ -386,9 +439,22 @@ export type PaymentStage =
 /** SCHEDULE — разовые платежи по графику (этапы 1–3), ON_SITE — расходы на месте (этап 4). */
 export type PaymentKind = 'SCHEDULE' | 'ON_SITE';
 
+/**
+ * ТЗ v3 раздел 3 — пять действующих типов оплат плюс историческе значения,
+ * которые остаются в базе ради читаемости старых записей. Зеркало enum
+ * PaymentPurpose из schema.prisma: тип обязан перечислять ВСЕ значения, иначе
+ * PAYMENT_PURPOSE_LABEL[p.purpose] вернёт undefined и колонка «Назначение»
+ * у старого платежа станет пустой.
+ */
 export type PaymentPurpose =
-  | 'REGISTRATION'
+  // Действующие (ТЗ v3 р3)
+  | 'PREPAYMENT'
+  | 'UNIVERSITY_REGISTRATION'
   | 'DOCUMENTATION'
+  | 'FULL_PAYMENT'
+  | 'TUITION_ACCOMMODATION'
+  // Историческе — только для чтения уже сохранённых платежей
+  | 'REGISTRATION'
   | 'ENROLLMENT'
   | 'RELOCATION'
   | 'ACCOMMODATION'
@@ -448,8 +514,15 @@ export const PAYMENT_STAGE_SHORT: Record<PaymentStage, string> = {
 };
 
 export const PAYMENT_PURPOSE_LABEL: Record<PaymentPurpose, string> = {
-  REGISTRATION: 'Регистрация студента',
+  // Пять пунктов ТЗ v3 — порядок совпадает с порядком в выпадающем списке.
+  PREPAYMENT: 'Предоплата',
+  UNIVERSITY_REGISTRATION: 'Оплата за регистрацию в университете',
   DOCUMENTATION: 'Документация',
+  FULL_PAYMENT: 'Полная оплата',
+  TUITION_ACCOMMODATION: 'Оплата за обучение и проживание',
+  // Историческе — подписи НЕ переименованы: старый платёж обязан показывать
+  // ровно то, чем он был, а не подставленное новое название.
+  REGISTRATION: 'Регистрация студента',
   ENROLLMENT: 'Зачисление в университет',
   RELOCATION: 'После переезда',
   ACCOMMODATION: 'Проживание',
@@ -458,26 +531,51 @@ export const PAYMENT_PURPOSE_LABEL: Record<PaymentPurpose, string> = {
   OTHER: 'Другое',
 };
 
+/**
+ * ТЗ v3 раздел 3, строка 2 таблицы: «Оплата за регистрацию в университете —
+ * право проведения только у Основателя». Зеркало FOUNDER_ONLY_PURPOSES из
+ * backend/src/payments/payment-rules.ts.
+ *
+ * Пункт обязан ИСЧЕЗАТЬ из списка у Администратора и Менеджера, а не быть
+ * выбранным и отбитым 403 при сохранении: правило проекта запрещает вести
+ * пользователя к ошибке, которую можно было предсказать заранее.
+ */
+export const FOUNDER_ONLY_PAYMENT_PURPOSES: PaymentPurpose[] = ['UNIVERSITY_REGISTRATION'];
+
 /** Назначения, допустимые для расходов на месте (kind=ON_SITE) — зеркало backend payment-rules.ts. */
-export const ON_SITE_PAYMENT_PURPOSES: PaymentPurpose[] = ['ACCOMMODATION', 'FOOD', 'CONSULTATION', 'OTHER'];
+export const ON_SITE_PAYMENT_PURPOSES: PaymentPurpose[] = ['TUITION_ACCOMMODATION'];
 /** Назначения, допустимые для платежей по графику (kind=SCHEDULE). */
 export const SCHEDULE_PAYMENT_PURPOSES: PaymentPurpose[] = [
-  'REGISTRATION',
+  'PREPAYMENT',
+  'UNIVERSITY_REGISTRATION',
   'DOCUMENTATION',
-  'ENROLLMENT',
-  'RELOCATION',
-  'CONSULTATION',
-  'OTHER',
+  'FULL_PAYMENT',
+  'TUITION_ACCOMMODATION',
 ];
 
-/** Разумное значение по умолчанию для назначения при выборе этапа в форме — пользователь может изменить. */
+/**
+ * Список типов для выпадающего списка с учётом роли: пункты, которые проводит
+ * только Основатель, остальным не показываются вовсе.
+ */
+export function paymentPurposesFor(stage: PaymentStage, role?: Role | null): PaymentPurpose[] {
+  const base =
+    PAYMENT_STAGE_KIND[stage] === 'ON_SITE' ? ON_SITE_PAYMENT_PURPOSES : SCHEDULE_PAYMENT_PURPOSES;
+  if (isFounder(role)) return base;
+  return base.filter((p) => !FOUNDER_ONLY_PAYMENT_PURPOSES.includes(p));
+}
+
+/**
+ * Значение по умолчанию при выборе этапа. Ни одно из них не должно быть
+ * пунктом «только для Основателя» — иначе форма у менеджера открывалась бы
+ * с заранее невалидным выбором.
+ */
 export const DEFAULT_PAYMENT_PURPOSE: Record<PaymentStage, PaymentPurpose> = {
-  INITIAL: 'OTHER',
-  REGISTRATION: 'REGISTRATION',
+  INITIAL: 'PREPAYMENT',
+  REGISTRATION: 'PREPAYMENT',
   DOCUMENTATION: 'DOCUMENTATION',
-  ENROLLMENT: 'ENROLLMENT',
-  RELOCATION: 'RELOCATION',
-  LIVING_EXPENSES: 'ACCOMMODATION',
+  ENROLLMENT: 'FULL_PAYMENT',
+  RELOCATION: 'TUITION_ACCOMMODATION',
+  LIVING_EXPENSES: 'TUITION_ACCOMMODATION',
 };
 
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createUser, deleteUser, listUsers, updateUser } from '../api/users';
-import type { Role, User } from '../api/types';
-import { ROLE_BADGE, ROLE_DESCRIPTION, ROLE_LABEL } from '../api/types';
+import type { Region, Role, User } from '../api/types';
+import { REGION_BADGE, REGION_DESCRIPTION, REGION_LABEL, ROLE_BADGE, ROLE_DESCRIPTION, ROLE_LABEL } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, required, validateAll } from '../utils/validators';
@@ -11,6 +11,32 @@ import ChangePasswordModal from '../components/ChangePasswordModal';
 // одно место, откуда берутся и value, и подпись (ROLE_LABEL), чтобы нигде
 // в разметке не оставалось хардкода вроде "Сотрудник"/"EMPLOYEE".
 const ROLE_OPTIONS: Role[] = ['EMPLOYEE', 'ADMIN', 'FOUNDER'];
+
+// BOTH стоит первым, потому что это значение по умолчанию на бэкенде: так
+// работала система до разделения по регионам, и именно его получит сотрудник,
+// если про поле забыли. Порядок списка не должен подталкивать сузить доступ
+// случайным выбором первой строки.
+const REGION_OPTIONS: Region[] = ['BOTH', 'TJ', 'CN'];
+
+/** Регион не приходил со старого бэкенда — пустое значение читаем как BOTH (ТЗ v3 р4). */
+const regionOf = (u: User): Region => u.region ?? 'BOTH';
+
+/**
+ * ТЗ v3 р4: регион сужает выборку студентов ТОЛЬКО для роли «Менеджер».
+ * Основатель и Администратор по ТЗ видят всех студентов обоих направлений,
+ * поэтому для них селект — не настройка доступа, а просто сохранённое значение.
+ *
+ * Поле мы им всё равно показываем (а не прячем): роль меняется прямо в этой же
+ * таблице, и если регион исчезает при роли «Администратор», то после понижения
+ * до менеджера человек молча получает BOTH — доступ шире, чем задумывали.
+ * Вместо этого честно подписываем селект, что сейчас значение ни на что не
+ * влияет: скрытое поле объяснить нельзя, подпись — можно.
+ */
+function regionHint(role: Role, region: Region): string {
+  return role === 'EMPLOYEE'
+    ? REGION_DESCRIPTION[region]
+    : `Роль «${ROLE_LABEL[role]}» видит студентов обоих регионов — значение сохранится, но на доступ сейчас не влияет.`;
+}
 
 /**
  * Управление сотрудниками.
@@ -24,7 +50,7 @@ export default function Users() {
   const { confirm, toast } = useUI();
   const [items, setItems] = useState<User[]>([]);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ email: '', fullName: '', password: '', role: 'EMPLOYEE' as Role });
+  const [form, setForm] = useState({ email: '', fullName: '', password: '', role: 'EMPLOYEE' as Role, region: 'BOTH' as Region });
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -59,7 +85,7 @@ export default function Users() {
     try {
       await createUser(form);
       setCreating(false);
-      setForm({ email: '', fullName: '', password: '', role: 'EMPLOYEE' });
+      setForm({ email: '', fullName: '', password: '', role: 'EMPLOYEE', region: 'BOTH' });
       setTouched({});
       load();
     } catch (e: any) {
@@ -73,6 +99,18 @@ export default function Users() {
       load();
     } catch (e: any) {
       toast(e.response?.data?.message?.toString() || 'Не удалось изменить роль', 'error');
+    }
+  };
+
+  // Регион правим отдельным PATCH, как и роль: перезагрузка списка после ответа
+  // нужна, чтобы в таблице осталось то, что реально сохранил бэкенд, а не то,
+  // что успел выбрать пользователь.
+  const onChangeRegion = async (u: User, region: Region) => {
+    try {
+      await updateUser(u.id, { region });
+      load();
+    } catch (e: any) {
+      toast(e.response?.data?.message?.toString() || 'Не удалось изменить регион', 'error');
     }
   };
 
@@ -169,6 +207,23 @@ export default function Users() {
                   ))}
                 </select>
               </div>
+              <div className="form-group">
+                <label>Регион</label>
+                <select value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value as Region })}>
+                  {REGION_OPTIONS.map((r) => (
+                    <option key={r} value={r}>{REGION_LABEL[r]}</option>
+                  ))}
+                </select>
+                {/*
+                  Подпись пересчитывается от выбранной роли: пока выбран «Менеджер»
+                  — объясняем, каких студентов он увидит; для остальных ролей сразу
+                  предупреждаем, что регион на доступ не влияет. Это дешевле, чем
+                  прятать поле и оставлять человека гадать, куда оно делось.
+                */}
+                <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 6, lineHeight: 1.5 }}>
+                  {regionHint(form.role, form.region)}
+                </div>
+              </div>
             </div>
             <div className="form-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setCreating(false)}>Отмена</button>
@@ -189,6 +244,7 @@ export default function Users() {
                 <th>ФИО</th>
                 <th>Email</th>
                 <th>Роль</th>
+                <th>Регион</th>
                 <th>Создан</th>
                 {canEdit && <th></th>}
               </tr>
@@ -212,6 +268,32 @@ export default function Users() {
                       </select>
                     ) : (
                       <span className={`badge ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role] || u.role}</span>
+                    )}
+                  </td>
+                  {/*
+                    Регион показываем всем ролям, но у Основателя и Администратора
+                    приглушаем: по ТЗ v3 р4 они видят студентов обоих направлений,
+                    и бейдж «Таджикистан» в их строке иначе читается как ограничение,
+                    которого на самом деле нет. Расшифровка — в title.
+                  */}
+                  <td data-label="Регион" title={regionHint(u.role, regionOf(u))}>
+                    {canEdit ? (
+                      <select
+                        value={regionOf(u)}
+                        onChange={(e) => onChangeRegion(u, e.target.value as Region)}
+                        style={u.role === 'EMPLOYEE' ? undefined : { opacity: 0.55 }}
+                      >
+                        {REGION_OPTIONS.map((r) => (
+                          <option key={r} value={r}>{REGION_LABEL[r]}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        className={`badge ${REGION_BADGE[regionOf(u)]}`}
+                        style={u.role === 'EMPLOYEE' ? undefined : { opacity: 0.55 }}
+                      >
+                        {REGION_LABEL[regionOf(u)]}
+                      </span>
                     )}
                   </td>
                   <td data-label="Создан">{u.createdAt ? new Date(u.createdAt).toLocaleDateString('ru-RU') : '—'}</td>

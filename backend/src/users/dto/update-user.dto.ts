@@ -1,6 +1,6 @@
 import { IsEmail, IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { Role } from '@prisma/client';
+import { Region, Role } from '@prisma/client';
 
 export class UpdateUserDto {
   // trim + lowercase ДО валидации — иначе хеш сохранится для одного варианта,
@@ -33,4 +33,9 @@ export class UpdateUserDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  /** ТЗ v3 раздел 4 — регион менеджера (Таджикистан / Китай / оба). */
+  @IsOptional()
+  @IsEnum(Region)
+  region?: Region;
 }

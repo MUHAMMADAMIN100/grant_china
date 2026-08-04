@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
-import { Direction, Prisma, Role, StudentStatus } from '@prisma/client';
+import { Direction, Prisma, Region, Role, StudentStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
@@ -8,7 +8,8 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isPrivileged } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedToUserFilter, canAccessStudentRecord } from '../common/access';
+import { buildPhoneSearch, phoneQuery } from '../common/phone';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
 import { MANAGED_DOCUMENT_TYPES, REQUIRED_DOCUMENT_TYPES, assertNotManagedDocument } from '../common/documents';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
@@ -193,6 +194,10 @@ export class StudentsService {
       data: {
         fullName: dto.fullName.trim(),
         phones: dto.phones?.length ? dto.phones : [],
+        // ТЗ v3 р1 — производная от phones, пересчитывается при каждой записи.
+        // Держать её в одной операции с phones обязательно: иначе появится
+        // окно, где студент уже есть, а по телефону не находится.
+        phoneSearch: buildPhoneSearch(dto.phones),
         email: emailNormalized,
         password: passwordHash,
         photoUrl: dto.photoUrl || null,
@@ -304,6 +309,8 @@ export class StudentsService {
     managerUserId?: string;
     currentUserId?: string;
     currentUserRole?: Role;
+    /** ТЗ v3 р4 — регион менеджера. undefined = как раньше (оба поля). */
+    currentUserRegion?: Region;
     /** Фильтр по этапу — либо ApplicationStatus последней заявки,
      *  либо специальный StudentStatus (PAUSED/GRADUATED/ARCHIVED). */
     stage?: string;
@@ -331,11 +338,17 @@ export class StudentsService {
       (filters.mine && filters.currentUserId) ||
       (filters.currentUserRole === 'EMPLOYEE' && filters.currentUserId);
     if (restrictToMine) {
+      // ТЗ v3 р4 — «только прикреплённые студенты из Китая / Таджикистана».
+      // Регион решает, ПО КАКОМУ полю считать студента своим: TJ — managerId,
+      // CN — chinaManagerId, BOTH — по любому из двух (прежнее поведение).
+      // Формула общая с canAccessStudentRecord, иначе список и карточка
+      // однажды разойдутся: студент виден в списке, но 404 при открытии.
       and.push({
-        OR: [
-          { managerId: filters.currentUserId },
-          { chinaManagerId: filters.currentUserId },
-        ],
+        OR: assignedToUserFilter({
+          id: filters.currentUserId!,
+          role: filters.currentUserRole ?? 'EMPLOYEE',
+          region: filters.currentUserRegion,
+        }),
       });
     }
     // Фильтр по менеджеру (любой роли — TJ или CN).
@@ -348,13 +361,26 @@ export class StudentsService {
       });
     }
     if (filters.search) {
-      and.push({
-        OR: [
-          { fullName: { contains: filters.search, mode: 'insensitive' } },
-          { email: { contains: filters.search, mode: 'insensitive' } },
-          { phones: { has: filters.search } },
-        ],
-      });
+      // ТЗ v3 раздел 1 — поиск по ФИО, email И телефону в любом формате.
+      //
+      // Раньше по телефону стояло `{ phones: { has: search } }` — точное
+      // совпадение с элементом массива целиком. Найти студента можно было,
+      // только набрав номер символ в символ, включая пробелы и дефисы ровно
+      // так, как их поставил менеджер. Ни «901234567», ни «992901234567» для
+      // записи «+992 90 123-45-67» не срабатывали.
+      //
+      // Теперь цифры запроса ищутся подстрокой в phoneSearch, где для каждого
+      // номера лежат обе формы (с кодом страны и без) — см. buildPhoneSearch.
+      const phoneDigits = phoneQuery(filters.search);
+      const or: Prisma.StudentWhereInput[] = [
+        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        { email: { contains: filters.search, mode: 'insensitive' } },
+      ];
+      // Условие по телефону добавляем ТОЛЬКО когда в запросе есть цифры:
+      // иначе `contains ''` совпало бы с каждым студентом, у кого телефон
+      // вообще заполнен, и поиск по имени начал бы возвращать всю базу.
+      if (phoneDigits) or.push({ phoneSearch: { contains: phoneDigits } });
+      and.push({ OR: or });
     }
     // stageFilter — на бэкенд. Был клиентским (фильтр по applications[0]),
     // теперь делаем через relational query чтобы не тащить всё на фронт.
@@ -442,7 +468,13 @@ export class StudentsService {
 
     const data: Prisma.StudentUpdateInput = {};
     if (dto.fullName !== undefined) data.fullName = dto.fullName;
-    if (dto.phones !== undefined) data.phones = dto.phones;
+    if (dto.phones !== undefined) {
+      data.phones = dto.phones;
+      // Пересчитываем ВМЕСТЕ с phones и только когда phones реально пришли:
+      // безусловная запись затирала бы поисковую строку в null при любой
+      // правке имени или комментария.
+      data.phoneSearch = buildPhoneSearch(dto.phones);
+    }
     if (dto.email !== undefined) data.email = dto.email;
     if (dto.photoUrl !== undefined) data.photoUrl = dto.photoUrl;
     if (dto.comment !== undefined) data.comment = dto.comment;

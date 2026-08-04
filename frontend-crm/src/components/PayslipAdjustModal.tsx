@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { Payslip } from '../api/types';
+import { canManageFinance } from '../api/types';
 import { updatePayslip } from '../api/payroll';
+import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
 
@@ -22,6 +24,15 @@ const MONEY_RE = /^\d{1,10}(\.\d{1,2})?$/;
  */
 export default function PayslipAdjustModal({ payslip, onClose, onSaved }: Props) {
   const { toast } = useUI();
+  /**
+   * ТЗ v3 раздел 4 — защита в глубину, как в PaymentFormModal и
+   * ScheduleEditModal. Путь сюда уже закрыт в Payroll.tsx (кнопка
+   * «Корректировка» внутри блока canManage), но кнопка записи не должна
+   * зависеть от того, кто открыл модалку: инвариант обязан держаться в самом
+   * компоненте, иначе следующая точка входа откроет её мимо проверки.
+   */
+  const me = useAuth((s) => s.user);
+  const canManage = canManageFinance(me?.role);
   const [adjustmentAmount, setAdjustmentAmount] = useState(payslip.adjustmentAmount !== '0.00' ? payslip.adjustmentAmount : '');
   const [adjustmentReason, setAdjustmentReason] = useState(payslip.adjustmentReason ?? '');
   const [baseOverride, setBaseOverride] = useState(payslip.baseOverride ?? '');
@@ -102,11 +113,18 @@ export default function PayslipAdjustModal({ payslip, onClose, onSaved }: Props)
         )}
 
         <div className="dialog-actions">
-          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Отмена</button>
-          <button className="btn btn-primary" onClick={onSubmit} disabled={saving || formInvalid}>
-            {saving ? 'Сохранение…' : 'Сохранить'}
-            {!saving && <Icon name="check" size={16} style={{ marginLeft: 4 }} />}
+          {/* Без права записи «Отмена» превращается в «Закрыть» — иначе
+              единственная кнопка окна предлагает отменить то, чего человек
+              всё равно не мог сделать. */}
+          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>
+            {canManage ? 'Отмена' : 'Закрыть'}
           </button>
+          {canManage && (
+            <button className="btn btn-primary" onClick={onSubmit} disabled={saving || formInvalid}>
+              {saving ? 'Сохранение…' : 'Сохранить'}
+              {!saving && <Icon name="check" size={16} style={{ marginLeft: 4 }} />}
+            </button>
+          )}
         </div>
       </motion.div>
     </motion.div>

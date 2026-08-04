@@ -9,9 +9,11 @@ import {
   KPI_RATE_METRICS,
   PAYMENT_STAGE_LABEL,
   SCHEDULE_PAYMENT_STAGES,
+  canManageFinance,
 } from '../api/types';
 import { addRule, updateRule } from '../api/payroll';
 import { listUsers } from '../api/users';
+import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
 
@@ -73,8 +75,15 @@ function initialThresholdInput(r: BonusRule | null | undefined): string {
  * относящиеся к выбранному типу.
  */
 export default function BonusRuleFormModal({ setId, rule, onClose, onSaved }: Props) {
+  const me = useAuth((s) => s.user);
   const { toast } = useUI();
   const isEdit = !!rule;
+  // ТЗ v3 раздел 4: Администратору финансы доступны только на чтение.
+  // POST sets/:id/rules и PATCH rules/:ruleId помечены @Roles(FOUNDER), поэтому
+  // кнопка сохранения существует только у Основателя. Открыть форму
+  // Администратор уже не может (кнопки на /payroll/rules от него скрыты) —
+  // это вторая линия защиты, чтобы ни один путь к форме не привёл в 403.
+  const canManage = canManageFinance(me?.role);
 
   const [kind, setKind] = useState<BonusRuleKind>(rule?.kind ?? 'FIXED_PER_CONTRACT');
   const [label, setLabel] = useState(rule?.label ?? '');
@@ -372,11 +381,13 @@ export default function BonusRuleFormModal({ setId, rule, onClose, onSaved }: Pr
         </div>
 
         <div className="dialog-actions">
-          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Отмена</button>
-          <button className="btn btn-primary" onClick={onSubmit} disabled={saving}>
-            {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Добавить'}
-            {!saving && <Icon name="check" size={16} style={{ marginLeft: 4 }} />}
-          </button>
+          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>{canManage ? 'Отмена' : 'Закрыть'}</button>
+          {canManage && (
+            <button className="btn btn-primary" onClick={onSubmit} disabled={saving}>
+              {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Добавить'}
+              {!saving && <Icon name="check" size={16} style={{ marginLeft: 4 }} />}
+            </button>
+          )}
         </div>
       </motion.div>
     </motion.div>

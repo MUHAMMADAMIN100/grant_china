@@ -44,32 +44,35 @@ export class RulesController {
     return this.payslips.simulate(id, period || periodKeyFor(new Date()));
   }
 
+  // ТЗ v3 раздел 4: формулы бонусов задают, сколько сотрудники получат — это
+  // финансовая часть, и Администратору она открыта только на чтение. GET'ы
+  // выше (просмотр наборов и симуляция) ему остаются, запись — нет.
   @Post('sets')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   createSet(@Body() dto: CreateBonusRuleSetDto, @CurrentUser() user: any) {
     return this.rules.createSet(dto, user);
   }
 
   @Patch('sets/:id')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   updateSet(@Param('id') id: string, @Body() dto: UpdateBonusRuleSetDto, @CurrentUser() user: any) {
     return this.rules.updateSet(id, dto, user);
   }
 
   @Post('sets/:id/rules')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   addRule(@Param('id') id: string, @Body() dto: CreateBonusRuleDto, @CurrentUser() user: any) {
     return this.rules.addRule(id, dto, user);
   }
 
   @Patch('rules/:ruleId')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   updateRule(@Param('ruleId') ruleId: string, @Body() dto: UpdateBonusRuleDto, @CurrentUser() user: any) {
     return this.rules.updateRule(ruleId, dto, user);
   }
 
   @Delete('rules/:ruleId')
-  @Roles(Role.FOUNDER, Role.ADMIN)
+  @Roles(Role.FOUNDER)
   removeRule(@Param('ruleId') ruleId: string, @CurrentUser() user: any) {
     return this.rules.removeRule(ruleId, user);
   }

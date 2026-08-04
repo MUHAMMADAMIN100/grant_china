@@ -9,10 +9,11 @@ import {
   PAYMENT_STAGE_KIND,
   PAYMENT_STAGE_LABEL,
   RECEIPT_REQUIRED_PURPOSES,
-  SCHEDULE_PAYMENT_PURPOSES,
-  ON_SITE_PAYMENT_PURPOSES,
+  canWriteFinance,
+  paymentPurposesFor,
 } from '../api/types';
 import { addPaymentReceipt, createPayment, removePaymentReceipt, submitPayment, updatePayment } from '../api/payments';
+import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { buildFileUrl } from '../utils/fileUrl';
 import ReceiptDropzone from './ReceiptDropzone';
@@ -40,12 +41,43 @@ type Props = {
 };
 
 export default function PaymentFormModal({ studentId, stage, payment, onClose, onSaved }: Props) {
+  const me = useAuth((s) => s.user);
   const { toast } = useUI();
+  /**
+   * ТЗ v3 раздел 4, критерий приёмки №4 — Администратор в финансах read-only.
+   * Создание/правка платежа и работа с чеками на бэкенде теперь под
+   * @Roles(FOUNDER, EMPLOYEE), то есть для ADMIN это 403.
+   *
+   * Защита в глубину: путь сюда уже закрыт в PaymentsSection (кнопки «Внести
+   * оплату» и «Редактировать» ему не показываются), но форма — единственное
+   * место, где живут кнопки записи, и она не должна зависеть от того, кто её
+   * открыл. Кнопки именно скрываются, а не гасятся: disabled без объяснения
+   * читается как поломка.
+   */
+  const canWrite = canWriteFinance(me?.role);
   const isEdit = !!payment;
   const kind = PAYMENT_STAGE_KIND[stage];
-  const purposeOptions = kind === 'ON_SITE' ? ON_SITE_PAYMENT_PURPOSES : SCHEDULE_PAYMENT_PURPOSES;
+  /**
+   * ТЗ v3 раздел 3 — ровно пять типов оплат, и «Оплата за регистрацию в
+   * университете» доступна только Основателю (бэкенд отвечает 403 остальным,
+   * см. assertPurposeAllowedForRole). Список считается от роли, чтобы
+   * недоступный пункт не появлялся в выпадающем списке вовсе.
+   */
+  const purposeOptions = paymentPurposesFor(stage, me?.role);
 
-  const [purpose, setPurpose] = useState<PaymentPurpose>(payment?.purpose ?? DEFAULT_PAYMENT_PURPOSE[stage]);
+  /**
+   * У платежа, сохранённого ДО перехода на новые типы, purpose историческй
+   * (например «Другое»). Его нельзя молча подменить действующим значением —
+   * это исказило бы уже проведённую запись. Поэтому в режиме правки такой
+   * тип показывается в списке дополнительным пунктом, и пока пользователь
+   * его не сменил, бэкенд оставляет старое значение как есть.
+   */
+  const initialPurpose = payment?.purpose ?? DEFAULT_PAYMENT_PURPOSE[stage];
+  const purposeChoices = purposeOptions.includes(initialPurpose)
+    ? purposeOptions
+    : [initialPurpose, ...purposeOptions];
+
+  const [purpose, setPurpose] = useState<PaymentPurpose>(initialPurpose);
   const [method, setMethod] = useState<PaymentMethod>(payment?.method ?? 'CASH');
   const [amount, setAmount] = useState(payment?.amount ?? '');
   const [paidAt, setPaidAt] = useState(payment ? payment.paidAt.slice(0, 10) : todayStr());
@@ -195,7 +227,7 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
           <div className="form-group">
             <label>Назначение платежа *</label>
             <select value={purpose} onChange={(e) => setPurpose(e.target.value as PaymentPurpose)} disabled={busy}>
-              {purposeOptions.map((p) => (
+              {purposeChoices.map((p) => (
                 <option key={p} value={p}>{PAYMENT_PURPOSE_LABEL[p]}</option>
               ))}
             </select>
@@ -270,23 +302,29 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
                       <Icon name="description" size={16} />
                       <span>{r.originalName}</span>
                     </a>
-                    <button type="button" className="btn btn-sm btn-danger" onClick={() => onRemoveReceipt(r.id)} disabled={busy}>
-                      <Icon name="delete" size={13} />
-                    </button>
+                    {canWrite && (
+                      <button type="button" className="btn btn-sm btn-danger" onClick={() => onRemoveReceipt(r.id)} disabled={busy}>
+                        <Icon name="delete" size={13} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             )}
-            <button
-              type="button"
-              className="btn btn-sm btn-secondary"
-              onClick={() => receiptInputRef.current?.click()}
-              disabled={addingReceipt || busy}
-            >
-              <Icon name={addingReceipt ? 'progress_activity' : 'add'} size={14} style={{ marginRight: 4 }} />
-              {addingReceipt ? 'Загрузка…' : 'Добавить чек'}
-            </button>
-            <input ref={receiptInputRef} type="file" hidden accept="image/*,.pdf" onChange={onAddReceiptFile} />
+            {canWrite && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => receiptInputRef.current?.click()}
+                  disabled={addingReceipt || busy}
+                >
+                  <Icon name={addingReceipt ? 'progress_activity' : 'add'} size={14} style={{ marginRight: 4 }} />
+                  {addingReceipt ? 'Загрузка…' : 'Добавить чек'}
+                </button>
+                <input ref={receiptInputRef} type="file" hidden accept="image/*,.pdf" onChange={onAddReceiptFile} />
+              </>
+            )}
           </div>
         ) : (
           <ReceiptDropzone
@@ -301,32 +339,42 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
           />
         )}
 
-        {draftDisabled && (
+        {canWrite && draftDisabled && (
           // ТЗ 1.3: подпись видна в обоих режимах — и при создании, и при
           // редактировании (кнопка «Сохранить» ниже блокируется без !isEdit,
           // иначе смену назначения на Проживание/Питание можно было бы
-          // сохранить в уже существующем черновике без чека).
+          // сохранить в уже существующем черновике без чека). Без права записи
+          // подпись не показываем: она объясняет, почему заблокирована кнопка,
+          // которой в этом случае вообще нет.
           <div className="form-error-text" style={{ marginBottom: 4 }}>{receiptRequiredCaption}</div>
         )}
 
         <div className="dialog-actions">
-          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Отмена</button>
-          <button
-            className="btn btn-secondary"
-            onClick={() => (isEdit ? doSaveEdit(false) : doCreate(false))}
-            disabled={busy || draftDisabled}
-            title={draftDisabled ? receiptRequiredCaption : undefined}
-          >
-            {saving === 'draft' ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Сохранить черновик'}
+          {/* Без права записи единственное действие — уйти, и подпись «Отмена»
+              обманывала бы: отменять нечего. */}
+          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>
+            {canWrite ? 'Отмена' : 'Закрыть'}
           </button>
-          <button
-            className="btn btn-primary"
-            onClick={() => (isEdit ? doSaveEdit(true) : doCreate(true))}
-            disabled={busy || submitDisabled}
-            title={submitDisabled ? 'Прикрепите чек, чтобы отправить на одобрение' : undefined}
-          >
-            {saving === 'submit' ? 'Отправка…' : 'Подтвердить'}
-          </button>
+          {canWrite && (
+            <>
+              <button
+                className="btn btn-secondary"
+                onClick={() => (isEdit ? doSaveEdit(false) : doCreate(false))}
+                disabled={busy || draftDisabled}
+                title={draftDisabled ? receiptRequiredCaption : undefined}
+              >
+                {saving === 'draft' ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Сохранить черновик'}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => (isEdit ? doSaveEdit(true) : doCreate(true))}
+                disabled={busy || submitDisabled}
+                title={submitDisabled ? 'Прикрепите чек, чтобы отправить на одобрение' : undefined}
+              >
+                {saving === 'submit' ? 'Отправка…' : 'Подтвердить'}
+              </button>
+            </>
+          )}
         </div>
       </motion.div>
     </motion.div>

@@ -10,7 +10,7 @@ import {
   KPI_METRIC_LABEL,
   KPI_RATE_METRICS,
   PAYMENT_STAGE_LABEL,
-  isFounder,
+  canManageFinance,
 } from '../api/types';
 import type { BonusRuleSimulateResult } from '../api/types';
 import {
@@ -35,8 +35,14 @@ type RuleSetFormMode = { kind: 'create'; cloneFromId?: string } | { kind: 'edit'
 
 /** Компактная модалка версии набора — только заголовок и дата, никаких формул. */
 function RuleSetFormModal({ mode, onClose, onSaved }: { mode: RuleSetFormMode; onClose: () => void; onSaved: (id: string) => void }) {
+  const me = useAuth((s) => s.user);
   const { toast } = useUI();
   const isEdit = mode.kind === 'edit';
+  // Вторая линия защиты. Открыть эту модалку Администратор уже не может —
+  // кнопки «Новый черновик» и «Изменить» от него скрыты, — но POST/PATCH
+  // /payroll/rules/sets помечены @Roles(FOUNDER), и кнопка «Сохранить»,
+  // ведущая в 403, не должна существовать ни на одном пути к форме.
+  const canManage = canManageFinance(me?.role);
   const [title, setTitle] = useState(isEdit ? mode.set.title : '');
   // effectiveFrom бэкенд разбирает через parseCalendarDate (rules.service.ts),
   // то есть хранит полночь ПО ДУШАНБЕ = 19:00 предыдущих суток UTC. Срез
@@ -95,8 +101,10 @@ function RuleSetFormModal({ mode, onClose, onSaved }: { mode: RuleSetFormMode; o
           <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} disabled={saving} />
         </div>
         <div className="dialog-actions">
-          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Отмена</button>
-          <button className="btn btn-primary" onClick={onSubmit} disabled={saving}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
+          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>{canManage ? 'Отмена' : 'Закрыть'}</button>
+          {canManage && (
+            <button className="btn btn-primary" onClick={onSubmit} disabled={saving}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
+          )}
         </div>
       </motion.div>
     </motion.div>
@@ -137,7 +145,12 @@ function ruleValueSummary(r: BonusRule): string {
 export default function PayrollRules() {
   const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
-  const isFdr = isFounder(me?.role);
+  // ТЗ v3 раздел 4, критерий приёмки №4 — Администратору финансы доступны
+  // строго на чтение. В rules.controller.ts под @Roles(FOUNDER, ADMIN) остались
+  // только GET sets / GET sets/:id / GET sets/:id/simulate (симулятор ничего
+  // не пишет в БД), а создание версии, правка, добавление/изменение/удаление
+  // правил, активация и архивация — @Roles(FOUNDER).
+  const canManage = canManageFinance(me?.role);
 
   const [sets, setSets] = useState<BonusRuleSet[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -253,16 +266,22 @@ export default function PayrollRules() {
   };
 
   const isDraft = selected?.status === 'DRAFT';
+  // Правила правятся только в черновике и только Основателем. Отдельная
+  // константа — чтобы заголовок колонки «Действия» и сами ячейки не могли
+  // разъехаться: колонка-заголовок без кнопок выглядит как сломанная вёрстка.
+  const canEditRules = isDraft && canManage;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18, alignItems: 'flex-start' }}>
       <motion.div className="card" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3 }}>
         <div className="card-header"><h2 className="card-title" style={{ fontSize: 15 }}>Версии формул</h2></div>
         <div className="card-body" style={{ padding: 10 }}>
-          <button className="btn btn-sm btn-secondary" style={{ width: '100%', marginBottom: 10 }} onClick={() => setSetModal({ kind: 'create' })}>
-            <Icon name="add" size={15} style={{ marginRight: 4 }} />
-            Новый черновик
-          </button>
+          {canManage && (
+            <button className="btn btn-sm btn-secondary" style={{ width: '100%', marginBottom: 10 }} onClick={() => setSetModal({ kind: 'create' })}>
+              <Icon name="add" size={15} style={{ marginRight: 4 }} />
+              Новый черновик
+            </button>
+          )}
           {error && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
           {loading ? (
             <div className="empty" style={{ padding: 12 }}>Загрузка...</div>
@@ -300,19 +319,22 @@ export default function PayrollRules() {
             <div className="card">
               <div className="card-header">
                 <h2 className="card-title">v{selected.version} · {selected.title}</h2>
+                {/* Весь блок действий над версией — только Основателю: правка
+                    черновика и клонирование в новый черновик тоже пишут в БД
+                    (PATCH/POST sets), у Администратора они дали бы 403. */}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {isDraft && (
+                  {isDraft && canManage && (
                     <button className="btn btn-sm btn-secondary" onClick={() => setSetModal({ kind: 'edit', set: selected })}>Изменить</button>
                   )}
-                  {!isDraft && (
+                  {!isDraft && canManage && (
                     <button className="btn btn-sm btn-secondary" onClick={() => setSetModal({ kind: 'create', cloneFromId: selected.id })}>
                       Создать черновик на основе этой версии
                     </button>
                   )}
-                  {isDraft && isFdr && (
+                  {isDraft && canManage && (
                     <button className="btn btn-sm btn-primary" onClick={onActivate}>Активировать</button>
                   )}
-                  {selected.status === 'ACTIVE' && isFdr && (
+                  {selected.status === 'ACTIVE' && canManage && (
                     <button className="btn btn-sm btn-danger" onClick={onArchive}>Архивировать</button>
                   )}
                 </div>
@@ -320,15 +342,25 @@ export default function PayrollRules() {
               <div className="card-body">
                 <div className="detail-row"><div className="detail-label">Статус</div><div className="detail-value"><span className={`badge ${BONUS_RULE_SET_STATUS_BADGE[selected.status]}`}>{BONUS_RULE_SET_STATUS_LABEL[selected.status]}</span></div></div>
                 <div className="detail-row"><div className="detail-label">Действует с</div><div className="detail-value">{new Date(selected.effectiveFrom).toLocaleDateString('ru-RU')}</div></div>
+                {/* Без пояснения страница у Администратора читается как поломка:
+                    видны версии, правила и симулятор — и ни одной кнопки. */}
+                {!canManage && (
+                  <div className="receipt-dropzone-hint" style={{ margin: '10px 0' }}>
+                    Наборы формул и симулятор открыты вам только для просмотра — изменение формул бонусов закреплено за Основателем (ТЗ v3, раздел 4).
+                  </div>
+                )}
                 {!isDraft && (
                   <div className="receipt-dropzone-hint" style={{ margin: '10px 0' }}>
-                    {selected.status === 'ACTIVE' ? 'Действующая версия редактированию не подлежит.' : 'Архивная версия редактированию не подлежит.'} Чтобы изменить формулы — создайте черновик на её основе.
+                    {selected.status === 'ACTIVE' ? 'Действующая версия редактированию не подлежит.' : 'Архивная версия редактированию не подлежит.'}
+                    {/* Совет «создайте черновик» без кнопки создания — это
+                        инструкция к действию, которого у Администратора нет. */}
+                    {canManage && ' Чтобы изменить формулы — создайте черновик на её основе.'}
                   </div>
                 )}
 
                 <div className="payments-section-header" style={{ marginTop: 10 }}>
                   <div className="payments-section-title">Правила</div>
-                  {isDraft && (
+                  {canEditRules && (
                     <button className="btn btn-sm btn-primary" onClick={() => setRuleModal({ kind: 'create' })}>
                       <Icon name="add" size={15} style={{ marginRight: 4 }} />
                       Добавить правило
@@ -341,7 +373,7 @@ export default function PayrollRules() {
                 ) : (
                   <div className="table-wrap">
                     <table className="table">
-                      <thead><tr><th>Правило</th><th>Тип</th><th>Область</th><th>Параметры</th>{isDraft && <th>Действия</th>}</tr></thead>
+                      <thead><tr><th>Правило</th><th>Тип</th><th>Область</th><th>Параметры</th>{canEditRules && <th>Действия</th>}</tr></thead>
                       <tbody>
                         {selected.rules.map((r) => (
                           <tr key={r.id} style={{ cursor: 'default', opacity: r.enabled ? 1 : 0.5 }}>
@@ -349,7 +381,7 @@ export default function PayrollRules() {
                             <td data-label="Тип">{BONUS_RULE_KIND_LABEL[r.kind]}</td>
                             <td data-label="Область">{BONUS_RULE_SCOPE_LABEL[r.scope]}</td>
                             <td data-label="Параметры">{ruleValueSummary(r)}</td>
-                            {isDraft && (
+                            {canEditRules && (
                               <td data-label="Действия">
                                 <div style={{ display: 'flex', gap: 6 }}>
                                   <button className="btn btn-sm btn-secondary" onClick={() => setRuleModal({ kind: 'edit', rule: r })}>Изменить</button>

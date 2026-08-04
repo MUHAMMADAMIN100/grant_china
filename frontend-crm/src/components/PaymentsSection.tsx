@@ -4,8 +4,9 @@ import type { Payment, PaymentStage, PaymentStageSummary, PaymentSummary } from 
 import {
   PAYMENT_METHOD_LABEL,
   PAYMENT_PURPOSE_LABEL,
+  canManageFinance,
+  canWriteFinance,
   isFounder,
-  isPrivileged,
 } from '../api/types';
 import {
   approvePayment,
@@ -39,7 +40,12 @@ const ON_SITE_PAGE_SIZE = 6;
 
 type Props = {
   studentId: string;
-  /** Может ли текущий пользователь вносить платежи по этому студенту (isAdmin || свой менеджер). */
+  /**
+   * Ведёт ли текущий пользователь этого студента (привилегия роли || свой менеджер).
+   * Это ответ только на вопрос «чей студент», а НЕ на вопрос «можно ли писать в
+   * финансы»: у Администратора canEdit истинно (он видит всех студентов), но
+   * финансы для него read-only — см. canWrite ниже.
+   */
   canEdit: boolean;
 };
 
@@ -55,8 +61,27 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
   const [modal, setModal] = useState<ModalState>(null);
   const [onSiteExpanded, setOnSiteExpanded] = useState(false);
 
-  const isPriv = isPrivileged(me?.role);
   const isFdr = isFounder(me?.role);
+  /**
+   * ТЗ v3 раздел 4, критерий приёмки №4: «Администратор имеет доступ к финансам
+   * СТРОГО в режиме Read-Only». Все методы записи по платежам на бэкенде теперь
+   * помечены @Roles(FOUNDER, EMPLOYEE) — Администратор получает на них 403.
+   * Поэтому кнопки этих действий ему не показываем вовсе: disabled-кнопка без
+   * объяснения читается как поломка интерфейса (правило проекта).
+   */
+  const canWrite = canWriteFinance(me?.role);
+  /**
+   * График платежей (PUT /payments/schedule) сузился до @Roles(FOUNDER):
+   * плановая сумма и срок этапа — предмет договора со студентом, менять их
+   * может только Основатель. Раньше карандаш правки видел и Администратор.
+   */
+  const canManageSchedule = canManageFinance(me?.role);
+  /**
+   * Внести платёж можно, только если верно и «студент мой», и «роль пишет в
+   * финансы». Разделение важно именно для Администратора: canEdit у него
+   * истинно по всем студентам, а права записи нет.
+   */
+  const canAddPayment = canEdit && canWrite;
 
   const load = () => {
     getPaymentsSummary(studentId)
@@ -218,8 +243,11 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
   }
 
   const renderPaymentRow = (p: Payment) => {
-    const canMutate = isPriv || p.createdById === me?.id;
-    const canRecall = isPriv || p.submittedById === me?.id;
+    // Право «править чужой платёж» раньше давала isPrivileged (FOUNDER+ADMIN).
+    // Теперь оно только у Основателя: Администратор в финансах read-only, а
+    // Сотрудник ведёт лишь свои записи — ровно так же рассуждает payments.service.
+    const canMutate = canWrite && (isFdr || p.createdById === me?.id);
+    const canRecall = canWrite && (isFdr || p.submittedById === me?.id);
     // Double Check (ТЗ 1.1): бэкенд блокирует одобрение, если пользователь
     // причастен к платежу — как автор ИЛИ как подавший. Оба условия должны
     // быть отражены здесь, иначе кнопка активна, а клик возвращает 409.
@@ -229,6 +257,15 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
     const cannotApproveReason = createdByMe
       ? 'Вы внесли этот платёж — одобрить должен другой пользователь'
       : 'Вы подали этот платёж — одобрить должен другой пользователь';
+
+    const showDraftActions = (p.status === 'DRAFT' || p.status === 'REJECTED') && canMutate;
+    const showRecall = p.status === 'PENDING_APPROVAL' && canRecall;
+    const showApproval = p.status === 'PENDING_APPROVAL' && isFdr;
+    const showVoid = p.status === 'APPROVED' && isFdr;
+    // .payment-row — это flex-колонка с gap: 6px, поэтому пустой контейнер
+    // действий оставляет висящий отступ под каждой строкой. У Администратора
+    // такая пустая полоса теперь была бы во ВСЕХ строках — не рендерим её.
+    const hasActions = showDraftActions || showRecall || showApproval || showVoid;
 
     return (
       <div key={p.id} className="payment-row">
@@ -267,44 +304,46 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
             <Icon name="block" size={14} /> Аннулирован: {p.voidReason}
           </div>
         )}
-        <div className="payment-row-actions">
-          {(p.status === 'DRAFT' || p.status === 'REJECTED') && canMutate && (
-            <>
-              <button className="btn btn-sm btn-secondary" onClick={() => setModal({ kind: 'edit', payment: p })}>
-                Редактировать
+        {hasActions && (
+          <div className="payment-row-actions">
+            {showDraftActions && (
+              <>
+                <button className="btn btn-sm btn-secondary" onClick={() => setModal({ kind: 'edit', payment: p })}>
+                  Редактировать
+                </button>
+                <button className="btn btn-sm btn-primary" onClick={() => handleSubmitPayment(p)}>
+                  Подать
+                </button>
+                <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p)}>
+                  Удалить
+                </button>
+              </>
+            )}
+            {showRecall && (
+              <button className="btn btn-sm btn-secondary" onClick={() => handleRecall(p)}>Отозвать</button>
+            )}
+            {showApproval && (
+              <>
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={() => handleApprove(p)}
+                  disabled={cannotApprove}
+                  title={cannotApprove ? cannotApproveReason : undefined}
+                >
+                  Одобрить
+                </button>
+                <button className="btn btn-sm btn-danger" onClick={() => setModal({ kind: 'reject', payment: p })}>
+                  Отклонить
+                </button>
+              </>
+            )}
+            {showVoid && (
+              <button className="btn btn-sm btn-danger" onClick={() => setModal({ kind: 'void', payment: p })}>
+                Аннулировать
               </button>
-              <button className="btn btn-sm btn-primary" onClick={() => handleSubmitPayment(p)}>
-                Подать
-              </button>
-              <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p)}>
-                Удалить
-              </button>
-            </>
-          )}
-          {p.status === 'PENDING_APPROVAL' && canRecall && (
-            <button className="btn btn-sm btn-secondary" onClick={() => handleRecall(p)}>Отозвать</button>
-          )}
-          {p.status === 'PENDING_APPROVAL' && isFdr && (
-            <>
-              <button
-                className="btn btn-sm btn-primary"
-                onClick={() => handleApprove(p)}
-                disabled={cannotApprove}
-                title={cannotApprove ? cannotApproveReason : undefined}
-              >
-                Одобрить
-              </button>
-              <button className="btn btn-sm btn-danger" onClick={() => setModal({ kind: 'reject', payment: p })}>
-                Отклонить
-              </button>
-            </>
-          )}
-          {p.status === 'APPROVED' && isFdr && (
-            <button className="btn btn-sm btn-danger" onClick={() => setModal({ kind: 'void', payment: p })}>
-              Аннулировать
-            </button>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -350,7 +389,7 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
             <span>План</span>
             <strong>
               {formatMoney(s.plannedAmount)}
-              {isPriv && (
+              {canManageSchedule && (
                 <button
                   type="button"
                   className="payment-stage-plan-edit"
@@ -383,7 +422,7 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
           </div>
         )}
 
-        {canEdit && !s.locked && (
+        {canAddPayment && !s.locked && (
           <button
             type="button"
             className="btn btn-sm btn-secondary payment-stage-add-btn"
@@ -444,7 +483,7 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
           </button>
         )}
 
-        {canEdit && (
+        {canAddPayment && (
           <button
             type="button"
             className="btn btn-sm btn-secondary payment-stage-add-btn"
