@@ -12,6 +12,7 @@ import { AUTH_COOKIE_NAME, STUDENT_COOKIE_NAME } from '../auth/cookie-helpers';
 import { onUserCacheInvalidated } from '../auth/jwt.strategy';
 import { onStudentCacheInvalidated } from '../student-auth/student-jwt.guard';
 import { isPrivileged } from '../common/roles';
+import { assignedFieldsForRegion } from '../common/access';
 import { checkOrigin } from '../common/cors';
 
 /** Парсит cookie-заголовок в объект { name: value }. */
@@ -110,9 +111,22 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     if (identity.kind === 'staff') {
-      (client.data as any) = { userId: identity.id, role: identity.role };
+      (client.data as any) = { userId: identity.id, role: identity.role, region: identity.region };
       client.join('staff');
       client.join(`user:${identity.id}`);
+      // ТЗ v3 р4 — комнаты по региону. emitForStudent маршрутизирует событие
+      // по ПОЛЮ студента (managerId → :tj, chinaManagerId → :cn), а сотрудник
+      // вступает только в комнату своего региона. Без этого менеджер,
+      // оказавшийся в непрофильном слоте студента чужой страны, продолжал
+      // получать поток событий по нему — карточку открыть не мог, но узнавал,
+      // что с этим студентом что-то происходит.
+      //
+      // Комната `user:{id}` без суффикса остаётся: по ней идут адресные
+      // уведомления самому сотруднику (emitUser) и принудительный разрыв
+      // сессии при смене роли — они к региону отношения не имеют.
+      for (const field of assignedFieldsForRegion(identity.region)) {
+        client.join(`user:${identity.id}:${field === 'managerId' ? 'tj' : 'cn'}`);
+      }
       if (isPrivileged(identity.role)) {
         client.join('staff:privileged');
       }
@@ -178,8 +192,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   emitForStudent(scope: ManagerScope, event: string, payload: any, opts?: { studentId?: string }) {
     const rooms = new Set<string>(['staff:privileged']);
     if (scope.managerId || scope.chinaManagerId) {
-      if (scope.managerId) rooms.add(`user:${scope.managerId}`);
-      if (scope.chinaManagerId) rooms.add(`user:${scope.chinaManagerId}`);
+      // ТЗ v3 р4 — адресуем в комнату с суффиксом региона, а не просто
+      // `user:{id}`. Менеджер вступает только в комнату своего региона (см.
+      // handleConnection), поэтому событие по таджикскому слоту не дойдёт до
+      // того, у кого регион «Китай», даже если он вписан в этот слот исторически.
+      if (scope.managerId) rooms.add(`user:${scope.managerId}:tj`);
+      if (scope.chinaManagerId) rooms.add(`user:${scope.chinaManagerId}:cn`);
     } else {
       rooms.add('staff');
     }

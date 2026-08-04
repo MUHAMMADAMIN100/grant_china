@@ -888,13 +888,16 @@ export class StudentsService implements OnModuleInit {
     return { ok: true };
   }
 
-  async stats(user?: { id: string; role: Role }) {
-    // Soft-delete: считаем только активных. EMPLOYEE видит только своих.
+  async stats(user?: CurrentUser) {
+    // Soft-delete: считаем только активных. EMPLOYEE видит только своих —
+    // ТЗ v3 р4: по профильному для его региона полю, той же функцией, что и
+    // список. Иначе дашборд показывал бы число, которое не сходится со
+    // списком (риск 6 проекта архитектора, только про регион).
     const where: Prisma.StudentWhereInput =
       user && user.role === 'EMPLOYEE'
         ? {
             deletedAt: null,
-            OR: [{ managerId: user.id }, { chinaManagerId: user.id }],
+            OR: assignedToUserFilter(user) as Prisma.StudentWhereInput[],
           }
         : { deletedAt: null };
     const [total, byCabinet, byDirection] = await Promise.all([

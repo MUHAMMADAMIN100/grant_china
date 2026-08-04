@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { Notification, Role } from '@prisma/client';
+import { Notification, Region, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { notDeleted } from '../common/soft-delete';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedFieldsForRegion, assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { isPrivileged } from '../common/roles';
 
 interface NotifyPayload {
@@ -264,9 +264,16 @@ export class NotificationsService {
     // студента. Студенты, заведённые до волны 0.2, менеджера не имеют
     // (бэкфилла не делали — данные не трогаем), поэтому мягкое правило
     // продолжило бы показывать их ПД всем. Требуем явного совпадения.
+    //
+    // ТЗ v3 р4 — «мой» считается по профильному для региона полю: менеджер,
+    // которого перевели в другую страну, не должен продолжать читать ФИО и
+    // телефоны студентов, которых больше не ведёт.
     const isAssignedToMe = (
       rec: { managerId: string | null; chinaManagerId: string | null },
-    ) => rec.managerId === user.id || rec.chinaManagerId === user.id;
+    ) =>
+      assignedFieldsForRegion((user as { region?: Region }).region).some((field) =>
+        field === 'managerId' ? rec.managerId === user.id : rec.chinaManagerId === user.id,
+      );
 
     return notifications.filter((n) => {
       const payload = n.payload as { studentId?: string; applicationId?: string } | null;

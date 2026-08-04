@@ -22,7 +22,7 @@ import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FileResolverService } from '../files/file-resolver.service';
 import { canManageFinance, canWriteFinance, isPrivileged } from '../common/roles';
-import { assignedOrFreeFilter, canAccessStudentRecord } from '../common/access';
+import { assignedFieldsForRegion, assignedOrFreeFilter, canAccessStudentRecord } from '../common/access';
 import { phoneContainsConditions } from '../common/phone';
 import { localDayStart } from '../scheduler/time';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -316,7 +316,15 @@ export class PaymentsService {
    */
   private ensureReadAccess(student: { managerId: string | null; chinaManagerId?: string | null }, user: CurrentUser, notFoundMessage: string) {
     if (isPrivileged(user.role)) return;
-    const assigned = student.managerId === user.id || student.chinaManagerId === user.id;
+    // ТЗ v3 р4 — регион решает, по какому полю студент считается своим.
+    // Ручная формула здесь пережила добавление региона: СПИСОК платежей уже
+    // резался правильно, а точечные чтения (findOne, getSchedule, summary)
+    // отдавали суммы, график и ссылки на чеки по студенту чужой страны —
+    // причём studentId в summary/schedule приходит параметром запроса, так
+    // что знать его заранее было не нужно.
+    const assigned = assignedFieldsForRegion(user.region).some((field) =>
+      field === 'managerId' ? student.managerId === user.id : student.chinaManagerId === user.id,
+    );
     if (!assigned) throw new NotFoundException(notFoundMessage);
   }
 
@@ -958,9 +966,19 @@ export class PaymentsService {
     // «я ручаюсь, что деньги пришли»; поручиться за чужие цифры по студенту,
     // за которого не отвечаешь, нельзя. Студенты без менеджера остались
     // только легаси (с волны 0.2 менеджер назначается при создании).
+    //
+    // ТЗ v3 р4 — «назначен» считается по профильному для региона полю. Без
+    // этого менеджер, оказавшийся в непрофильном слоте студента чужой страны,
+    // подавал по нему платёж в очередь на одобрение Основателю: и доступ к
+    // чужим деньгам, и запись в аудит-следе от имени того, кто этого студента
+    // не ведёт.
     const isAssignedManager =
       !!payment &&
-      (payment.student.managerId === user.id || payment.student.chinaManagerId === user.id);
+      assignedFieldsForRegion(user.region).some((field) =>
+        field === 'managerId'
+          ? payment.student.managerId === user.id
+          : payment.student.chinaManagerId === user.id,
+      );
     const allowed =
       payment && (isPrivileged(user.role) || payment.createdById === user.id || isAssignedManager);
     // 404 в обоих случаях (Проблема 9 аудита волны 1) — не быть оракулом существования.
@@ -1305,6 +1323,11 @@ export class PaymentsService {
   }
 
   async removeReceipt(docId: string, user: CurrentUser) {
+    // ТЗ v3 р4 — единственная операция записи в финансах, где этой проверки не
+    // было. Через HTTP не эксплуатировалось (@Roles на эндпоинте стоит), но
+    // уровень защиты здесь был ниже, чем у соседей, — а исходная дыра появилась
+    // ровно так: на одном методе проверку забыли.
+    this.assertCanWriteFinance(user);
     const doc = await this.prisma.document.findFirst({
       where: { id: docId, deletedAt: null, type: 'RECEIPT', paymentId: { not: null } },
       include: { payment: { select: PAYMENT_SELECT } },

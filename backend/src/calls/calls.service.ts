@@ -1,14 +1,16 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { CallDirection, CallStatus, Prisma, Role } from '@prisma/client';
+import { CallDirection, CallStatus, Prisma, Region, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isFounder, isPrivileged } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { normalizePhone } from '../common/phone';
 import { CallWebhookDto, CreateCallDto, UpdateCallDto } from './dto/call.dto';
 
-export type CurrentUser = { id: string; role: Role };
+/** ТЗ v3 р4 — регион менеджера. Необязательный: внутренние вызовы могут
+ * собирать объект не из JWT, и отсутствие трактуется как BOTH. */
+export type CurrentUser = { id: string; role: Role; region?: Region };
 
 const CALL_INCLUDE = {
   user: { select: { id: true, fullName: true } },
@@ -117,8 +119,9 @@ export class CallsService {
       and.push({
         OR: [
           { userId: user.id },
-          { student: { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] } },
-          { application: { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] } },
+          // ТЗ v3 р4 — «свой» по профильному для региона полю, общей функцией.
+          { student: { OR: assignedToUserFilter(user) as Prisma.StudentWhereInput[] } },
+          { application: { OR: assignedToUserFilter(user) as Prisma.ApplicationWhereInput[] } },
           // «Свободные» карточки (ответственный ещё не назначен) — их даёт
           // canAccessStudentRecord, а значит findOne такой звонок открывает.
           // Без этих веток список и карточка расходились: менеджер видел 404

@@ -1036,13 +1036,14 @@ export class ApplicationsService implements OnModuleInit {
     return { ok: true };
   }
 
-  async stats(user?: { id: string; role: Role }) {
+  async stats(user?: { id: string; role: Role; region?: Region }) {
     // Soft-delete + не в архиве: список по умолчанию (вкладка «Все») тоже
     // исключает архивные (см. tabCondition('all')) — если дашборд считать
     // иначе, числа между ним и списком разойдутся (риск 6 проекта архитектора).
+    // ТЗ v3 р4: и по региону тоже — той же функцией, что и список.
     const scope: Prisma.ApplicationWhereInput =
       user && user.role === 'EMPLOYEE'
-        ? { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] }
+        ? { OR: assignedToUserFilter(user) as Prisma.ApplicationWhereInput[] }
         : {};
     const where: Prisma.ApplicationWhereInput = { deletedAt: null, archivedAt: null, ...scope };
     const [total, byStatus, byDirection, archived] = await Promise.all([

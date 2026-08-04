@@ -30,11 +30,60 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { fixFilenameEncoding } from '../common/upload-utils';
 import { parsePage, parsePageSize } from '../common/pagination';
 
+/**
+ * Канонический тип чека — ЕДИНСТВЕННЫЙ источник и расширения на диске, и
+ * mimeType в базе. Ни то, ни другое больше не берётся из присланного клиентом.
+ *
+ * Раньше расширение бралось из extname(originalname), а mimeType — прямо из
+ * заголовка части. Оба целиком под контролем загружающего: файл с именем
+ * evil.html и заголовком application/pdf ложился на диск как <uuid>.html, а
+ * имя ok.jpg с заголовком text/html записывало text/html в Document.mimeType,
+ * откуда он уезжал в заголовок ответа при отдаче файла.
+ *
+ * Сегодня к исполнению это не приводит (uploads.controller.ts отдаёт неизвестные
+ * типы как attachment, плюс nosniff от helmet), но вся защита держится на одном
+ * allow-list в другом модуле, а рядом живёт аварийный рубильник
+ * UPLOADS_PROTECTED=0, возвращающий раздачу файлов с диска по расширению —
+ * и тогда .html поедет inline с origin API. Проще не создавать такой файл.
+ */
+const RECEIPT_TYPES: Array<{ ext: string; mime: string; extRe: RegExp; mimeRe: RegExp }> = [
+  { ext: '.jpg', mime: 'image/jpeg', extRe: /\.jpe?g$/i, mimeRe: /^image\/jpe?g$/i },
+  { ext: '.png', mime: 'image/png', extRe: /\.png$/i, mimeRe: /^image\/png$/i },
+  { ext: '.webp', mime: 'image/webp', extRe: /\.webp$/i, mimeRe: /^image\/webp$/i },
+  { ext: '.heic', mime: 'image/heic', extRe: /\.heic$/i, mimeRe: /^image\/heic$/i },
+  { ext: '.heif', mime: 'image/heif', extRe: /\.heif$/i, mimeRe: /^image\/heif$/i },
+  { ext: '.pdf', mime: 'application/pdf', extRe: /\.pdf$/i, mimeRe: /^application\/pdf$/i },
+  {
+    ext: '.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    extRe: /\.docx$/i,
+    mimeRe: /^application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document$/i,
+  },
+];
+
+/**
+ * MIME приоритетнее расширения: заголовок ставит браузер по фактическому
+ * содержимому, а имя набирает человек. Если MIME неизвестен (HEIC с айфона
+ * часто приезжает как application/octet-stream) — падаем на расширение.
+ * null означает «ни то, ни другое не опознано» — такой файл фильтр не пропустит.
+ */
+function canonicalReceiptType(file: { mimetype: string; originalname: string }) {
+  return (
+    RECEIPT_TYPES.find((t) => t.mimeRe.test(file.mimetype)) ??
+    RECEIPT_TYPES.find((t) => t.extRe.test(file.originalname)) ??
+    null
+  );
+}
+
 const receiptStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
   filename: (_req, file, cb) => {
     const id = randomUUID();
-    cb(null, `${id}${extname(file.originalname)}`);
+    const canonical = canonicalReceiptType(file);
+    // Фильтр уже отбил всё, что не опознано, поэтому ветка с extname
+    // недостижима; оставлена, чтобы будущая правка фильтра не привела к
+    // файлу вообще без расширения.
+    cb(null, `${id}${canonical ? canonical.ext : extname(file.originalname)}`);
   },
 });
 
@@ -67,6 +116,20 @@ const receiptFileFilter = (
   file: Express.Multer.File,
   cb: (error: Error | null, acceptFile: boolean) => void,
 ) => {
+  // Достаточно совпадения ОДНОГО из двух — и это осознанно, а не небрежность.
+  // Требовать совпадения обоих нельзя: HEIC с айфона регулярно приезжает с
+  // Content-Type: application/octet-stream, и строгая проверка отбивала бы
+  // фотографию чека, снятую телефоном, — самый частый способ его приложить.
+  //
+  // Опасность «или» в другом: оба входа под контролем клиента, и раньше из них
+  // же собиралось имя файла на диске и mimeType в базе. Имя evil.html с
+  // заголовком application/pdf проходило фильтр и ложилось на диск как .html,
+  // а имя ok.jpg с заголовком text/html сохраняло text/html в Document.mimeType,
+  // откуда он попадал в заголовок ответа при отдаче файла.
+  //
+  // Закрыто не ужесточением фильтра, а тем, что НИ расширение на диске, НИ
+  // mimeType в базе больше не берутся из присланного: и то и другое
+  // выводится из белого списка (canonicalReceiptType ниже).
   if (!(ALLOWED_RECEIPT_MIME_RE.test(file.mimetype) || ALLOWED_RECEIPT_EXT_RE.test(file.originalname))) {
     return cb(new BadRequestException('Чек должен быть фото (JPG/PNG/WEBP/HEIC), PDF или DOCX'), false);
   }
@@ -120,7 +183,11 @@ function toReceiptInputs(files: Express.Multer.File[] | undefined): ReceiptFileI
   return list.map((file) => ({
     filename: file.filename,
     originalName: fixFilenameEncoding(file.originalname),
-    mimeType: file.mimetype,
+    // Канонический тип из белого списка, а НЕ присланный заголовок: именно он
+    // потом уезжает в Content-Type при отдаче файла (uploads.controller.ts).
+    // Раньше сюда попадал сырой mimetype, и text/html, приложенный к файлу с
+    // именем ok.jpg, сохранялся в базе как есть.
+    mimeType: canonicalReceiptType(file)?.mime ?? file.mimetype,
     size: file.size,
     url: `/uploads/${file.filename}`,
   }));

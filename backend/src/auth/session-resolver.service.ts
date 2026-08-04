@@ -1,13 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Role, StudentStatus } from '@prisma/client';
+import { Region, Role, StudentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTH_COOKIE_NAME, STUDENT_COOKIE_NAME } from './cookie-helpers';
 import { getStaffState } from './jwt.strategy';
 import { getStudentState } from '../student-auth/student-jwt.guard';
 
-export type StaffIdentity = { kind: 'staff'; id: string; role: Role };
+/**
+ * ТЗ v3 р4 — регион ОБЯЗАТЕЛЕН в личности сотрудника, а не опционален.
+ *
+ * Без него весь файловый тракт работал мимо регионов: UploadsAccessService
+ * передаёт эту личность в canAccessStudentRecord, а там отсутствие региона
+ * трактуется как BOTH — «как было до разделения». В результате карточка
+ * студента чужой страны честно отдавала менеджеру 404, а скан паспорта того
+ * же студента по прямой ссылке /uploads/<файл> отдавался с кодом 200.
+ * Ссылку менеджер получал из разделов, которые ему видны.
+ *
+ * Тип обязательный намеренно: пропуск такого поля должен ловить компилятор,
+ * а не пентест. Значение и так лежит в кэше состояния сотрудника рядом с
+ * ролью (getStaffState), доставать его неоткуда не нужно.
+ */
+export type StaffIdentity = { kind: 'staff'; id: string; role: Role; region: Region };
 export type StudentIdentity = { kind: 'student'; id: string; status: StudentStatus };
 export type AnonymousIdentity = { kind: 'anonymous' };
 export type SessionIdentity = StaffIdentity | StudentIdentity | AnonymousIdentity;
@@ -63,7 +77,7 @@ export class SessionResolverService {
       const payload = await this.jwt.verifyAsync<{ sub: string; role: string }>(token, { secret });
       const state = await getStaffState(this.prisma, payload.sub);
       if (!state || state.deletedAt) return null;
-      return { kind: 'staff', id: payload.sub, role: state.role };
+      return { kind: 'staff', id: payload.sub, role: state.role, region: state.region };
     } catch {
       return null; // невалидная подпись/истёк токен — не роняем запрос
     }

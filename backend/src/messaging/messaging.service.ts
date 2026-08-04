@@ -1,18 +1,20 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { MessageDirection, Prisma, Role } from '@prisma/client';
+import { MessageDirection, Prisma, Region, Role } from '@prisma/client';
 import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { normalizePhone } from '../common/phone';
 import { canSendTo } from './channels';
 import { TelegramClientBotService } from './telegram-client.service';
 import { AssignConversationDto, LinkConversationDto, SendMessageDto } from './dto/messaging.dto';
 
-export type CurrentUser = { id: string; role: Role };
+/** ТЗ v3 р4 — регион менеджера. Необязательный: внутренние вызовы могут
+ * собирать объект не из JWT, и отсутствие трактуется как BOTH. */
+export type CurrentUser = { id: string; role: Role; region?: Region };
 
 const CONVERSATION_INCLUDE = {
   student: { select: { id: true, fullName: true, managerId: true, chinaManagerId: true } },
@@ -59,12 +61,16 @@ export class MessagingService {
    */
   private scopeWhere(user: CurrentUser): Prisma.ConversationWhereInput {
     if (isPrivileged(user.role)) return {};
+    // ТЗ v3 р4 — «свой» считается по профильному для региона полю. Общая
+    // функция, а не копия условия: до неё формула была разбросана по проекту,
+    // и добавление региона обошло половину мест.
+    const mine = assignedToUserFilter(user) as Prisma.StudentWhereInput[];
     return {
       OR: [
         { studentId: null, applicationId: null },
         { assignedToId: user.id },
-        { student: { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] } },
-        { application: { OR: [{ managerId: user.id }, { chinaManagerId: user.id }] } },
+        { student: { OR: mine } },
+        { application: { OR: mine as Prisma.ApplicationWhereInput[] } },
       ],
     };
   }
