@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { aiAsk, aiClearHistory, aiHistory, type AiChatMessage } from '../api/knowledge';
 import { useUI } from '../ui/Dialogs';
+import { useAuth } from '../store/auth';
+import { isPrivileged } from '../api/types';
 import Icon from '../Icon';
 
 /**
@@ -17,6 +19,7 @@ import Icon from '../Icon';
  */
 export default function AiAssistant() {
   const { confirm, toast } = useUI();
+  const me = useAuth((s) => s.user);
   const [enabled, setEnabled] = useState(false);
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<AiChatMessage[]>([]);
@@ -100,14 +103,20 @@ export default function AiAssistant() {
     }
   };
 
-  if (!enabled) return null;
-
+  // Кнопка видна ВСЕГДА, даже когда помощник не настроен (решение заказчика).
+  //
+  // Раньше здесь стоял `if (!enabled) return null` с рассуждением «кнопка,
+  // которая гарантированно ответит ошибкой, хуже её отсутствия». На практике
+  // вышло иначе: угол экрана оставался пустым, и понять, что помощник вообще
+  // существует и чего ему не хватает, было неоткуда — ни сотруднику, ни
+  // руководству. Пустое место не объясняет себя, а панель с объяснением —
+  // объясняет.
   return (
     <>
       <motion.button
         className="ai-fab"
         onClick={() => setOpen((v) => !v)}
-        title="AI-помощник по регламентам компании"
+        title={enabled ? 'AI-помощник' : 'AI-помощник ещё не подключён'}
         whileHover={{ scale: 1.08 }}
         whileTap={{ scale: 0.94 }}
         initial={{ opacity: 0, scale: 0.8 }}
@@ -132,7 +141,9 @@ export default function AiAssistant() {
                   <Icon name="smart_toy" size={18} />
                   Помощник
                 </div>
-                <div className="ai-panel-sub">Отвечает по базе знаний компании</div>
+                <div className="ai-panel-sub">
+                  {enabled ? 'Регламенты компании и ваши студенты' : 'Пока не подключён'}
+                </div>
               </div>
               {messages.length > 0 && (
                 <button className="ai-panel-clear" onClick={onClear} title="Очистить переписку">
@@ -142,13 +153,44 @@ export default function AiAssistant() {
             </div>
 
             <div className="ai-feed" ref={feedRef}>
-              {messages.length === 0 && !asking && (
+              {/* Помощник не настроен — объясняем причину РАЗНЫМИ словами в
+                  зависимости от роли. Основатель и Администратор могут это
+                  исправить, поэтому им называем переменную и место. Менеджеру
+                  имя переменной бесполезно: задать её он всё равно не может, а
+                  техническая подробность в ответ на «почему не работает»
+                  выглядит как отписка. Ему нужно знать, к кому идти. */}
+              {!enabled && (
+                <div className="ai-empty">
+                  <div className="empty-icon"><Icon name="power_off" size={36} /></div>
+                  {isPrivileged(me?.role) ? (
+                    <>
+                      Помощник ещё не подключён. Чтобы он заработал, добавьте в переменные
+                      окружения сервера ключ <b>GEMINI_API_KEY</b> — его выдают на
+                      <b> aistudio.google.com</b> в разделе «Get API key».
+                      <div className="ai-empty-note">
+                        После сохранения сервер перезапустится сам, и помощник станет доступен
+                        всем сотрудникам. Пересобирать ничего не нужно.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      Помощник ещё не подключён.
+                      <div className="ai-empty-note">
+                        Обратитесь к Основателю или администратору — включение занимает минуту.
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              {enabled && messages.length === 0 && !asking && (
                 <div className="ai-empty">
                   <div className="empty-icon"><Icon name="menu_book" size={36} /></div>
-                  Спросите, как устроен процесс в компании: «Как принять оплату наличными?»,
-                  «Кто утверждает платёж?», «Что делать, если студент отменил перелёт?».
+                  Спросите про порядок работы — «Кто утверждает платёж?», «Что делать, если студент
+                  отменил перелёт?» — или про своих студентов: «У кого нет визы?», «Кому продлевать
+                  грант в этом году?».
                   <div className="ai-empty-note">
-                    Помощник знает только регламенты из раздела «База знаний» и не видит данные студентов.
+                    Помощник видит регламенты из раздела «База знаний» и только тех студентов,
+                    которые доступны вам.
                   </div>
                 </div>
               )}
@@ -173,13 +215,18 @@ export default function AiAssistant() {
               </div>
             )}
 
+            {/* Поле ввода выключено, пока помощник не настроен. Оставить его
+                рабочим означало бы дать сотруднику написать вопрос, нажать
+                «отправить» и получить ошибку — притом что причина уже написана
+                прямо над полем. */}
             <form className="ai-composer" onSubmit={onAsk}>
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Ваш вопрос..."
+                placeholder={enabled ? 'Ваш вопрос...' : 'Помощник не подключён'}
                 rows={2}
                 maxLength={2000}
+                disabled={!enabled}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -187,7 +234,11 @@ export default function AiAssistant() {
                   }
                 }}
               />
-              <button type="submit" className="btn btn-primary btn-sm" disabled={!question.trim() || asking}>
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={!enabled || !question.trim() || asking}
+              >
                 <Icon name="send" size={16} />
               </button>
             </form>
