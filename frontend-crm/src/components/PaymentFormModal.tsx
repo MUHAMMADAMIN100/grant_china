@@ -31,18 +31,6 @@ import { todayInputValue } from '../utils/datetime';
  */
 const todayStr = todayInputValue;
 
-/**
- * ТЗ v3 раздел 2: POST /payments/:id/receipts после перехода на мультизагрузку
- * возвращает МАССИВ созданных документов. Хелпер addPaymentReceipt в
- * api/payments.ts всё ещё типизирован как один Document (файл вне зоны этой
- * задачи — см. concerns), поэтому нормализуем ответ здесь и переживаем обе
- * формы: так экран не сломается ни до, ни после правки хелпера.
- */
-const asReceiptList = (res: unknown): PaymentReceipt[] => {
-  if (Array.isArray(res)) return res as PaymentReceipt[];
-  return res ? [res as PaymentReceipt] : [];
-};
-
 type Props = {
   studentId: string;
   stage: PaymentStage;
@@ -222,7 +210,7 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
       // Одним запросом: бэкенд принимает пачку, и дробить её на N обращений
       // значит получить состояние «часть чеков легла, часть нет» вместо
       // «легли все или ни одного».
-      const added = asReceiptList(await addPaymentReceipts(payment.id, picked));
+      const added = await addPaymentReceipts(payment.id, picked);
       // Список чеков бэкенд отдаёт по убыванию createdAt (PAYMENT_SELECT.receipts),
       // поэтому пачку кладём сверху в обратном порядке — иначе локальный список
       // разошёлся бы с тем, что придёт после перезагрузки карточки.

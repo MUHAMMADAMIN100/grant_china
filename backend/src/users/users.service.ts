@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { Prisma, Region, Role } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -48,8 +49,8 @@ export class UsersService {
     const where: any = { ...notDeleted };
     if (search) {
       where.OR = [
-        { email: { contains: search, mode: 'insensitive' as const } },
-        { fullName: { contains: search, mode: 'insensitive' as const } },
+        { email: containsInsensitive(search) },
+        { fullName: containsInsensitive(search) },
       ];
     }
     const users = await this.prisma.user.findMany({

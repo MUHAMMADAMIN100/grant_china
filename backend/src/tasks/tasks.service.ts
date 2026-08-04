@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role, TaskStatus } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -119,8 +120,8 @@ export class TasksService {
     if (search) {
       and.push({
         OR: [
-          { title: { contains: search, mode: 'insensitive' as const } },
-          { description: { contains: search, mode: 'insensitive' as const } },
+          { title: containsInsensitive(search) },
+          { description: containsInsensitive(search) },
         ],
       });
     }

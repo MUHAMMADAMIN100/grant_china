@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException, OnModuleInit } from '@nestjs/common';
-import { ApplicationStatus, Direction, Prisma, Role } from '@prisma/client';
+import { ApplicationStatus, Direction, Prisma, Region, Role } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
@@ -11,7 +12,7 @@ import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { REQUIRED_DOCUMENT_TYPES } from '../common/documents';
 import { isPrivileged } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
@@ -82,6 +83,8 @@ export interface ApplicationListFilters {
   managerUserId?: string;
   currentUserId?: string;
   currentUserRole?: Role;
+  /** ТЗ v3 р4 — регион менеджера. undefined = как раньше (оба поля). */
+  currentUserRegion?: Region;
   /** ТЗ 3.1 — источник привлечения. 'NONE' — отдельный пункт «Не указан» (source: null). */
   source?: string;
   /** ТЗ 3.1 — фильтр по датам (createdAt), копия подхода activity.service.ts. */
@@ -324,11 +327,17 @@ export class ApplicationsService implements OnModuleInit {
       (filters.mine && filters.currentUserId) ||
       (filters.currentUserRole === 'EMPLOYEE' && filters.currentUserId);
     if (restrictToMine) {
+      // ТЗ v3 р4 — регион решает, по какому полю заявка считается «моей»:
+      // TJ — managerId, CN — chinaManagerId, BOTH — по любому из двух.
+      // Формула общая с canAccessStudentRecord и со списками студентов,
+      // грантов, билетов, договоров и платежей: разъехавшись, они дали бы
+      // заявку, видимую в списке, но недоступную при открытии.
       and.push({
-        OR: [
-          { managerId: filters.currentUserId },
-          { chinaManagerId: filters.currentUserId },
-        ],
+        OR: assignedToUserFilter({
+          id: filters.currentUserId!,
+          role: filters.currentUserRole ?? 'EMPLOYEE',
+          region: filters.currentUserRegion,
+        }) as Prisma.ApplicationWhereInput[],
       });
     }
     // Фильтр по конкретному менеджеру: показываем заявки где он
@@ -376,12 +385,12 @@ export class ApplicationsService implements OnModuleInit {
       // поэтому запрос и хранимое значение гарантированно приводятся к одному
       // виду, а не к двум похожим.
       const or: Prisma.ApplicationWhereInput[] = [
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        { fullName: containsInsensitive(filters.search) },
         // Сырое поле оставляем: у заявок, заведённых из students.service
         // (`phones[0] || ''`), и у части исторических строк phoneNormalized
         // остаётся null — по ним ищет только эта ветка.
-        { phone: { contains: filters.search, mode: 'insensitive' } },
-        { email: { contains: filters.search, mode: 'insensitive' } },
+        { phone: containsInsensitive(filters.search) },
+        { email: containsInsensitive(filters.search) },
         // Обе формы запроса разом. Пустой массив при текстовом запросе
         // («Иван»): `contains ''` совпало бы с каждой заявкой с распознанным
         // телефоном, и поиск по имени вернул бы всю базу.

@@ -103,7 +103,21 @@ const receiptUploadOptions = {
  * внутри payments.service.ts). Всегда массив — пустой, если файлов не прислали.
  */
 function toReceiptInputs(files: Express.Multer.File[] | undefined): ReceiptFileInput[] {
-  return (files ?? []).map((file) => ({
+  const list = files ?? [];
+  // Пустой файл — не подтверждение оплаты. Проверять это в fileFilter нельзя:
+  // на момент его вызова размер ещё неизвестен (multer зовёт фильтр по
+  // заголовкам части, до чтения тела), поэтому отсекаем здесь.
+  //
+  // Инвариант ТЗ 1.3 требует «хотя бы один чек» для Проживания и Питания —
+  // и файл в ноль байт формально его закрывал, не давая никакого реального
+  // доказательства. Именно поэтому это не косметика.
+  const empty = list.find((f) => !f.size);
+  if (empty) {
+    throw new BadRequestException(
+      `Файл «${fixFilenameEncoding(empty.originalname)}» пустой (0 байт) — он не может служить подтверждением оплаты`,
+    );
+  }
+  return list.map((file) => ({
     filename: file.filename,
     originalName: fixFilenameEncoding(file.originalname),
     mimeType: file.mimetype,

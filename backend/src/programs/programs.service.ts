@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { Direction, Prisma, Program, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { containsInsensitive } from '../common/search';
 import { CreateProgramDto } from './dto/create-program.dto';
 import { UpdateProgramDto } from './dto/update-program.dto';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -41,8 +42,8 @@ export class ProgramsService {
   }) {
     // Soft-delete: всегда исключаем удалённые программы
     const where: Prisma.ProgramWhereInput = { deletedAt: null };
-    if (filters.city) where.city = { contains: filters.city, mode: 'insensitive' };
-    if (filters.major) where.major = { contains: filters.major, mode: 'insensitive' };
+    if (filters.city) where.city = containsInsensitive(filters.city);
+    if (filters.major) where.major = containsInsensitive(filters.major);
     if (filters.direction) where.direction = filters.direction;
     if (typeof filters.minCost === 'number' || typeof filters.maxCost === 'number') {
       where.cost = {};
@@ -52,10 +53,10 @@ export class ProgramsService {
     if (filters.publishedOnly) where.published = true;
     if (filters.search) {
       where.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { university: { contains: filters.search, mode: 'insensitive' } },
-        { major: { contains: filters.search, mode: 'insensitive' } },
-        { city: { contains: filters.search, mode: 'insensitive' } },
+        { name: containsInsensitive(filters.search) },
+        { university: containsInsensitive(filters.search) },
+        { major: containsInsensitive(filters.search) },
+        { city: containsInsensitive(filters.search) },
       ];
     }
     return this.prisma.program.findMany({

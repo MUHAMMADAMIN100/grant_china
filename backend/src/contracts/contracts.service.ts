@@ -1,17 +1,23 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ContractStatus, Prisma, Role } from '@prisma/client';
+import { ContractStatus, Prisma, Region, Role } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged, isFounder, canWriteFinance, canManageFinance } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedOrFreeFilter, canAccessStudentRecord } from '../common/access';
 import { phoneContainsConditions } from '../common/phone';
 import { parseCalendarDate, formatDateRuShort } from '../grants/grant-year';
 import { AMOUNT_RE } from '../payments/dto/create-payment.dto';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { SignContractDto, TerminateContractDto, UpdateContractDto } from './dto/update-contract.dto';
 
-export type CurrentUser = { id: string; role: Role };
+/**
+ * ТЗ v3 р4 — регион менеджера. Необязательный: часть внутренних вызовов
+ * собирает объект не из JWT, а отсутствие региона трактуется как BOTH,
+ * то есть как поведение до разделения по регионам.
+ */
+export type CurrentUser = { id: string; role: Role; region?: Region };
 
 const CONTRACT_INCLUDE = {
   student: { select: { id: true, fullName: true, managerId: true, chinaManagerId: true } },
@@ -69,7 +75,8 @@ export class ContractsService {
   private studentScopeWhere(user: CurrentUser, extra: Prisma.StudentWhereInput[] = []): Prisma.StudentWhereInput {
     const and: Prisma.StudentWhereInput[] = [...extra];
     if (!isPrivileged(user.role)) {
-      and.push({ OR: [{ managerId: null, chinaManagerId: null }, { managerId: user.id }, { chinaManagerId: user.id }] });
+      // ТЗ v3 р4 — общая формула с canAccessStudentRecord (см. common/access.ts).
+      and.push({ OR: assignedOrFreeFilter(user) as Prisma.StudentWhereInput[] });
     }
     return and.length ? { deletedAt: null, AND: and } : { deletedAt: null };
   }
@@ -144,7 +151,7 @@ export class ContractsService {
       // AND, и два отдельных условия потребовали бы совпадения И по ФИО,
       // И по телефону одновременно — реестр всегда оказывался бы пустым.
       const searchOr: Prisma.StudentWhereInput[] = [
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        { fullName: containsInsensitive(filters.search) },
         // Два варианта запроса (цифры как есть и национальная форма) — общая
         // функция, потому что номер мог быть записан и с кодом страны, и без.
         // Пустой массив при текстовом запросе: `contains ''` вернул бы всё.
@@ -196,7 +203,7 @@ export class ContractsService {
     let managerId: string | null = student.managerId ?? user.id;
     if (dto.managerId !== undefined) {
       if (!isPrivileged(user.role)) {
-        throw new ForbiddenException('Только Основатель или администратор может назначить другого ответственного за договор');
+        throw new ForbiddenException('Назначить ответственным за договор другого сотрудника может только Основатель');
       }
       if (dto.managerId) {
         const exists = await this.prisma.user.findFirst({ where: { id: dto.managerId, deletedAt: null }, select: { id: true } });

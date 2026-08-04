@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Direction } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -229,8 +230,8 @@ export class StudentAuthController {
     @Query('search') search?: string,
   ) {
     const where: any = { published: true, deletedAt: null };
-    if (city) where.city = { contains: city, mode: 'insensitive' };
-    if (major) where.major = { contains: major, mode: 'insensitive' };
+    if (city) where.city = containsInsensitive(city);
+    if (major) where.major = containsInsensitive(major);
     if (direction) where.direction = direction;
     if (minCost || maxCost) {
       where.cost = {};
@@ -239,10 +240,10 @@ export class StudentAuthController {
     }
     if (search) {
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { university: { contains: search, mode: 'insensitive' } },
-        { major: { contains: search, mode: 'insensitive' } },
-        { city: { contains: search, mode: 'insensitive' } },
+        { name: containsInsensitive(search) },
+        { university: containsInsensitive(search) },
+        { major: containsInsensitive(search) },
+        { city: containsInsensitive(search) },
       ];
     }
     return this.prisma.program.findMany({

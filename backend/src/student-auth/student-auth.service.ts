@@ -142,7 +142,17 @@ export class StudentAuthService {
       include: STUDENT_INCLUDE,
     });
     if (!student) throw new UnauthorizedException('Студент не найден');
-    const { password, ...safe } = student as any;
+    // include на верхнеуровневой модели тянет ВСЕ её скаляры — поэтому каждое
+    // новое поле Student по умолчанию уезжает студенту, и вырезать лишнее
+    // приходится здесь явно. Так когда-то утёк bcrypt-хэш пароля.
+    //
+    // phoneSearch — служебная строка для поиска по телефону (см. common/phone.ts).
+    // Никакой новой информации студенту она не даёт: это цифры его же номера,
+    // который тут же лежит в поле phones. Но в контракте API её быть не должно:
+    // фронтенд её не читает (проверено по собранным бандлам), а формат поля
+    // служебный и может измениться — тогда утечка станет настоящей, причём
+    // незаметно.
+    const { password, phoneSearch, ...safe } = student as any;
     // Скрываем URL BANK/MEDICAL — студент не должен их скачивать.
     if (safe.documents) {
       safe.documents = sanitizeStudentDocuments(safe.documents);

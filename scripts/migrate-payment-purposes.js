@@ -63,6 +63,12 @@ const LABEL = {
 };
 
 function resolveDatabaseUrl() {
+  // Явное указание базы через окружение — чтобы скрипт можно было ПРОВЕРИТЬ
+  // на копии данных, а не выяснять его поведение сразу на боевой. Отдельное
+  // имя, а не DATABASE_URL: та переменная уже лежит в backend/.env и указывает
+  // на локальную разработку, и молчаливое переключение на неё было бы хуже
+  // отсутствия возможности вовсе.
+  if (process.env.GC_DB_URL) return { url: process.env.GC_DB_URL, source: 'GC_DB_URL' };
   const files = [
     path.join(REPO, 'backend', '.env.production.local'),
     path.join(REPO, 'backend', '.env'),

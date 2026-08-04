@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { MessageDirection, Prisma, Role } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -102,10 +103,10 @@ export class MessagingService {
     if (filters.search) {
       and.push({
         OR: [
-          { title: { contains: filters.search, mode: 'insensitive' } },
-          { username: { contains: filters.search, mode: 'insensitive' } },
-          { phone: { contains: filters.search, mode: 'insensitive' } },
-          { student: { fullName: { contains: filters.search, mode: 'insensitive' } } },
+          { title: containsInsensitive(filters.search) },
+          { username: containsInsensitive(filters.search) },
+          { phone: containsInsensitive(filters.search) },
+          { student: { fullName: containsInsensitive(filters.search) } },
         ],
       });
     }

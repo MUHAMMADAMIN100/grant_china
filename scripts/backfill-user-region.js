@@ -38,6 +38,9 @@ const REPO = path.join(__dirname, '..');
 const APPLY = process.argv.includes('--apply');
 
 function resolveDatabaseUrl() {
+  // См. пояснение в migrate-payment-purposes.js: явный GC_DB_URL позволяет
+  // прогнать скрипт на копии данных перед боевым запуском.
+  if (process.env.GC_DB_URL) return { url: process.env.GC_DB_URL, source: 'GC_DB_URL' };
   const files = [
     path.join(REPO, 'backend', '.env.production.local'),
     path.join(REPO, 'backend', '.env'),

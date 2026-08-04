@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Role, TicketStatus } from '@prisma/client';
+import { Prisma, Region, Role, TicketStatus } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedOrFreeFilter, canAccessStudentRecord } from '../common/access';
 import { normalizeCity } from '../common/china-cities';
 import { phoneContainsConditions } from '../common/phone';
 import { formatLocalDateTime } from '../scheduler/time';
@@ -12,7 +13,12 @@ import { TasksService } from '../tasks/tasks.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 
-export type CurrentUser = { id: string; role: Role };
+/**
+ * ТЗ v3 р4 — регион менеджера. Необязательный: часть внутренних вызовов
+ * собирает объект не из JWT, а отсутствие региона трактуется как BOTH,
+ * то есть как поведение до разделения по регионам.
+ */
+export type CurrentUser = { id: string; role: Role; region?: Region };
 
 /** Лёгкий контракт файла — сервис не зависит от Express/Multer типов (см. payments.service.ReceiptFileInput). */
 export interface TicketFileInput {
@@ -99,7 +105,8 @@ export class TicketsService {
   private studentScopeWhere(user: CurrentUser, extra: Prisma.StudentWhereInput[] = []): Prisma.StudentWhereInput {
     const and: Prisma.StudentWhereInput[] = [...extra];
     if (!isPrivileged(user.role)) {
-      and.push({ OR: [{ managerId: null, chinaManagerId: null }, { managerId: user.id }, { chinaManagerId: user.id }] });
+      // ТЗ v3 р4 — общая формула с canAccessStudentRecord (см. common/access.ts).
+      and.push({ OR: assignedOrFreeFilter(user) as Prisma.StudentWhereInput[] });
     }
     return and.length ? { deletedAt: null, AND: and } : { deletedAt: null };
   }
@@ -164,9 +171,9 @@ export class TicketsService {
       // массив, и условие не добавляется вовсе: `contains: ''` совпал бы с
       // каждым студентом с заполненным телефоном и показал бы все билеты.
       const or: Prisma.TicketWhereInput[] = [
-        { flightNumber: { contains: filters.search, mode: 'insensitive' } },
-        { airline: { contains: filters.search, mode: 'insensitive' } },
-        { student: { fullName: { contains: filters.search, mode: 'insensitive' } } },
+        { flightNumber: containsInsensitive(filters.search) },
+        { airline: containsInsensitive(filters.search) },
+        { student: { fullName: containsInsensitive(filters.search) } },
       ];
       // Отдельной веткой OR, а не внутри объекта student выше: Prisma не
       // допускает два разных условия на одно relation-поле одного объекта

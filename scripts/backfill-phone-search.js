@@ -56,6 +56,9 @@ function buildPhoneSearch(phones) {
 }
 
 function resolveDatabaseUrl() {
+  // См. пояснение в migrate-payment-purposes.js: явный GC_DB_URL позволяет
+  // прогнать скрипт на копии данных перед боевым запуском.
+  if (process.env.GC_DB_URL) return { url: process.env.GC_DB_URL, source: 'GC_DB_URL' };
   const files = [
     path.join(REPO, 'backend', '.env.production.local'),
     path.join(REPO, 'backend', '.env'),
@@ -129,13 +132,28 @@ async function main() {
   }
 
   console.log('\n--- ВЫПОЛНЕНИЕ ---');
+  // Пачками по одному UPDATE, а не по строке за запрос.
+  //
+  // Первая версия делала prisma.student.update() в цикле. На 10 000 записей
+  // это 10 000 обращений к БД — почти пять минут, и любая исчезнувшая между
+  // чтением и записью строка роняла весь прогон целиком («Record to update
+  // not found»), потеряв всю уже проделанную работу. Один UPDATE ... FROM
+  // unnest() на пачку укладывается в секунды, а пропавшая строка просто не
+  // совпадает по id и молча пропускается — ровно то поведение, которое здесь
+  // и нужно.
+  const CHUNK = 500;
   let done = 0;
-  for (const s of toUpdate) {
-    await prisma.student.update({ where: { id: s.id }, data: { phoneSearch: s.next } });
-    done++;
-    if (done % 50 === 0) console.log(`  обработано ${done} из ${toUpdate.length}`);
+  for (let i = 0; i < toUpdate.length; i += CHUNK) {
+    const chunk = toUpdate.slice(i, i + CHUNK);
+    await prisma.$executeRaw`
+      UPDATE "Student" AS s
+      SET "phoneSearch" = v.val
+      FROM unnest(${chunk.map((s) => s.id)}::text[], ${chunk.map((s) => s.next)}::text[]) AS v(id, val)
+      WHERE s.id = v.id
+    `;
+    done += chunk.length;
+    console.log(`  обработано ${done} из ${toUpdate.length}`);
   }
-  console.log(`  обработано ${done} из ${toUpdate.length}`);
 
   // Проверка: после бэкфилла у каждого студента с телефоном поле заполнено.
   const stillEmpty = await prisma.student.count({

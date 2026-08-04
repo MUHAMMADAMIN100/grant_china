@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConsultationKind, ConsultationOutcome, Prisma, Role } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { ActivityService } from '../activity/activity.service';
@@ -198,10 +199,10 @@ export class ConsultationsService {
       // (ввод С кодом страны: «992901234567» → «901234567», а в колонке лежит
       // именно национальный номер). Разбор — в комментарии applications.service.
       const or: Prisma.ConsultationWhereInput[] = [
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        { fullName: containsInsensitive(filters.search) },
         // Оставляем как запасной путь для строк, где phoneNormalized = null
         // (номер не распознан normalizePhone — короче 7 цифр).
-        { phone: { contains: filters.search, mode: 'insensitive' } },
+        { phone: containsInsensitive(filters.search) },
         // Обе формы запроса. Пустой массив при поиске по имени.
         ...phoneContainsConditions('phoneNormalized', filters.search),
       ];

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { CreateKnowledgeArticleDto, UpdateKnowledgeArticleDto } from './dto/knowledge-article.dto';
@@ -45,8 +46,8 @@ export class KnowledgeService {
     if (filters.search) {
       and.push({
         OR: [
-          { title: { contains: filters.search, mode: 'insensitive' } },
-          { body: { contains: filters.search, mode: 'insensitive' } },
+          { title: containsInsensitive(filters.search) },
+          { body: containsInsensitive(filters.search) },
           { tags: { has: filters.search.toLowerCase() } },
         ],
       });

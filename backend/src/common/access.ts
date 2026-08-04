@@ -54,6 +54,25 @@ export function assignedToUserFilter(user: AccessUser): Array<Record<string, str
 }
 
 /**
+ * То же самое ПЛЮС «никому не назначенные».
+ *
+ * Этой формой пользуются списки грантов, билетов, договоров и платежей: они
+ * зеркалят canAccessStudentRecord, где студент без обоих менеджеров доступен
+ * любому сотруднику. Списки студентов и заявок пользуются assignedToUserFilter
+ * без этой ветки — там «свободные» намеренно не показываются.
+ *
+ * ОТДЕЛЬНАЯ ФУНКЦИЯ, А НЕ КОПИЯ УСЛОВИЯ В КАЖДОМ СЕРВИСЕ. До неё формула
+ * `OR: [{ managerId: null, chinaManagerId: null }, { managerId: id }, { chinaManagerId: id }]`
+ * была продублирована в четырёх файлах, и когда появился регион, обновили
+ * только canAccessStudentRecord. Получилось расхождение ровно того сорта, от
+ * которого предостерегает комментарий выше: в СПИСКЕ платежей менеджер видел
+ * записи по студенту чужого региона, а при открытии карточки получал 404.
+ */
+export function assignedOrFreeFilter(user: AccessUser): Array<Record<string, unknown>> {
+  return [{ managerId: null, chinaManagerId: null }, ...assignedToUserFilter(user)];
+}
+
+/**
  * true если пользователь может видеть/редактировать запись:
  *  - FOUNDER и ADMIN — всегда (ТЗ v3: оба видят всех студентов Таджикистана
  *    и Китая; регион на них не влияет);

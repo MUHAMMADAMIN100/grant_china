@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { containsInsensitive } from '../common/search';
 import {
   PaymentKind,
   PaymentMethod,
@@ -12,6 +13,7 @@ import {
   PaymentStage,
   PaymentStatus,
   Prisma,
+  Region,
   Role,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,7 +22,7 @@ import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FileResolverService } from '../files/file-resolver.service';
 import { canManageFinance, canWriteFinance, isPrivileged } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedOrFreeFilter, canAccessStudentRecord } from '../common/access';
 import { phoneContainsConditions } from '../common/phone';
 import { localDayStart } from '../scheduler/time';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -41,7 +43,12 @@ import {
   isPurposeAllowedForStage,
 } from './payment-rules';
 
-export type CurrentUser = { id: string; role: Role };
+/**
+ * ТЗ v3 р4 — регион менеджера. Необязательный: часть внутренних вызовов
+ * собирает объект не из JWT, а отсутствие региона трактуется как BOTH,
+ * то есть как поведение до разделения по регионам.
+ */
+export type CurrentUser = { id: string; role: Role; region?: Region };
 
 /** Лёгкий контракт файла чека — сервис не зависит от Express/Multer типов (см. students.service.addDocument). */
 export interface ReceiptFileInput {
@@ -384,11 +391,16 @@ export class PaymentsService {
     // Проблема утечки финансов (риск 3 проекта архитектора): EMPLOYEE обязан
     // видеть только платежи СВОИХ (или ещё никому не назначенных) студентов —
     // формула идентична canAccessStudentRecord(), но применена как фильтр
-    // whereна уровне списка, а не как проверка одной уже загруженной записи.
+    // where на уровне списка, а не как проверка одной уже загруженной записи.
+    //
+    // ТЗ v3 р4: «идентична» теперь обеспечена буквально — обе стороны зовут
+    // assignedOrFreeFilter из common/access.ts. Ручная копия условия здесь
+    // пережила добавление региона и показывала менеджеру СУММЫ платежей по
+    // студентам чужой страны, хотя карточка того же платежа отдавала 404.
     if (!isPrivileged(user.role)) {
       and.push({
         student: {
-          OR: [{ managerId: user.id }, { chinaManagerId: user.id }, { managerId: null, chinaManagerId: null }],
+          OR: assignedOrFreeFilter(user) as Prisma.StudentWhereInput[],
         },
       });
     } else if (filters.managerId) {
@@ -404,8 +416,8 @@ export class PaymentsService {
       // student выше: Prisma не допускает два разных условия на одно
       // relation-поле в одном объекте (тот же приём, что в tickets.service).
       const or: Prisma.PaymentWhereInput[] = [
-        { reference: { contains: filters.search, mode: 'insensitive' } },
-        { student: { fullName: { contains: filters.search, mode: 'insensitive' } } },
+        { reference: containsInsensitive(filters.search) },
+        { student: { fullName: containsInsensitive(filters.search) } },
       ];
       // Пустой массив при текстовом запросе — условие не добавится вовсе.
       for (const cond of phoneContainsConditions('phoneSearch', filters.search)) {

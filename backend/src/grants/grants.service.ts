@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { GrantIntake, GrantStatus, Prisma, Role } from '@prisma/client';
+import { GrantIntake, GrantStatus, Prisma, Region, Role } from '@prisma/client';
+import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
-import { canAccessStudentRecord } from '../common/access';
+import { assignedOrFreeFilter, canAccessStudentRecord } from '../common/access';
 import { phoneContainsConditions } from '../common/phone';
 import { CreateGrantDto } from './dto/create-grant.dto';
 import { UpdateGrantDto } from './dto/update-grant.dto';
@@ -19,7 +20,12 @@ import {
   parseCalendarDate,
 } from './grant-year';
 
-export type CurrentUser = { id: string; role: Role };
+/**
+ * ТЗ v3 р4 — регион менеджера. Необязательный: часть внутренних вызовов
+ * собирает объект не из JWT, а отсутствие региона трактуется как BOTH,
+ * то есть как поведение до разделения по регионам.
+ */
+export type CurrentUser = { id: string; role: Role; region?: Region };
 
 const GRANT_INCLUDE = {
   // phones нужен reminderTaskInput(): джоба кладёт телефон в описание задачи, и
@@ -81,9 +87,11 @@ export class GrantsService {
   private studentScopeWhere(user: CurrentUser, extra: Prisma.StudentWhereInput[] = []): Prisma.StudentWhereInput {
     const and: Prisma.StudentWhereInput[] = [...extra];
     if (!isPrivileged(user.role)) {
-      and.push({
-        OR: [{ managerId: null, chinaManagerId: null }, { managerId: user.id }, { chinaManagerId: user.id }],
-      });
+      // ТЗ v3 р4 — та же формула, что в canAccessStudentRecord, ОДНОЙ функцией.
+      // Раньше здесь стояла ручная копия условия, и когда появился регион,
+      // обновили только canAccessStudentRecord: в СПИСКЕ менеджер видел гранты
+      // студента чужого региона, а при открытии карточки получал 404.
+      and.push({ OR: assignedOrFreeFilter(user) as Prisma.StudentWhereInput[] });
     }
     return and.length ? { deletedAt: null, AND: and } : { deletedAt: null };
   }
@@ -142,7 +150,7 @@ export class GrantsService {
       // склеивает extra через AND, и раздельные условия означали бы «ФИО
       // совпало И телефон совпал» — то есть не нашлось бы вообще ничего.
       const searchOr: Prisma.StudentWhereInput[] = [
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
+        { fullName: containsInsensitive(filters.search) },
         // Оба варианта запроса — общая функция (номер мог быть записан
         // с кодом страны и без). Пустой массив при поиске по ФИО.
         ...phoneContainsConditions('phoneSearch', filters.search),
