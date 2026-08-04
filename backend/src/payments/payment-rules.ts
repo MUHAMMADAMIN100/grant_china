@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { PaymentKind, PaymentMethod, PaymentPurpose, PaymentStage, PaymentStatus } from '@prisma/client';
+import { PaymentKind, PaymentMethod, PaymentPurpose, PaymentStage, PaymentStatus, Region } from '@prisma/client';
 
 /**
  * Порядок этапов в UI и отчётах. НЕ порядок объявления enum PaymentStage —
@@ -99,16 +99,50 @@ export function isSelectablePurpose(purpose: PaymentPurpose): boolean {
 }
 
 /**
- * ТЗ v3 раздел 3, строка 2 таблицы: «Оплата за регистрацию в университете —
- * право проведения ТОЛЬКО у Основателя (Администратор и Менеджеры только
- * видят)».
+ * ТЗ v3 раздел 4, графа «Права по финансовой части» — какие типы оплат МЕНЕДЖЕР
+ * данного региона может ПРОВЕСТИ (не «увидеть»: видит он всё по своим студентам).
  *
- * Именно «проведения», а не «просмотра»: платежи этого типа менеджер видит в
- * карточке студента и в списке финансов, но создать или изменить такой платёж
- * не может. Множество, а не одно значение — чтобы при появлении второго
- * такого пункта не пришлось искать все места сравнения.
+ * Дословно из таблицы ролей:
+ *   Менеджер (Китай):
+ *     • Предоплата
+ *     • Оплата за регистрацию в университете (ТОЛЬКО ПРОСМОТР)
+ *     • Оплата за обучение и проживание
+ *   Менеджер (Таджикистан):
+ *     «Просмотр и проведение платежей только по своим студентам
+ *      (без доступа к общим цифрам)» — перечня типов НЕТ, значит ограничения
+ *      по типам у него тоже нет.
+ *
+ * Отсюда два следствия, которые стоит проговорить:
+ *
+ * 1. UNIVERSITY_REGISTRATION не входит НИ В ОДИН региональный список — это и
+ *    есть «право проведения только у Основателя» из раздела 3. Отдельного
+ *    множества FOUNDER_ONLY больше нет: оно было вторым источником истины про
+ *    то же самое, и при правке одного из двух они бы разъехались.
+ *
+ * 2. BOTH получает набор Таджикистана, а не пересечение с Китаем. Человек,
+ *    ведущий оба направления, не должен оказаться ограниченнее того, кто ведёт
+ *    только одно; ТЗ его случай не описывает, потому что в нём таких ролей нет.
  */
-export const FOUNDER_ONLY_PURPOSES = new Set<PaymentPurpose>(['UNIVERSITY_REGISTRATION']);
+export const PURPOSES_BY_REGION: Record<Region, PaymentPurpose[]> = {
+  CN: ['PREPAYMENT', 'TUITION_ACCOMMODATION'],
+  TJ: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+  BOTH: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+};
+
+/**
+ * Типы, которые конкретный сотрудник может провести.
+ *
+ * FOUNDER — все пять («полное управление» в его строке таблицы).
+ * EMPLOYEE — по региону.
+ * ADMIN — пустой список: в финансовой части он только читает, и создать платёж
+ *   любого типа ему всё равно не даст canWriteFinance. Возвращаем пустоту, а не
+ *   набор «как у менеджера», чтобы список в интерфейсе не обещал ему лишнего.
+ */
+export function purposesForActor(role: string, region: Region | string | null | undefined): PaymentPurpose[] {
+  if (role === 'FOUNDER') return SELECTABLE_PURPOSES;
+  if (role !== 'EMPLOYEE') return [];
+  return PURPOSES_BY_REGION[(region as Region) ?? 'BOTH'] ?? PURPOSES_BY_REGION.BOTH;
+}
 
 // Раздел 2.6 ТЗ (финансовая аналитика Основателя): подписи способа оплаты
 // для разбивки «наличные / безнал» — нужна Основателю для сверки с кассой
@@ -178,15 +212,37 @@ export function assertPurposeSelectable(purpose: PaymentPurpose): void {
 }
 
 /**
- * ТЗ v3 раздел 3 — «Оплата за регистрацию в университете»: право проведения
- * только у Основателя. Проверка на уровне правил, а не контроллера: тип
+ * ТЗ v3 разделы 3 и 4 — может ли ЭТОТ сотрудник провести платёж ЭТОГО типа.
+ *
+ * Проверка на уровне правил, а не декоратором @Roles на контроллере: тип
  * платежа приходит в теле запроса, а @Roles умеет смотреть только на роль.
+ * Регион — по той же причине: он тоже не выражается декоратором.
+ *
+ * ИСТОРИЧЕСКИЕ ТИПЫ НЕ ОГРАНИЧИВАЕМ. Их нет ни в одном региональном списке, и
+ * формально они «не разрешены» никому — но выбрать их для нового платежа и так
+ * нельзя (assertPurposeSelectable), а вот отредактировать сумму у уже
+ * существующего платежа со старым типом менеджер должен мочь. Без этой ветки
+ * десять платежей с типом «Другое» в боевой базе оказались бы заморожены
+ * для своих же авторов.
  */
-export function assertPurposeAllowedForRole(purpose: PaymentPurpose, role: string): void {
-  if (!FOUNDER_ONLY_PURPOSES.has(purpose)) return;
-  if (role === 'FOUNDER') return;
+export function assertPurposeAllowedForActor(
+  purpose: PaymentPurpose,
+  role: string,
+  region: Region | string | null | undefined,
+): void {
+  if (!isSelectablePurpose(purpose)) return;
+  const allowed = purposesForActor(role, region);
+  if (allowed.includes(purpose)) return;
+
+  // Сообщение разное, потому что причины разные, и человеку надо понять,
+  // идти ли ему к Основателю или он просто выбрал не тот пункт.
+  const founderOnly = !PURPOSES_BY_REGION.TJ.includes(purpose) && !PURPOSES_BY_REGION.CN.includes(purpose);
   throw new ForbiddenException(
-    `Платёж с типом «${PURPOSE_LABEL[purpose]}» может провести только Основатель`,
+    founderOnly
+      ? `Платёж с типом «${PURPOSE_LABEL[purpose]}» может провести только Основатель`
+      : `Тип оплаты «${PURPOSE_LABEL[purpose]}» недоступен менеджеру этого региона. Доступны: ${allowed
+          .map((p) => PURPOSE_LABEL[p])
+          .join(', ')}`,
   );
 }
 

@@ -545,15 +545,26 @@ export const PAYMENT_PURPOSE_LABEL: Record<PaymentPurpose, string> = {
 };
 
 /**
- * ТЗ v3 раздел 3, строка 2 таблицы: «Оплата за регистрацию в университете —
- * право проведения только у Основателя». Зеркало FOUNDER_ONLY_PURPOSES из
+ * ТЗ v3 раздел 4, графа «Права по финансовой части» — какие типы оплат
+ * менеджер данного региона может ПРОВЕСТИ. Зеркало PURPOSES_BY_REGION из
  * backend/src/payments/payment-rules.ts.
  *
- * Пункт обязан ИСЧЕЗАТЬ из списка у Администратора и Менеджера, а не быть
- * выбранным и отбитым 403 при сохранении: правило проекта запрещает вести
- * пользователя к ошибке, которую можно было предсказать заранее.
+ * Дословно из таблицы: у менеджера Китая перечислено три пункта, причём
+ * «Оплата за регистрацию в университете» — с пометкой «только просмотр», то
+ * есть провести он может два. У менеджера Таджикистана перечня типов нет
+ * вовсе — значит и ограничения нет.
+ *
+ * UNIVERSITY_REGISTRATION не входит ни в один региональный список: это и есть
+ * «право проведения только у Основателя» из раздела 3.
+ *
+ * Недоступный пункт обязан ИСЧЕЗАТЬ из выпадающего списка, а не быть выбранным
+ * и отбитым 403 при сохранении: вести человека к предсказуемой ошибке нельзя.
  */
-export const FOUNDER_ONLY_PAYMENT_PURPOSES: PaymentPurpose[] = ['UNIVERSITY_REGISTRATION'];
+export const PAYMENT_PURPOSES_BY_REGION: Record<Region, PaymentPurpose[]> = {
+  CN: ['PREPAYMENT', 'TUITION_ACCOMMODATION'],
+  TJ: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+  BOTH: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+};
 
 /** Назначения, допустимые для расходов на месте (kind=ON_SITE) — зеркало backend payment-rules.ts. */
 export const ON_SITE_PAYMENT_PURPOSES: PaymentPurpose[] = ['TUITION_ACCOMMODATION'];
@@ -567,14 +578,23 @@ export const SCHEDULE_PAYMENT_PURPOSES: PaymentPurpose[] = [
 ];
 
 /**
- * Список типов для выпадающего списка с учётом роли: пункты, которые проводит
- * только Основатель, остальным не показываются вовсе.
+ * Список типов для выпадающего списка с учётом ЭТАПА, РОЛИ и РЕГИОНА.
+ * Зеркало purposesForActor() на бэкенде — расхождение означало бы либо пункт,
+ * ведущий в 403, либо спрятанный пункт у того, кому он положен.
  */
-export function paymentPurposesFor(stage: PaymentStage, role?: Role | null): PaymentPurpose[] {
-  const base =
+export function paymentPurposesFor(
+  stage: PaymentStage,
+  role?: Role | null,
+  region?: Region | null,
+): PaymentPurpose[] {
+  const byStage =
     PAYMENT_STAGE_KIND[stage] === 'ON_SITE' ? ON_SITE_PAYMENT_PURPOSES : SCHEDULE_PAYMENT_PURPOSES;
-  if (isFounder(role)) return base;
-  return base.filter((p) => !FOUNDER_ONLY_PAYMENT_PURPOSES.includes(p));
+  if (isFounder(role)) return byStage;
+  // Администратор в финансах не пишет — форма ему и так недоступна, но список
+  // не должен обещать ему пунктов, которых он не проведёт.
+  if (role !== 'EMPLOYEE') return [];
+  const byRegion = PAYMENT_PURPOSES_BY_REGION[region ?? 'BOTH'] ?? PAYMENT_PURPOSES_BY_REGION.BOTH;
+  return byStage.filter((p) => byRegion.includes(p));
 }
 
 /**

@@ -38,7 +38,7 @@ import {
   STAGE_LABEL,
   STAGE_ORDER,
   assertReceiptInvariant,
-  assertPurposeAllowedForRole,
+  assertPurposeAllowedForActor,
   assertPurposeSelectable,
   isPurposeAllowedForStage,
 } from './payment-rules';
@@ -684,7 +684,7 @@ export class PaymentsService {
     // только от Основателя. Обе проверки ДО проверки этапа: сообщение
     // «этот тип больше не используется» полезнее, чем «не соответствует этапу».
     assertPurposeSelectable(dto.purpose);
-    assertPurposeAllowedForRole(dto.purpose, user.role);
+    assertPurposeAllowedForActor(dto.purpose, user.role, user.region);
 
     if (!isPurposeAllowedForStage(dto.stage, dto.purpose)) {
       throw new BadRequestException('Назначение платежа не соответствует выбранному этапу');
@@ -851,12 +851,12 @@ export class PaymentsService {
     // список заморозил бы существующие записи.
     if (dto.purpose !== undefined && dto.purpose !== payment.purpose) {
       assertPurposeSelectable(dto.purpose);
-      assertPurposeAllowedForRole(dto.purpose, user.role);
+      assertPurposeAllowedForActor(dto.purpose, user.role, user.region);
     }
     // Тип «Оплата за регистрацию в университете» защищаем и от правки СУММЫ
     // не-Основателем: иначе запрет на его проведение обходился бы созданием
     // платежа с другим типом и последующей сменой одного поля.
-    assertPurposeAllowedForRole(nextPurpose, user.role);
+    assertPurposeAllowedForActor(nextPurpose, user.role, user.region);
 
     if (!isPurposeAllowedForStage(nextStage, nextPurpose)) {
       throw new BadRequestException('Назначение платежа не соответствует выбранному этапу');

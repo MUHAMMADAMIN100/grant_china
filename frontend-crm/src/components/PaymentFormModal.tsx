@@ -63,7 +63,7 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
    * см. assertPurposeAllowedForRole). Список считается от роли, чтобы
    * недоступный пункт не появлялся в выпадающем списке вовсе.
    */
-  const purposeOptions = paymentPurposesFor(stage, me?.role);
+  const purposeOptions = paymentPurposesFor(stage, me?.role, me?.region);
 
   /**
    * У платежа, сохранённого ДО перехода на новые типы, purpose историческй
