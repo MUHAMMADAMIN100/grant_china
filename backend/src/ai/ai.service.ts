@@ -62,6 +62,12 @@ const HISTORY_TURNS = 12;
 // сюда можно вставить мегабайт текста и оплатить его токенами компании.
 const MAX_QUESTION_LENGTH = 2000;
 
+// Сколько ждём ответа Gemini. Замеры на боевом объёме (202 студента в
+// контексте, ~15 тыс. токенов на входе): Pro отвечает за 14–37 секунд, Flash —
+// за 6. Разброс у Pro большой, поэтому запас нужен, но выше проксирующего слоя
+// Vercel (~60 с) уходить нельзя — он оборвёт соединение первым.
+const TIMEOUT_SEC = 55;
+
 export type CurrentUser = { id: string; role: Role | string; region?: Region | string | null };
 
 export interface AiAskResult {
@@ -221,11 +227,33 @@ export class AiService {
     if (e.status === 429) {
       throw new ServiceUnavailableException('AI-помощник перегружен запросами. Попробуйте через минуту.');
     }
-    if (e.status === 504 || e.status === 502) {
-      throw new ServiceUnavailableException('AI-помощник не ответил вовремя. Попробуйте ещё раз.');
+    if (e.status === 504) {
+      throw new ServiceUnavailableException(
+        `AI-помощник не ответил за ${TIMEOUT_SEC} секунд. Попробуйте ещё раз или задайте вопрос короче. ` +
+          'Если повторяется — переключите AI_MODEL на gemini-flash-latest, он отвечает вдвое быстрее.',
+      );
     }
+    if (e.status === 502) {
+      throw new ServiceUnavailableException(
+        `AI-помощник: нет связи с сервисом Google. ${e.detail ? `Причина: ${e.detail.slice(0, 160)}` : ''}`.trim(),
+      );
+    }
+    // Остальные коды — показываем причину, а не прячем её за «временно
+    // недоступен».
+    //
+    // Именно эта фраза уже стоила часа разбирательств: помощник упал в проде,
+    // а сообщение не отличало «Google вернул 500» от «мы отправили негодный
+    // запрос». Причину пришлось бы искать в логах Railway, куда владелец
+    // системы обычно не ходит.
+    //
+    // Текст ошибки Google секретов не содержит (ключ туда не попадает), а
+    // человеку, который видит «Google: 500 Internal error», сразу понятно:
+    // это не у нас сломалось, надо просто повторить.
+    const reason = (e.detail ?? e.message ?? '').slice(0, 200);
     this.logger.error(`AI: ошибка ${e.status}: ${e.detail ?? e.message}`);
-    throw new ServiceUnavailableException('AI-помощник временно недоступен. Попробуйте позже.');
+    throw new ServiceUnavailableException(
+      `AI-помощник не смог ответить. Ошибка сервиса Google (код ${e.status})${reason ? `: ${reason}` : ''}`,
+    );
   }
 
   async ask(question: string, user: CurrentUser): Promise<AiAskResult> {
@@ -284,6 +312,7 @@ export class AiService {
         }),
         turns,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        timeoutSec: TIMEOUT_SEC,
       });
     } catch (e) {
       if (e instanceof GeminiError) this.translateError(e);
