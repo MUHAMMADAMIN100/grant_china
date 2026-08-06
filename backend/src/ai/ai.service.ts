@@ -68,6 +68,15 @@ const MAX_QUESTION_LENGTH = 2000;
 // Vercel (~60 с) уходить нельзя — он оборвёт соединение первым.
 const TIMEOUT_SEC = 55;
 
+// Резервная модель на случай перегрузки основной. Flash, а не вторая Pro:
+// перегрузка бьёт по всем версиям одного семейства разом (спрос мигрирует
+// вслед за новинкой), а Flash живёт на отдельной, более дешёвой ёмкости и в
+// день боевого инцидента с 503 у Pro отвечал стабильно за 6 секунд. Для
+// пересказа регламентов и подсчётов по списку студентов его качества
+// достаточно — проверено одинаковыми ответами обеих моделей на одинаковых
+// вопросах.
+const FALLBACK_MODEL = 'gemini-flash-latest';
+
 export type CurrentUser = { id: string; role: Role | string; region?: Region | string | null };
 
 export interface AiAskResult {
@@ -296,27 +305,54 @@ export class AiService {
       { role: 'user' as const, text },
     ];
 
-    let result;
-    try {
-      result = await callGemini({
-        model: this.model,
-        apiKey: this.apiKey,
-        system: this.buildSystemPrompt({
-          knowledge: knowledge.text,
-          knowledgeTruncated: knowledge.truncated,
-          students: studentsCtx.text,
-          studentsIncluded: studentsCtx.included,
-          studentsTotal: studentsCtx.total,
-          studentsTruncated: studentsCtx.truncated,
-          roleLabel: this.roleLabel(user.role),
-        }),
+    const system = this.buildSystemPrompt({
+      knowledge: knowledge.text,
+      knowledgeTruncated: knowledge.truncated,
+      students: studentsCtx.text,
+      studentsIncluded: studentsCtx.included,
+      studentsTotal: studentsCtx.total,
+      studentsTruncated: studentsCtx.truncated,
+      roleLabel: this.roleLabel(user.role),
+    });
+    const callWith = (model: string) =>
+      callGemini({
+        model,
+        apiKey: this.apiKey!,
+        system,
         turns,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         timeoutSec: TIMEOUT_SEC,
       });
+
+    let result;
+    try {
+      result = await callWith(this.model);
     } catch (e) {
-      if (e instanceof GeminiError) this.translateError(e);
-      throw e;
+      // 503 «model is experiencing high demand» и 429 — перегрузка КОНКРЕТНОЙ
+      // модели, а не сервиса целиком: свежая Pro пала под спросом, Flash в тот
+      // же момент отвечал за 6 секунд (проверено в день, когда это случилось
+      // в проде). Показывать сотруднику «попробуйте позже», когда рядом стоит
+      // работающая модель, — значит превращать чужую перегрузку в наш простой.
+      //
+      // Поэтому: перегружена основная — молча пробуем резервную. Ответ придёт
+      // от неё, поле model в истории честно покажет, кто отвечал. Если и
+      // резервная лежит — вот теперь это правда «Google перегружен», и об этом
+      // скажет translateError по её ошибке.
+      const overloaded = e instanceof GeminiError && (e.status === 503 || e.status === 429);
+      if (overloaded && this.model !== FALLBACK_MODEL) {
+        this.logger.warn(
+          `AI: модель «${this.model}» перегружена (${(e as GeminiError).status}), переключаюсь на «${FALLBACK_MODEL}»`,
+        );
+        try {
+          result = await callWith(FALLBACK_MODEL);
+        } catch (e2) {
+          if (e2 instanceof GeminiError) this.translateError(e2);
+          throw e2;
+        }
+      } else {
+        if (e instanceof GeminiError) this.translateError(e);
+        throw e;
+      }
     }
 
     const answer =
