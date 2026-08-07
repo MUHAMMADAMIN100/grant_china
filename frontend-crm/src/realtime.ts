@@ -8,7 +8,37 @@ const isDev = (import.meta as any).env?.DEV;
 const API_URL =
   (import.meta as any).env?.VITE_API_URL ||
   (isDev ? 'http://localhost:3001/api' : '/admin/api');
-const SOCKET_URL = API_URL.replace(/\/api$/, '');
+
+/**
+ * АДРЕС И ПУТЬ СОКЕТА — РАЗНЫЕ ВЕЩИ, и раньше они были перепутаны.
+ *
+ * Было: `io(API_URL.replace(/\/api$/, ''))`, то есть в проде `io('/admin')`.
+ * Первый аргумент io() — это URI, а НЕ префикс пути: строка «/admin» читается
+ * как ПРОСТРАНСТВО ИМЁН, а путь остаётся стандартным `/socket.io/`. В итоге
+ * клиент стучался в `https://<домен>/socket.io/`, куда переписывания нет:
+ * Vercel отдавал index.html с кодом 200, и рукопожатие падало с
+ * «Unexpected response code: 200».
+ *
+ * Почему этого никто не замечал:
+ *  - в dev адрес абсолютный (localhost:3001), путь по умолчанию верный —
+ *    всё работает;
+ *  - на боевом домене grantchina.tj спасает правило из ДРУГОГО проекта:
+ *    в vercel.json лендинга есть `/socket.io/(.*)` → Railway. То есть
+ *    realtime в CRM держался на строке в чужом конфиге. Уберут её при
+ *    правке лендинга — сокет во всей CRM умрёт молча, без единой ошибки
+ *    в коде.
+ *  - а на прямом домене CRM (grant-china-crm.vercel.app) сокет не работал
+ *    вовсе — проверено запросом: `/socket.io/` отдаёт HTML,
+ *    `/admin/socket.io/` отдаёт `0{"sid":...}`.
+ *
+ * Стало: адрес — свой origin, путь — задан явно. Работает на обоих доменах
+ * и ни от чего постороннего не зависит.
+ */
+const isAbsoluteApi = /^https?:\/\//i.test(API_URL);
+const SOCKET_URL = isAbsoluteApi ? API_URL.replace(/\/api$/, '') : '/';
+const SOCKET_PATH = isAbsoluteApi
+  ? '/socket.io'
+  : `${API_URL.replace(/\/api$/, '')}/socket.io`;
 
 let socket: Socket | null = null;
 type ConnState = 'connected' | 'disconnected' | 'reconnecting';
@@ -28,6 +58,7 @@ export function connectRealtime() {
   try {
     if (socket) socket.disconnect();
     socket = io(SOCKET_URL, {
+      path: SOCKET_PATH,
       withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
