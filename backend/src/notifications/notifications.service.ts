@@ -206,7 +206,7 @@ export class NotificationsService {
    * если запись создана до появления этого правила. FOUNDER/ADMIN видят всё
    * как раньше (canAccessStudentRecord() для них всегда true).
    */
-  async listForUser(userId: string, role: Role, onlyUnread = false): Promise<Notification[]> {
+  async listForUser(userId: string, role: Role, onlyUnread = false, region?: Region): Promise<Notification[]> {
     const notifications = await this.prisma.notification.findMany({
       where: {
         userId,
@@ -217,7 +217,7 @@ export class NotificationsService {
     });
 
     if (isPrivileged(role)) return notifications;
-    return this.filterByAccess(notifications, { id: userId, role });
+    return this.filterByAccess(notifications, { id: userId, role, region });
   }
 
   /**
@@ -228,7 +228,7 @@ export class NotificationsService {
    */
   private async filterByAccess(
     notifications: Notification[],
-    user: { id: string; role: Role },
+    user: { id: string; role: Role; region?: Region },
   ): Promise<Notification[]> {
     const studentIds = new Set<string>();
     const applicationIds = new Set<string>();
@@ -271,7 +271,7 @@ export class NotificationsService {
     const isAssignedToMe = (
       rec: { managerId: string | null; chinaManagerId: string | null },
     ) =>
-      assignedFieldsForRegion((user as { region?: Region }).region).some((field) =>
+      assignedFieldsForRegion(user.region).some((field) =>
         field === 'managerId' ? rec.managerId === user.id : rec.chinaManagerId === user.id,
       );
 
@@ -311,7 +311,7 @@ export class NotificationsService {
     });
   }
 
-  async unreadCount(userId: string, role?: Role) {
+  async unreadCount(userId: string, role?: Role, region?: Region) {
     // Счётчик обязан считать РОВНО то, что пользователь увидит в списке.
     // Простой count() показывал бы менеджеру число, включающее скрытые
     // легаси-уведомления про чужих студентов: бейдж «12», а список пуст.
@@ -333,7 +333,7 @@ export class NotificationsService {
       orderBy: { createdAt: 'desc' },
       take: BADGE_CAP,
     });
-    const visible = await this.filterByAccess(rows, { id: userId, role: role as Role });
+    const visible = await this.filterByAccess(rows, { id: userId, role: role as Role, region });
     return { count: visible.length };
   }
 }

@@ -22,7 +22,7 @@ import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FileResolverService } from '../files/file-resolver.service';
 import { canManageFinance, canWriteFinance, isPrivileged } from '../common/roles';
-import { assignedFieldsForRegion, assignedOrFreeFilter, canAccessStudentRecord } from '../common/access';
+import { assignedFieldsForRegion, assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { phoneContainsConditions } from '../common/phone';
 import { localDayStart } from '../scheduler/time';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -381,7 +381,12 @@ export class PaymentsService {
   // ------------------------------------------------------------------
 
   async findAll(filters: PaymentListFilters, user: CurrentUser) {
-    const where: Prisma.PaymentWhereInput = { deletedAt: null };
+    // student.deletedAt — БЕЗУСЛОВНО, а не только для непривилегированных.
+    // Удалённый студент пропадает из своего раздела, но его платежи оставались
+    // в общем списке «Финансы» вместе с именем несуществующей карточки. Так же
+    // безусловно это делают grants/contracts/tickets (см. studentScopeWhere в
+    // grants.service.ts) — здесь фильтра просто не было.
+    const where: Prisma.PaymentWhereInput = { deletedAt: null, student: { deletedAt: null } };
     const and: Prisma.PaymentWhereInput[] = [];
 
     if (filters.studentId) where.studentId = filters.studentId;
@@ -406,9 +411,17 @@ export class PaymentsService {
     // пережила добавление региона и показывала менеджеру СУММЫ платежей по
     // студентам чужой страны, хотя карточка того же платежа отдавала 404.
     if (!isPrivileged(user.role)) {
+      // assignedToUserFilter, а НЕ assignedOrFreeFilter: список обязан совпасть
+      // с ensureReadAccess ниже по файлу, который «свободных» студентов
+      // намеренно не пускает («для карточки это разумно, для денег — нет»).
+      //
+      // Пока стояла мягкая формула, список финансов был ШИРЕ карточки: менеджер
+      // видел в общем списке суммы, номера квитанций, комментарии и ФИО по
+      // студентам без назначенного менеджера, а при открытии того же платежа
+      // получал 404. Ссылки на чеки из такого списка тоже открывались.
       and.push({
         student: {
-          OR: assignedOrFreeFilter(user) as Prisma.StudentWhereInput[],
+          OR: assignedToUserFilter(user) as Prisma.StudentWhereInput[],
         },
       });
     } else if (filters.managerId) {
@@ -454,9 +467,19 @@ export class PaymentsService {
     return { items: items.map((p) => this.serialize(p)), total, page, pageSize };
   }
 
-  /** Очередь на одобрение — только FOUNDER/ADMIN (роль проверяет RolesGuard в контроллере). */
+  /**
+   * Очередь на одобрение — только FOUNDER/ADMIN (роль проверяет RolesGuard в контроллере).
+   *
+   * Платежи удалённых студентов из очереди исключены: Основателю показывали
+   * заявку на одобрение денег по студенту, чью карточку уже удалили, — открыть
+   * её в CRM он не мог, а одобрить мог.
+   */
   async findPending(filters: { page?: number; pageSize?: number }) {
-    const where: Prisma.PaymentWhereInput = { status: 'PENDING_APPROVAL', deletedAt: null };
+    const where: Prisma.PaymentWhereInput = {
+      status: 'PENDING_APPROVAL',
+      deletedAt: null,
+      student: { deletedAt: null },
+    };
     const page = Math.max(1, filters.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 10));
     const skip = (page - 1) * pageSize;
@@ -483,7 +506,14 @@ export class PaymentsService {
   }
 
   async pendingCount() {
-    const where: Prisma.PaymentWhereInput = { status: 'PENDING_APPROVAL', deletedAt: null };
+    // Условие обязано совпадать с findPending() до буквы: этот счётчик рисует
+    // бейдж на пункте «Финансы» в меню. Разойдутся — бейдж покажет «3», а в
+    // очереди будет две записи, и человек будет искать третью.
+    const where: Prisma.PaymentWhereInput = {
+      status: 'PENDING_APPROVAL',
+      deletedAt: null,
+      student: { deletedAt: null },
+    };
     const [count, sumAgg] = await Promise.all([
       this.prisma.payment.count({ where }),
       this.prisma.payment.aggregate({ where, _sum: { amount: true } }),

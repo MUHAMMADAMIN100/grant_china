@@ -71,7 +71,26 @@ export class FinanceAnalyticsService {
   // явная аннотация здесь. Проверено: с аннотацией `npx tsc --noEmit` падает
   // на этом файле, без неё — проходит чисто.
   async summary(period: AnalyticsPeriod) {
-    const approvedWhere: Prisma.PaymentWhereInput = { status: 'APPROVED', deletedAt: null };
+    // `deletedAt: null` относится к САМОМУ ПЛАТЕЖУ, а `student: { deletedAt: null }` —
+    // к его студенту, и второго здесь не было.
+    //
+    // Что это давало: менеджер удаляет дублирующуюся карточку студента —
+    // рутинное действие, доступное любому назначенному менеджеру, — студент
+    // исчезает из раздела «Студенты», а его одобренные платежи НАВСЕГДА
+    // остаются в «Итого поступлений», в разбивках по этапам, назначениям,
+    // способам оплаты, по менеджерам и в динамике по месяцам. Главная цифра
+    // на экране Основателя тихо завышается, и заметить это нельзя ничем,
+    // кроме сверки с бухгалтерией вручную.
+    //
+    // В этом же файле ниже (блок «Просроченные + плановые») JOIN на Student с
+    // проверкой deletedAt УЖЕ был, с объяснением зачем. Рассуждение оказалось
+    // применено к одной агрегации из семи — остальные шесть про удаление
+    // студента не знали.
+    const approvedWhere: Prisma.PaymentWhereInput = {
+      status: 'APPROVED',
+      deletedAt: null,
+      student: { deletedAt: null },
+    };
     if (period.from || period.to) {
       approvedWhere.paidAt = {};
       if (period.from) (approvedWhere.paidAt as Prisma.DateTimeFilter).gte = period.from;
@@ -241,9 +260,22 @@ export class FinanceAnalyticsService {
     };
   }
 
-  /** Собирает WHERE для $queryRaw динамики по месяцам — тот же фильтр, что approvedWhere, но как Prisma.Sql. */
+  /**
+   * Собирает WHERE для $queryRaw динамики по месяцам — тот же фильтр, что
+   * approvedWhere, но как Prisma.Sql.
+   *
+   * «Тот же» приходится обеспечивать руками: Prisma-условие и сырой SQL —
+   * два независимых текста, и добавленное в одном не появляется в другом.
+   * Именно так помесячная динамика и разошлась с остальными агрегациями.
+   * EXISTS, а не JOIN: платёж не должен задвоиться, если у него когда-нибудь
+   * окажется несколько связей на студента.
+   */
   private buildMonthlyWhereSql(period: AnalyticsPeriod): Prisma.Sql {
-    const parts: Prisma.Sql[] = [Prisma.sql`"status" = 'APPROVED'`, Prisma.sql`"deletedAt" IS NULL`];
+    const parts: Prisma.Sql[] = [
+      Prisma.sql`"status" = 'APPROVED'`,
+      Prisma.sql`"deletedAt" IS NULL`,
+      Prisma.sql`EXISTS (SELECT 1 FROM "Student" s WHERE s."id" = "Payment"."studentId" AND s."deletedAt" IS NULL)`,
+    ];
     if (period.from) parts.push(Prisma.sql`"paidAt" >= ${period.from}`);
     if (period.to) parts.push(Prisma.sql`"paidAt" <= ${period.to}`);
     return Prisma.join(parts, ' AND ');
