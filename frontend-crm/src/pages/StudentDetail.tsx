@@ -21,6 +21,7 @@ import CallsCard from '../components/CallsCard';
 import CommentsFeed from '../components/CommentsFeed';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
+import { runOptimistic } from '../utils/optimistic';
 
 function CredRow({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -155,6 +156,55 @@ function cardFieldsDiffer(prev: Student | null, next: Student): boolean {
   );
 }
 
+/**
+ * Значения формы редактирования, собранные из карточки.
+ *
+ * Отдельной функцией, потому что переливать форму приходится в трёх местах:
+ * первичная загрузка (reload), кнопка «Отмена» и успешное сохранение — после
+ * него состояние приходит из ответа PATCH, а не из GET. Раньше все три пути
+ * шли через reload(), то есть ради заполнения полей дёргали сервер.
+ */
+function formFromStudent(s: Student) {
+  return {
+    fullName: s.fullName,
+    phones: s.phones.join(', '),
+    email: s.email || '',
+    direction: s.direction,
+    cabinet: s.cabinet,
+    status: s.status,
+    comment: s.comment || '',
+  };
+}
+
+/**
+ * Тело PATCH и ОДНОВРЕМЕННО предсказание результата.
+ *
+ * Ключи, которых в объекте нет, сервер не меняет: students.service.update()
+ * проверяет каждое поле на `!== undefined`, а JSON.stringify выбрасывает
+ * undefined ещё на клиенте. Отсюда правило, ради которого эта функция и
+ * существует: пустой email нельзя предсказывать как пустой — запрос его не
+ * несёт, сервер оставит прежний адрес, и оптимистичный прочерк через мгновение
+ * отскочил бы обратно на старое значение.
+ *
+ * Собираем объект один раз и используем и как payload, и как патч состояния —
+ * тогда предсказание совпадает с ответом сервера ПО ПОСТРОЕНИЮ. Это же условие
+ * позволило убрать окно markSelfMutation() (см. комментарий у reload).
+ */
+function buildStudentPatch(form: any): Partial<Student> {
+  const patch: Partial<Student> = {
+    fullName: form.fullName.trim(),
+    phones: form.phones.split(',').map((p: string) => p.trim()).filter(Boolean),
+    direction: form.direction,
+    cabinet: parseInt(form.cabinet, 10),
+    status: form.status,
+  };
+  const email = form.email?.trim();
+  if (email) patch.email = email;
+  const comment = form.comment?.trim();
+  if (comment) patch.comment = comment;
+  return patch;
+}
+
 export default function StudentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -210,25 +260,35 @@ export default function StudentDetail() {
   const showErr = (k: string) => touched[k] && (formErrors as any)[k];
 
   /**
-   * Окно подавления подсказки «обновлено другим пользователем».
+   * ПОЧЕМУ ЗДЕСЬ БОЛЬШЕ НЕТ markSelfMutation().
    *
-   * RealtimeGateway намеренно не исключает отправителя из рассылки, поэтому
-   * автор изменения получает эхо СВОЕГО же действия. Сравнения полей (prev vs
-   * s) для отсечения эха недостаточно: собственное сохранение как раз и меняет
-   * поля, то есть упрёк в чужой правке приходил ровно после своей. Взводим
-   * окно перед каждой своей мутацией — 5 секунд с запасом покрывают путь
-   * «HTTP-ответ → сокет → reload», а чужая правка в этот момент маловероятна
-   * и в худшем случае стоит одной непоказанной подсказки.
+   * Раньше рядом жил ref-«окно тишины» на 5 секунд, которое глушило подсказку
+   * «карточка обновлена другим пользователем». RealtimeGateway намеренно не
+   * исключает отправителя из рассылки, поэтому автор изменения получает эхо
+   * своего же действия; а поскольку состояние ждало ответа сервера,
+   * reload({external:true}) сравнивал СТАРЫЙ снимок карточки с новым серверным.
+   * Поля, естественно, отличались — собственными же правками, — и упрёк в чужой
+   * правке приходил ровно после своего сохранения. Окно затыкало подсказку
+   * целиком, заодно пряча настоящие чужие правки в эти 5 секунд.
+   *
+   * С оптимистичным обновлением подпорка не нужна: своё изменение попадает
+   * в состояние ДО отправки запроса, поэтому к моменту прихода эха
+   * studentRef.current уже равен тому, что вернёт сервер, и cardFieldsDiffer()
+   * честно отвечает «ничего не изменилось». Условие этого — предсказание,
+   * совпадающее с серверным поле в поле: см. buildStudentPatch(), где поля,
+   * которых нет в запросе, не меняются и локально.
+   *
+   * Оставшиеся неоптимистичные пути окна не требовали никогда:
+   * cardFieldsDiffer() сравнивает семь полей формы, а photoUrl (загрузка фото)
+   * и applications (создание заявки) в их число не входят — эхо от них молчит
+   * и без всякого подавления.
    */
-  const selfMutationUntilRef = useRef(0);
-  const markSelfMutation = () => {
-    selfMutationUntilRef.current = Date.now() + 5000;
-  };
 
   /**
    * opts.resetForm — ЯВНОЕ разрешение перезалить форму данными сервера.
-   * Передаётся только там, где сброс задуман: первичная загрузка по id,
-   * успешное сохранение и кнопка «Отмена».
+   * Остался ровно один такой вызов — первичная загрузка по id: сохранение
+   * и «Отмена» больше не ходят на сервер ради формы, они заливают её из уже
+   * известного состояния (formFromStudent).
    * opts.external — вызов пришёл от realtime-события, а не напрямую от
    * действия пользователя. Само по себе это НЕ значит «правил кто-то другой»
    * (см. cardFieldsDiffer), нужно только чтобы решить, показывать ли подсказку.
@@ -253,16 +313,8 @@ export default function StudentDetail() {
       // «Сохранить» записывал обратно старые значения.
       setStudent(s);
       if (opts?.resetForm || !formRef.current || !editRef.current) {
-        setForm({
-          fullName: s.fullName,
-          phones: s.phones.join(', '),
-          email: s.email || '',
-          direction: s.direction,
-          cabinet: s.cabinet,
-          status: s.status,
-          comment: s.comment || '',
-        });
-      } else if (opts?.external && Date.now() > selfMutationUntilRef.current && cardFieldsDiffer(prev, s)) {
+        setForm(formFromStudent(s));
+      } else if (opts?.external && cardFieldsDiffer(prev, s)) {
         toast('Карточка обновлена другим пользователем — ваши правки сохранены', 'info');
       }
     } catch (e: any) {
@@ -293,39 +345,59 @@ export default function StudentDetail() {
     },
   });
 
+  /**
+   * Сохранение карточки — оптимистично.
+   *
+   * Было два похода на сервер на одну кнопку: PATCH, а следом полный GET
+   * карточки, и всё это время форма стояла открытой и неотзывчивой. Второй
+   * запрос не нужен в принципе: PATCH /students/:id отвечает тем же
+   * STUDENT_SELECT, что и GET (документы, заявки, анкета, менеджеры), то есть
+   * ответ и ЕСТЬ новое состояние карточки — reconcile кладёт его как есть.
+   */
   const onSave = async () => {
-    if (!id || !form) return;
+    if (!id || !form || !student) return;
     setTouched({ fullName: true, phones: true, email: true, cabinet: true, comment: true });
     if (hasErrors(formErrors)) {
       toast('Исправьте ошибки в форме', 'error');
       return;
     }
-    const phones = form.phones.split(',').map((p: string) => p.trim()).filter(Boolean);
-    try {
-      markSelfMutation();
-      await updateStudent(id, {
-        fullName: form.fullName.trim(),
-        phones,
-        email: form.email?.trim() || undefined,
-        direction: form.direction,
-        cabinet: parseInt(form.cabinet, 10),
-        status: form.status,
-        comment: form.comment?.trim() || undefined,
-      });
-      toast('Данные сохранены', 'success');
-      await reload({ resetForm: true });
-      setEdit(false);
-      setTouched({});
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
-    }
+    const patch = buildStudentPatch(form);
+    // Режим редактирования закрываем сразу — это и есть видимая часть
+    // оптимизма. form при этом НЕ трогаем: при отказе сервера человек должен
+    // вернуться к своему тексту, а не набирать его заново.
+    setEdit(false);
+    // Типы указаны явно: setStudent принимает Student | null, и по нему
+    // вывод TState «расползся» бы шире, чем нужно предикату optimistic.
+    const saved = await runOptimistic<Student, Student>({
+      current: student,
+      optimistic: (prev) => ({ ...prev, ...patch }),
+      commit: setStudent,
+      request: () => updateStudent(id, patch),
+      reconcile: (_before, s) => s,
+      onError: (message) => {
+        // Возвращаем ровно туда, где человек был: открытая форма с его вводом
+        // плюс причина отказа СЕРВЕРА, а не общая «Ошибка сохранения».
+        // Карточку к этому моменту runOptimistic уже откатил.
+        setEdit(true);
+        toast(message, 'error');
+      },
+    });
+    if (!saved) return;
+    toast('Данные сохранены', 'success');
+    setTouched({});
+    // Нормализованные значения (обрезанные пробелы, разложенные телефоны)
+    // переливаем в форму из ответа — но только если человек не успел снова
+    // войти в редактирование, иначе затёрли бы уже набранное. Через реф:
+    // edit из замыкания к этому моменту устарел (см. editRef выше).
+    if (!editRef.current) setForm(formFromStudent(saved));
   };
 
   const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     try {
-      markSelfMutation();
+      // Загрузка файла осознанно осталась «ждать сервер»: имя и адрес файла
+      // известны только из ответа, предсказать их нечем.
       await uploadPhoto(id, file);
       toast('Фото загружено', 'success');
       await reload();
@@ -335,13 +407,13 @@ export default function StudentDetail() {
   };
 
   /**
-   * Раздел 5 ТЗ — отметка «Виза получена».
+   * Раздел 5 ТЗ — отметка «Виза получена». Оптимистично.
    *
-   * reload() зовём БЕЗ resetForm: менеджер мог одновременно править ФИО
-   * в открытой форме, и отметка о визе не должна затирать его несохранённый
-   * ввод (та же причина, по которой resetForm вообще появился).
-   * markSelfMutation() — чтобы эхо собственного изменения по сокету не
-   * показало подсказку «карточка обновлена другим пользователем».
+   * Переключатель обязан отрабатывать по клику: это событие, а не поле формы,
+   * и ждать полсекунды ради перекраски «Нет» в «Да» незачем. reload() отсюда
+   * убран целиком — ответ PATCH заменяет карточку сам, а значит исчезла и
+   * прежняя оговорка про «reload без resetForm»: несохранённый ввод в открытой
+   * форме теперь физически нечем затереть.
    */
   const onVisaChange = async (next: boolean) => {
     if (!id || !student || visaSaving) return;
@@ -349,22 +421,68 @@ export default function StudentDetail() {
     // не менял visaReceivedAt, но лишний PATCH дёрнул бы realtime всем.
     if (student.visaReceived === next) return;
     setVisaSaving(true);
-    try {
-      markSelfMutation();
-      await updateStudent(id, { visaReceived: next });
-      toast(next ? 'Отмечено: виза получена' : 'Отметка о визе снята', 'success');
-      await reload();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Не удалось сохранить статус визы', 'error');
-    } finally {
-      setVisaSaving(false);
-    }
+    const saved = await runOptimistic<Student, Student>({
+      current: student,
+      // Дату ставит сервер (new Date() ровно на переходе состояния), но
+      // предсказываем и её: без даты строка «Отмечено ...» на мгновение
+      // пропала бы и вернулась. Показывается она с точностью до дня, так что
+      // расхождение часов клиента и сервера не видно, а точное значение
+      // всё равно придёт следом в reconcile.
+      optimistic: (prev) => ({
+        ...prev,
+        visaReceived: next,
+        visaReceivedAt: next ? new Date().toISOString() : null,
+      }),
+      commit: setStudent,
+      request: () => updateStudent(id, { visaReceived: next }),
+      reconcile: (_before, s) => s,
+      onError: (message) => toast(message, 'error'),
+    });
+    // visaSaving теперь не «пока не знаем результат» (результат уже на экране),
+    // а защита от гонки двух PATCH при быстрых кликах «Да»/«Нет» подряд.
+    setVisaSaving(false);
+    if (saved) toast(next ? 'Отмечено: виза получена' : 'Отметка о визе снята', 'success');
   };
 
+  /**
+   * Переназначение менеджеров — оптимистично ровно в той части, которую
+   * карточка может предсказать честно.
+   *
+   * ManagerBar передаёт сюда только userId: список сотрудников живёт внутри
+   * него, и ФИО назначенного здесь неизвестно. Придумывать подпись нельзя —
+   * в слоте на полсекунды повисло бы неверное имя, а это хуже, чем короткое
+   * ожидание. Поэтому сразу двигаем идентификаторы (от них зависят права на
+   * карточку), СНЯТИЕ менеджера показываем целиком — null он и есть null, —
+   * а ФИО берём из ответа: PATCH /students/:id/manager возвращает того же
+   * студента, что и GET, поэтому прежний второй запрос (await reload()) ушёл.
+   */
   const onReassign = async (patch: { managerId?: string | null; chinaManagerId?: string | null }) => {
-    if (!id) return;
-    await assignStudentManager(id, patch);
-    await reload();
+    if (!id || !student) return;
+    let failure: any = null;
+    await runOptimistic<Student, Student>({
+      current: student,
+      optimistic: (prev) => {
+        const next: Student = { ...prev };
+        if (patch.managerId !== undefined) {
+          next.managerId = patch.managerId;
+          if (patch.managerId === null) next.manager = null;
+        }
+        if (patch.chinaManagerId !== undefined) {
+          next.chinaManagerId = patch.chinaManagerId;
+          if (patch.chinaManagerId === null) next.chinaManager = null;
+        }
+        return next;
+      },
+      commit: setStudent,
+      request: () => assignStudentManager(id, patch),
+      reconcile: (_before, s) => s,
+      onError: (_message, e) => { failure = e; },
+    });
+    // ManagerBar показывает и «менеджер обновлён», и причину отказа сам — он
+    // рассчитывает, что упавший вызов БРОСИТ. runOptimistic ошибку гасит
+    // (состояние к этому моменту уже откачено), поэтому пробрасываем её руками:
+    // иначе после отката человек увидел бы зелёный тост «обновлён».
+    if (failure) throw failure;
   };
 
   const onRegenerate = async () => {
@@ -462,8 +580,13 @@ export default function StudentDetail() {
         <div style={{ display: 'flex', gap: 8 }}>
           {!loading && canEdit && !edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
           {!loading && canEdit && edit && <>
-            {/* resetForm ОБЯЗАТЕЛЕН: здесь откат правок — это и есть смысл кнопки. */}
-            <button className="btn btn-secondary btn-sm" onClick={() => { setEdit(false); reload({ resetForm: true }); }}>Отмена</button>
+            {/* Откат правок — это и есть смысл кнопки, но ради него не нужен
+                поход на сервер: student уже содержит последнее известное
+                серверное состояние карточки (его поддерживают и reload, и
+                ответы PATCH), поэтому форму заливаем из него локально и
+                мгновенно. Раньше здесь стоял reload с resetForm — то есть
+                полный GET студента ради отмены редактирования. */}
+            <button className="btn btn-secondary btn-sm" onClick={() => { setEdit(false); setTouched({}); setForm(formFromStudent(student!)); }}>Отмена</button>
             <button className="btn btn-primary btn-sm" onClick={onSave}>Сохранить</button>
           </>}
           {!loading && canEdit && <button className="btn btn-danger btn-sm" onClick={onDeleteStudent}>Удалить</button>}

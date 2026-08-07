@@ -14,6 +14,7 @@ import { isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
+import { removeById, runOptimistic } from '../utils/optimistic';
 import GrantFormModal from './GrantFormModal';
 import Icon from '../Icon';
 
@@ -43,8 +44,13 @@ export default function GrantCard({ studentId, canEdit }: Props) {
 
   const isPriv = isPrivileged(me?.role);
 
-  const load = () => {
-    setLoading(true);
+  /**
+   * `silent` — обновление на фоне: карточка не подменяется строкой «Загрузка...».
+   * Со спиннером остаются только первый показ и переход к другому студенту;
+   * событие от другого сотрудника гасить блок под руками не должно.
+   */
+  const load = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     // multiOnly: false — карточка студента должна показывать ЛЮБОЙ грант
     // (включая разовый, на 1 год), не только «двойные» из общего реестра.
     listGrants({ studentId, multiOnly: false, pageSize: 20 })
@@ -59,7 +65,10 @@ export default function GrantCard({ studentId, canEdit }: Props) {
   }, [studentId]);
 
   useRealtime({
-    'grant:updated': (d: any) => { if (d?.studentId === studentId) load(); },
+    // Событие приходит и на собственное закрытие гранта: перезагрузка сверит
+    // локально убранную карточку с сервером. Список заменяется целиком —
+    // задвоиться нечему.
+    'grant:updated': (d: any) => { if (d?.studentId === studentId) load({ silent: true }); },
   });
 
   const onAdvance = async (g: StudentGrant) => {
@@ -82,6 +91,16 @@ export default function GrantCard({ studentId, canEdit }: Props) {
     }
   };
 
+  /**
+   * Закрытие гранта. Карточка исчезает сразу, запрос уходит следом.
+   *
+   * Здесь предсказывать нечего: удаление — не расчёт, результат известен
+   * заранее (в отличие от перевода на следующий год выше, где дату считает
+   * сервер и потому ждём ответ). Было два похода на сервер на клик — DELETE и
+   * перезагрузка всего списка грантов; стало — один. Сервер отказал (нет прав,
+   * грант уже закрыт другим) — карточка возвращается на место вместе с
+   * причиной отказа.
+   */
   const onClose = async (g: StudentGrant) => {
     const ok = await confirm({
       title: 'Закрыть грант',
@@ -90,16 +109,14 @@ export default function GrantCard({ studentId, canEdit }: Props) {
       danger: true,
     });
     if (!ok) return;
-    setBusyId(g.id);
-    try {
-      await deleteGrant(g.id);
-      toast('Грант закрыт', 'success');
-      load();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка закрытия гранта', 'error');
-    } finally {
-      setBusyId(null);
-    }
+    const done = await runOptimistic<StudentGrant[], { ok: true }>({
+      current: grants,
+      optimistic: (prev) => removeById(prev, g.id),
+      commit: setGrants,
+      request: () => deleteGrant(g.id),
+      onError: (message) => toast(message, 'error'),
+    });
+    if (done) toast('Грант закрыт', 'success');
   };
 
   const renderGrant = (g: StudentGrant) => {
@@ -193,12 +210,21 @@ export default function GrantCard({ studentId, canEdit }: Props) {
         <div className="grant-card-list">{grants.map(renderGrant)}</div>
       )}
 
+      {/* onSaved — честная перезагрузка, а не предсказание: у нового гранта id
+          и дату следующего учебного года считает бэкенд. Но тихая: модалка к
+          этому моменту закрыта, и карточке гаснуть незачем. */}
       <AnimatePresence>
         {modal?.kind === 'create' && (
-          <GrantFormModal key="create" studentId={studentId} onClose={() => setModal(null)} onSaved={load} />
+          <GrantFormModal key="create" studentId={studentId} onClose={() => setModal(null)} onSaved={() => load({ silent: true })} />
         )}
         {modal?.kind === 'edit' && (
-          <GrantFormModal key="edit" studentId={studentId} grant={modal.grant} onClose={() => setModal(null)} onSaved={load} />
+          <GrantFormModal
+            key="edit"
+            studentId={studentId}
+            grant={modal.grant}
+            onClose={() => setModal(null)}
+            onSaved={() => load({ silent: true })}
+          />
         )}
       </AnimatePresence>
     </div>

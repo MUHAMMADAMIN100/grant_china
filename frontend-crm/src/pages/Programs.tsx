@@ -10,6 +10,7 @@ import Icon from '../Icon';
 import DirectionOptions from '../components/DirectionOptions';
 import { compose, hasErrors, maxLen, minLen, positive, required, validateAll } from '../utils/validators';
 import { useUrlFilter } from '../hooks/useUrlFilter';
+import { isTempId, removeById, replaceById, runOptimistic, tempId } from '../utils/optimistic';
 
 // Дефолты фильтров вынесены за компонент — иначе useMemo на каждом рендере
 // создавал бы новую ссылку и URL-хук триггерился без причины.
@@ -75,9 +76,20 @@ export default function Programs() {
   // устаревшим номером отбрасываем — это же снимает гонку с realtime.
   const reqRef = useRef(0);
 
-  const load = () => {
+  /**
+   * silent — обновление ФОНОМ, без подмены сетки на «Загрузка...».
+   *
+   * Нужно из-за оптимистичных изменений: после нашего же действия сервер
+   * присылает эхо (program:new/updated/deleted получают ВСЕ сотрудники, включая
+   * автора). Если на это эхо гасить сетку, весь смысл мгновенного отклика
+   * теряется — карточки моргают через полсекунды после клика. Полноэкранная
+   * «Загрузка...» остаётся только там, где на экране действительно нечего
+   * показывать: смена фильтров и первый заход.
+   */
+  const load = (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
     const my = ++reqRef.current;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     listPrograms({
       city: city || undefined,
@@ -90,6 +102,14 @@ export default function Programs() {
       })
       .catch((e: any) => {
         if (my !== reqRef.current) return;
+        if (silent) {
+          // Фоновое обновление: на экране лежит выборка по ТЕМ ЖЕ фильтрам,
+          // просто чуть более старая. Стирать её из-за сетевой заминки нельзя —
+          // человек потеряет то, что уже читал. Честно говорим, что данные
+          // могли устареть, и оставляем их на месте.
+          setError('Не удалось обновить список — показаны данные на момент последнего успешного обновления');
+          return;
+        }
         // Без сброса items на экране остался бы результат ПРОШЛОГО фильтра, а
         // сброшенный loading выдал бы его за успешно применённый. Пустая
         // сетка без баннера читалась бы как «программ по фильтру нет».
@@ -107,11 +127,62 @@ export default function Programs() {
     return () => clearTimeout(t);
   }, [city, major, direction]);
 
+  /**
+   * Фоновая сверка с сервером после собственного действия и по realtime.
+   *
+   * Задержка решает две задачи. Первая — склеить эхо своего действия с
+   * собственным вызовом в один запрос: сервер шлёт событие всем сотрудникам,
+   * включая автора, и без склейки на каждое сохранение приходилось бы два
+   * похода за списком. Вторая — не влезть между оптимистичным изменением и
+   * сверкой ответа: runOptimistic собирает итог из снимка ДО запроса, и
+   * перезагрузка, легшая в середину, была бы затёрта.
+   *
+   * Строки от этого не задваиваются: перезагрузка ЗАМЕНЯЕТ список целиком, а
+   * не дописывает в него полученную запись.
+   */
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReload = () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      load({ silent: true });
+    }, 500);
+  };
+  useEffect(() => () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+  }, []);
+
   useRealtime({
-    'program:new': () => load(),
-    'program:updated': () => load(),
-    'program:deleted': () => load(),
+    'program:new': () => scheduleReload(),
+    'program:updated': () => scheduleReload(),
+    'program:deleted': () => scheduleReload(),
   });
+
+  /**
+   * Выборку и порядок задаёт сервер (programs.service.findAll): city и major —
+   * «содержит» без учёта регистра, direction — точное совпадение, сортировка
+   * «сначала опубликованные, внутри — новые сверху». Повторяем это локально,
+   * иначе оптимистично показанная карточка встанет не на своё место или
+   * мелькнёт в чужом фильтре и исчезнет на первом же обновлении.
+   */
+  const matchesFilters = (p: Program) =>
+    (!city || p.city.toLowerCase().includes(city.toLowerCase())) &&
+    (!major || p.major.toLowerCase().includes(major.toLowerCase())) &&
+    (!direction || p.direction === direction);
+
+  /** Вставить карточку туда, где её покажет сервер. Не подходит под фильтр — не показываем вовсе. */
+  const insertRow = (list: Program[], row: Program) => {
+    if (!matchesFilters(row)) return list;
+    if (row.published) return [row, ...list];
+    const firstDraft = list.findIndex((p) => !p.published);
+    return firstDraft < 0
+      ? [...list, row]
+      : [...list.slice(0, firstDraft), row, ...list.slice(firstDraft)];
+  };
+
+  /** Обновить карточку. Если после правки она выпала из фильтра — убрать, как это сделает сервер. */
+  const patchRow = (list: Program[], id: string, patch: Partial<Program>) =>
+    replaceById(list, id, patch).filter((p) => p.id !== id || matchesFilters(p));
 
   const formErrors = editing
     ? validateAll(
@@ -136,25 +207,78 @@ export default function Programs() {
   const onSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editing || formInvalid) return;
-    setSaving(true);
-    try {
-      const payload = {
-        ...editing,
-        cost: typeof editing.cost === 'string' ? parseFloat(editing.cost) : editing.cost,
-      };
-      if (editing.id) {
-        await updateProgram(editing.id, payload);
-        toast('Программа обновлена', 'success');
-      } else {
-        await createProgram(payload, pendingImage);
+    const id = editing.id;
+    // Снимок формы: если сервер откажет, вернём модалку ровно с тем, что было
+    // набрано. Перенабирать десяток полей из-за отказа человек не должен.
+    const draft = { ...editing };
+    const payload = {
+      ...editing,
+      cost: typeof editing.cost === 'string' ? parseFloat(editing.cost) : editing.cost,
+    };
+
+    // СОЗДАНИЕ С КАРТИНКОЙ ждёт ответ по-старому, со спиннером: адрес файла
+    // придумать нельзя — он известен только после загрузки (см. utils/optimistic.ts).
+    // Показать карточку без картинки, а потом подставить её, значит устроить
+    // мигание ровно там, где человек смотрит на результат.
+    if (!id && pendingImage) {
+      setSaving(true);
+      try {
+        const created = await createProgram(payload, pendingImage);
         toast('Программа создана', 'success');
+        closeEditor();
+        setItems((prev) => insertRow(prev, created));
+        scheduleReload();
+      } catch (err: any) {
+        toast(err?.response?.data?.message || 'Ошибка сохранения', 'error');
+      } finally {
+        setSaving(false);
       }
-      closeEditor();
-      load();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
-    } finally {
-      setSaving(false);
+      return;
+    }
+
+    // Карточка, которую показываем до ответа при создании. Поля, которых в
+    // форме нет, заполняем ровно теми умолчаниями, что подставит бэкенд
+    // (programs.service.create): currency → CNY, published → true. id —
+    // временный: по нему интерфейс понимает, что строка ещё не подтверждена,
+    // и не даёт по ней действий, требующих настоящего id.
+    const optimisticRow: Program = {
+      id: tempId(),
+      name: payload.name || '',
+      university: payload.university || '',
+      city: payload.city || '',
+      major: payload.major || '',
+      direction: payload.direction || 'BACHELOR',
+      cost: Number(payload.cost) || 0,
+      currency: payload.currency || 'CNY',
+      duration: payload.duration || null,
+      language: payload.language || null,
+      description: payload.description || null,
+      imageUrl: null,
+      published: payload.published !== false,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Дальше — оптимистично: форма закрывается сразу, сетка меняется сразу,
+    // запрос уходит следом.
+    closeEditor();
+
+    const saved = await runOptimistic<Program[], Program>({
+      current: items,
+      optimistic: (prev) => (id ? patchRow(prev, id, payload) : insertRow(prev, optimisticRow)),
+      commit: setItems,
+      request: () => (id ? updateProgram(id, payload) : createProgram(payload)),
+      // Сервер тримит строки и подставляет умолчания (currency, published) —
+      // показываем то, что реально сохранено, а не то, что предсказали.
+      reconcile: (prev, srv) => (id ? patchRow(prev, id, srv) : insertRow(prev, srv)),
+      onError: (msg) => {
+        setEditing(draft);
+        toast(msg, 'error');
+      },
+    });
+
+    if (saved !== null) {
+      toast(id ? 'Программа обновлена' : 'Программа создана', 'success');
+      scheduleReload();
     }
   };
 
@@ -197,12 +321,18 @@ export default function Programs() {
       danger: true,
     });
     if (!ok) return;
-    try {
-      await deleteProgram(p.id);
+    // Карточка исчезает сразу; если сервер откажет (например, программа уже
+    // удалена другим администратором) — вернётся на своё место в списке.
+    const res = await runOptimistic<Program[], unknown>({
+      current: items,
+      optimistic: (prev) => removeById(prev, p.id),
+      commit: setItems,
+      request: () => deleteProgram(p.id),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    if (res !== null) {
       toast('Программа удалена', 'success');
-      load();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка', 'error');
+      scheduleReload();
     }
   };
 
@@ -263,11 +393,27 @@ export default function Programs() {
                       <div className="program-card-uni">{p.university}</div>
                     </div>
                     {isAdmin && (
+                      /*
+                        Пока строка не подтверждена сервером, её id временный:
+                        править и удалять по нему нечего — бэкенд ответит «не
+                        найдено». Кнопки не прячем, а гасим с подписью: исчезающие
+                        и возвращающиеся кнопки читаются как сбой интерфейса.
+                      */
                       <div className="program-card-actions">
-                        <button className="btn btn-sm btn-secondary" onClick={() => setEditing({ ...p })}>
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => setEditing({ ...p })}
+                          disabled={isTempId(p.id)}
+                          title={isTempId(p.id) ? 'Программа ещё сохраняется' : undefined}
+                        >
                           <Icon name="edit" size={14} />
                         </button>
-                        <button className="btn btn-sm btn-danger" onClick={() => onDelete(p)}>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          onClick={() => onDelete(p)}
+                          disabled={isTempId(p.id)}
+                          title={isTempId(p.id) ? 'Программа ещё сохраняется' : undefined}
+                        >
                           <Icon name="delete" size={14} />
                         </button>
                       </div>

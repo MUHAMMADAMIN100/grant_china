@@ -24,6 +24,7 @@ import { useUrlFilter } from '../hooks/useUrlFilter';
 import { downloadProtectedFile } from '../utils/fileUrl';
 import { formatDateTimeRu, toPeriodRange } from '../utils/datetime';
 import { exportTicketsCsv } from '../utils/ticketsReport';
+import { removeById, runOptimistic } from '../utils/optimistic';
 import TicketFormModal from '../components/TicketFormModal';
 import Pagination from '../components/Pagination';
 import Icon from '../Icon';
@@ -38,6 +39,35 @@ const PAGE_SIZE = 20;
 const EXPORT_PAGE_SIZE = 100;
 /** Потолок выгрузки в страницах (2000 строк) — чтобы экспорт не превратился в DDoS собственного API. */
 const EXPORT_MAX_PAGES = 20;
+
+/**
+ * Пересчёт сводки после удаления билета — БЕЗ второго похода на /tickets/stats.
+ *
+ * Формула повторяет tickets.service.ts → stats(): upcoming7/upcoming30 — это
+ * неотменённые рейсы с вылетом в окне «от сейчас», booked — забронированные,
+ * но ещё не вылетевшие, cancelled — отменённые. Повторяем её целиком, а не
+ * уменьшаем один «Всего»: плитки стоят рядом, и «Всего 41» при неизменном
+ * «Не выкуплено 12» врёт ровно так же, как ничего не обновить.
+ *
+ * Если формула на бэкенде разойдётся с этой, расхождение живёт до ближайшей
+ * перезагрузки сводки — следом за удалением прилетает ticket:updated, и цифры
+ * приходят от сервера.
+ */
+function statsAfterDelete(stats: TicketStats | null, t: Ticket): TicketStats | null {
+  if (!stats) return stats;
+  const now = Date.now();
+  const departure = new Date(t.departureAt).getTime();
+  const daysLeft = (departure - now) / 86_400_000;
+  const upcoming = t.status !== 'CANCELLED' && daysLeft >= 0;
+  const dec = (value: number, hit: boolean) => (hit ? Math.max(0, value - 1) : value);
+  return {
+    total: Math.max(0, stats.total - 1),
+    upcoming7: dec(stats.upcoming7, upcoming && daysLeft <= 7),
+    upcoming30: dec(stats.upcoming30, upcoming && daysLeft <= 30),
+    booked: dec(stats.booked, t.status === 'BOOKED' && departure >= now),
+    cancelled: dec(stats.cancelled, t.status === 'CANCELLED'),
+  };
+}
 
 /**
  * ТЗ «Билеты» — раздел учёта авиабилетов студентов.
@@ -131,9 +161,16 @@ export default function Tickets() {
   // гонку с realtime-перезагрузкой по 'ticket:updated'.
   const reqRef = useRef(0);
 
-  const load = () => {
+  /**
+   * `silent` — обновление на фоне: таблица не подменяется строкой «Загрузка...».
+   *
+   * Раньше любая фоновая причина перезагрузиться (ticket:updated от другого
+   * сотрудника, возврат из формы) поднимала общий флаг загрузки, и список
+   * гаснул у человека, который в этот момент ничего не нажимал.
+   */
+  const load = (opts?: { silent?: boolean }) => {
     const my = ++reqRef.current;
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     listTickets({ ...queryFilters, page, pageSize: PAGE_SIZE })
       .then((res) => {
         if (my !== reqRef.current) return;
@@ -156,7 +193,7 @@ export default function Tickets() {
   };
 
   useEffect(() => {
-    const t = setTimeout(load, 300);
+    const t = setTimeout(() => load(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryFilters, page]);
@@ -174,7 +211,11 @@ export default function Tickets() {
       if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
       reloadTimerRef.current = setTimeout(() => {
         reloadTimerRef.current = null;
-        load();
+        // Тихо: событие пришло не от действия этого человека, мигать таблицей
+        // незачем. Полная перезагрузка заодно приводит в порядок то, что
+        // оптимистичное удаление посчитало локально (страница добирает
+        // двадцатую строку, сводка приходит от сервера).
+        load({ silent: true });
         loadStats();
       }, 600);
     },
@@ -194,6 +235,29 @@ export default function Tickets() {
     }
   };
 
+  /**
+   * Три состояния, которые меняются одним движением: строки, счётчик пагинации
+   * и плитки сводки. Держим их одним снимком, чтобы откат при ошибке вернул их
+   * вместе — иначе после отказа сервера строка вернулась бы в таблицу, а
+   * «Всего» осталось бы уменьшенным.
+   */
+  type TicketsView = { items: Ticket[]; total: number; stats: TicketStats | null };
+  const applyView = (next: TicketsView) => {
+    setItems(next.items);
+    setTotal(next.total);
+    setStats(next.stats);
+  };
+
+  /**
+   * Удаление билета. Строка исчезает сразу, запрос уходит следом.
+   *
+   * Было три похода на сервер на один клик — DELETE, перезагрузка страницы
+   * списка и перезагрузка сводки, — и всё это время таблица гасла. Стало: один
+   * запрос, экран отвечает мгновенно. Сервер отказал (нет прав, билет уже
+   * удалён другим) — возвращается ровно то, что было, вместе с причиной отказа.
+   *
+   * busyId здесь больше не нужен: блокировать нечего, строки на экране уже нет.
+   */
   const onDelete = async (t: Ticket) => {
     const ok = await confirm({
       title: 'Удалить билет',
@@ -202,17 +266,20 @@ export default function Tickets() {
       danger: true,
     });
     if (!ok) return;
-    setBusyId(t.id);
-    try {
-      await deleteTicket(t.id);
-      toast('Билет удалён', 'success');
-      load();
-      loadStats();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Не удалось удалить билет', 'error');
-    } finally {
-      setBusyId(null);
-    }
+    const done = await runOptimistic<TicketsView, { ok: true }>({
+      current: { items, total, stats },
+      optimistic: (prev) => ({
+        items: removeById(prev.items, t.id),
+        // total тоже -1: иначе пагинация продолжает обещать страницу, на
+        // которой уже нечего показывать.
+        total: Math.max(0, prev.total - 1),
+        stats: statsAfterDelete(prev.stats, t),
+      }),
+      commit: applyView,
+      request: () => deleteTicket(t.id),
+      onError: (message) => toast(message, 'error'),
+    });
+    if (done) toast('Билет удалён', 'success');
   };
 
   const onDownload = async (t: Ticket) => {
@@ -579,7 +646,12 @@ export default function Tickets() {
               setEditing(null);
             }}
             onSaved={() => {
-              load();
+              // Форма уже дождалась сервера, но результат сюда не приходит, и
+              // предсказать его нечем: у нового билета id, прикреплённый файл и
+              // данные студента рождаются на бэкенде. Поэтому здесь честная
+              // перезагрузка — но тихая: модалка закрылась, и таблица не должна
+              // гаснуть на ровном месте.
+              load({ silent: true });
               loadStats();
             }}
           />

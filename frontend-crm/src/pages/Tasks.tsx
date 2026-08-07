@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
 import { listUsers } from '../api/users';
@@ -10,6 +10,7 @@ import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import { compose, hasErrors, maxLen, minLen, required, validateAll } from '../utils/validators';
 import { formatDateTimeRu, toDatetimeLocalValue } from '../utils/datetime';
+import { isTempId, removeById, replaceById, runOptimistic, tempId } from '../utils/optimistic';
 
 type Scope = 'all' | 'mine';
 type DueFilter = '' | 'overdue' | 'today';
@@ -38,17 +39,50 @@ export default function Tasks() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', assignedToId: '', dueDate: '' });
-  const [submitting, setSubmitting] = useState(false);
 
   // Инлайн-редактирование срока у уже существующей задачи (ТЗ 3.2 — перенос
   // даты повторного звонка/срока). Отдельный маленький стейт вместо полноценной
   // формы редактирования — так же лаконично, как переключатель статуса ниже.
   const [dueEditId, setDueEditId] = useState<string | null>(null);
   const [dueDraft, setDueDraft] = useState('');
-  const [dueSaving, setDueSaving] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+  /**
+   * Актуальный список для оптимистичных обновлений.
+   *
+   * В обработчике брать `items` из замыкания нельзя: между кликом и запросом
+   * успевает пройти диалог подтверждения удаления, а за это время список мог
+   * приехать заново по сокету. Снимок для отката, сделанный из устаревшего
+   * замыкания, при ошибке воскресил бы уже неактуальные строки. Ref всегда
+   * держит то, что реально отрисовано.
+   */
+  const itemsRef = useRef<Task[]>(items);
+  itemsRef.current = items;
+
+  /**
+   * Ключ строки для React.
+   *
+   * Оптимистичная задача живёт с временным id, а после ответа сервера получает
+   * настоящий. Если ключом сделать сам id, React увидит не «та же строка с
+   * другим id», а «одна исчезла, другая появилась»: строка перемонтируется и
+   * заново проиграет анимацию появления — на глаз это моргание там, где ничего
+   * не изменилось. Поэтому один раз выданный ключ закрепляем за записью до
+   * конца жизни экрана.
+   */
+  const rowKeys = useRef(new Map<string, string>());
+  const rowKey = (id: string) => rowKeys.current.get(id) || id;
+
+  /**
+   * `silent` — перезагрузка без индикатора «Загрузка...».
+   *
+   * Нужна для событий сокета: после нашего же изменения сервер пришлёт
+   * `task:updated`, и обычный load() на время запроса подменил бы весь список
+   * заглушкой — то есть оптимистичное обновление обесценилось бы миганием
+   * ровно там, где мы от него избавлялись. Данные при этом всё равно
+   * сверяются с сервером: setItems заменяет массив целиком, поэтому повторное
+   * событие не может задвоить строки.
+   */
+  const load = async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true);
     try {
       let dueFrom: string | undefined;
       let dueTo: string | undefined;
@@ -66,22 +100,25 @@ export default function Tasks() {
       const data = await listTasks({ mine: scope === 'mine', search: search || undefined, dueFrom, dueTo, overdue });
       setItems(data);
     } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка загрузки', 'error');
+      // Тихая перезагрузка идёт по событию сокета, а не по просьбе человека:
+      // всплывающая ошибка на ровном месте только испугала бы. На экране
+      // остаётся последний удачно загруженный список.
+      if (!opts.silent) toast(e?.response?.data?.message || 'Ошибка загрузки', 'error');
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    const t = setTimeout(load, 300);
+    const t = setTimeout(() => load(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, search, dueFilter]);
 
   useRealtime({
-    'task:new': () => load(),
-    'task:updated': () => load(),
-    'task:deleted': () => load(),
+    'task:new': () => load({ silent: true }),
+    'task:updated': () => load({ silent: true }),
+    'task:deleted': () => load({ silent: true }),
   });
 
   useEffect(() => {
@@ -106,39 +143,95 @@ export default function Tasks() {
       toast('Заполните все поля корректно', 'error');
       return;
     }
-    setSubmitting(true);
-    try {
-      await createTask({
-        title: form.title.trim(),
-        description: form.description.trim(),
-        assignedToId: form.assignedToId,
-        dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : undefined,
-      });
-      toast('Задача создана. Сотрудник получит email и уведомление.', 'success');
-      setForm({ title: '', description: '', assignedToId: '', dueDate: '' });
-      setCreating(false);
-      await load();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Ошибка создания', 'error');
-    } finally {
-      setSubmitting(false);
-    }
+
+    const draft = form;
+    const dueDate = draft.dueDate ? new Date(draft.dueDate).toISOString() : null;
+    const assignee = users.find((u) => u.id === draft.assignedToId);
+    const now = new Date().toISOString();
+    // Все поля, кроме id и служебных дат, известны клиенту — задача рисуется
+    // целиком, а не полупустой заглушкой. Сервер вернёт запись с настоящим id,
+    // и reconcile заменит эту строку на неё.
+    const pending: Task = {
+      id: tempId(),
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      status: 'TODO',
+      assignedToId: draft.assignedToId,
+      assignedTo: assignee ? { id: assignee.id, fullName: assignee.fullName, email: assignee.email } : undefined,
+      createdById: me?.id ?? null,
+      createdBy: me ? { id: me.id, fullName: me.fullName, email: me.email } : null,
+      dueDate,
+      originKey: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Форму убираем сразу, но введённое держим в `draft`: если сервер откажет,
+    // человек получит её обратно заполненной, а не будет набирать заново.
+    setForm({ title: '', description: '', assignedToId: '', dueDate: '' });
+    setCreating(false);
+
+    const saved = await runOptimistic({
+      current: itemsRef.current,
+      // Сверху: порядок в списке задаёт сервер (статус → срок → дата создания),
+      // и точное место новой строки определится ближайшей перезагрузкой.
+      optimistic: (prev) => [pending, ...prev],
+      commit: setItems,
+      request: () =>
+        createTask({
+          title: pending.title,
+          description: pending.description,
+          assignedToId: pending.assignedToId,
+          dueDate: dueDate ?? undefined,
+        }),
+      // Подменяем временную строку на настоящую в ТЕКУЩЕМ состоянии, а не
+      // пересобираем список из снимка «до»: форма закрывается сразу, и вторая
+      // задача может быть создана до ответа на первую. Пересборка из снимка
+      // выкинула бы её с экрана, хотя на сервере она сохранилась.
+      reconcile: (_prev, created) => {
+        rowKeys.current.set(created.id, pending.id);
+        return itemsRef.current.map((it) => (it.id === pending.id ? created : it));
+      },
+      onError: (msg) => {
+        // Возвращаем форму заполненной — но не затираем то, что человек успел
+        // набрать заново, пока запрос был в пути.
+        setForm((cur) => (cur.title || cur.description || cur.assignedToId || cur.dueDate ? cur : draft));
+        setCreating(true);
+        toast(msg, 'error');
+      },
+    });
+
+    // Про письмо и уведомление сообщаем только когда сервер подтвердил: их
+    // рассылает он, обещать их за него нельзя.
+    if (saved !== null) toast('Задача создана. Сотрудник получит email и уведомление.', 'success');
   };
 
   const setStatus = async (t: Task, next: TaskStatus) => {
     if (t.status === next) return;
-    try {
-      await updateTask(t.id, { status: next });
-      if (next === 'DONE') toast('Задача выполнена', 'success');
-      else if (next === 'IN_PROGRESS') toast('Задача взята в работу', 'success');
-      else toast('Задача возвращена в очередь', 'info');
-      await load();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка', 'error');
-    }
+    // Задачи ещё нет на сервере — PATCH ушёл бы по временному id и вернул 404.
+    if (isTempId(t.id)) return;
+
+    const saved = await runOptimistic({
+      current: itemsRef.current,
+      // Строка перекрашивается на клике. Если при этом она перестаёт подходить
+      // под фильтр («Просроченные» + статус «Выполнено»), она останется на
+      // экране до ближайшей перезагрузки — это честнее, чем выдёргивать из-под
+      // курсора строку, по которой человек только что кликнул.
+      optimistic: (prev) => replaceById(prev, t.id, { status: next }),
+      commit: setItems,
+      request: () => updateTask(t.id, { status: next }),
+      reconcile: (prev, updated) => replaceById(prev, t.id, updated),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    if (saved === null) return;
+
+    if (next === 'DONE') toast('Задача выполнена', 'success');
+    else if (next === 'IN_PROGRESS') toast('Задача взята в работу', 'success');
+    else toast('Задача возвращена в очередь', 'info');
   };
 
   const onDelete = async (t: Task) => {
+    if (isTempId(t.id)) return;
     const ok = await confirm({
       title: 'Удалить задачу',
       message: `«${t.title}» — действие нельзя отменить.`,
@@ -146,13 +239,16 @@ export default function Tasks() {
       danger: true,
     });
     if (!ok) return;
-    try {
-      await deleteTask(t.id);
-      toast('Задача удалена', 'success');
-      await load();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка удаления', 'error');
-    }
+
+    const res = await runOptimistic({
+      current: itemsRef.current,
+      optimistic: (prev) => removeById(prev, t.id),
+      commit: setItems,
+      request: () => deleteTask(t.id),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    // runOptimistic отдаёт null только при ошибке; тело ответа тут не важно.
+    if (res !== null) toast('Задача удалена', 'success');
   };
 
   const openDueEdit = (t: Task) => {
@@ -166,17 +262,26 @@ export default function Tasks() {
   };
 
   const saveDueEdit = async (t: Task) => {
-    setDueSaving(true);
-    try {
-      await updateTask(t.id, { dueDate: dueDraft ? new Date(dueDraft).toISOString() : null });
-      toast(dueDraft ? 'Срок обновлён' : 'Срок снят', 'success');
-      cancelDueEdit();
-      await load();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка сохранения срока', 'error');
-    } finally {
-      setDueSaving(false);
-    }
+    if (isTempId(t.id)) return;
+    // Черновик запоминаем ДО закрытия редактора: при отказе сервера редактор
+    // откроется снова ровно с той датой, которую человек выбрал.
+    const draft = dueDraft;
+    const nextDue = draft ? new Date(draft).toISOString() : null;
+    cancelDueEdit();
+
+    const saved = await runOptimistic({
+      current: itemsRef.current,
+      optimistic: (prev) => replaceById(prev, t.id, { dueDate: nextDue }),
+      commit: setItems,
+      request: () => updateTask(t.id, { dueDate: nextDue }),
+      reconcile: (prev, updated) => replaceById(prev, t.id, updated),
+      onError: (msg) => {
+        setDueEditId(t.id);
+        setDueDraft(draft);
+        toast(msg, 'error');
+      },
+    });
+    if (saved !== null) toast(nextDue ? 'Срок обновлён' : 'Срок снят', 'success');
   };
 
   return (
@@ -304,10 +409,10 @@ export default function Tasks() {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={submitting || formInvalid}
+                  disabled={formInvalid}
                   title={formInvalid ? 'Исправьте ошибки в форме' : ''}
                 >
-                  {submitting ? 'Создаём...' : 'Создать'}
+                  Создать
                 </button>
               </div>
             </motion.form>
@@ -334,7 +439,11 @@ export default function Tasks() {
             >
               {items.map((t) => {
                 const isOwner = t.assignedToId === me?.id;
-                const canChange = isAdmin || isOwner;
+                // Строка ещё не подтверждена сервером: настоящего id у неё нет,
+                // поэтому всё, что уходит запросом по id (статус, срок,
+                // удаление), для неё закрыто до ответа.
+                const isPending = isTempId(t.id);
+                const canChange = (isAdmin || isOwner) && !isPending;
                 const overdue = isOverdue(t);
                 const dueToday = !overdue && isDueToday(t);
                 const isAuto = t.createdById === null;
@@ -345,7 +454,7 @@ export default function Tasks() {
                 ];
                 return (
                   <motion.div
-                    key={t.id}
+                    key={rowKey(t.id)}
                     className={`task-item task-${t.status.toLowerCase()}`}
                     variants={{
                       hidden: { opacity: 0, y: 10 },
@@ -356,9 +465,14 @@ export default function Tasks() {
                     <div className="task-content">
                       <div className="task-title">
                         {t.title}
-                        {isAuto && (
+                        {isAuto && !isPending && (
                           <span className="badge badge-gray" style={{ marginLeft: 8 }} title="Создана автоматически системой">
                             Авто
+                          </span>
+                        )}
+                        {isPending && (
+                          <span className="badge badge-gray" style={{ marginLeft: 8 }} title="Ждём подтверждения сервера">
+                            Сохраняем...
                           </span>
                         )}
                       </div>
@@ -398,16 +512,18 @@ export default function Tasks() {
 
                       {dueEditId === t.id && (
                         <div className="task-meta" style={{ marginTop: 8 }}>
+                          {/* Блокировать поля на время запроса больше нечего:
+                              редактор закрывается сразу, а при отказе сервера
+                              открывается заново с тем же черновиком. */}
                           <input
                             type="datetime-local"
                             value={dueDraft}
                             onChange={(e) => setDueDraft(e.target.value)}
-                            disabled={dueSaving}
                           />
-                          <button className="btn btn-sm btn-primary" onClick={() => saveDueEdit(t)} disabled={dueSaving}>
+                          <button className="btn btn-sm btn-primary" onClick={() => saveDueEdit(t)}>
                             Сохранить
                           </button>
-                          <button className="btn btn-sm btn-secondary" onClick={cancelDueEdit} disabled={dueSaving}>
+                          <button className="btn btn-sm btn-secondary" onClick={cancelDueEdit}>
                             Отмена
                           </button>
                         </div>
@@ -420,7 +536,13 @@ export default function Tasks() {
                             className={`task-status-btn${t.status === s.value ? ' active' : ''} task-status-${s.value.toLowerCase()}`}
                             onClick={() => canChange && setStatus(t, s.value)}
                             disabled={!canChange}
-                            title={canChange ? s.label : 'Только назначенный сотрудник или админ'}
+                            title={
+                              canChange
+                                ? s.label
+                                : isPending
+                                  ? 'Задача ещё сохраняется'
+                                  : 'Только назначенный сотрудник или админ'
+                            }
                           >
                             <Icon name={s.icon} size={16} />
                             <span>{s.label}</span>
@@ -428,7 +550,7 @@ export default function Tasks() {
                         ))}
                       </div>
                     </div>
-                    {isAdmin && (
+                    {isAdmin && !isPending && (
                       <button className="btn btn-sm btn-danger task-delete-btn" onClick={() => onDelete(t)} title="Удалить задачу">
                         <Icon name="delete" size={16} />
                       </button>

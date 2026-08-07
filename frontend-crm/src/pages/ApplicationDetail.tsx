@@ -20,6 +20,7 @@ import ContractFormModal from '../components/ContractFormModal';
 import Icon from '../Icon';
 import { AnimatePresence, motion } from 'framer-motion';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, numberRule, required, validateAll } from '../utils/validators';
+import { runOptimistic } from '../utils/optimistic';
 
 import { buildFileUrl } from '../utils/fileUrl';
 
@@ -45,6 +46,26 @@ function cardFieldsDiffer(prev: Student | null, next: Student): boolean {
     prev.status !== next.status ||
     (prev.comment || '') !== (next.comment || '')
   );
+}
+
+/**
+ * Значения формы карточки из серверного снимка студента.
+ *
+ * Одна функция на два места (первичная загрузка и успешное сохранение) —
+ * раньше после сохранения форму переливал reload(), то есть ЛИШНИЙ GET ради
+ * нормализации того, что сервер уже вернул в ответе на PATCH. Разъехаться
+ * набору полей теперь неоткуда.
+ */
+function formFromStudent(s: Student) {
+  return {
+    fullName: s.fullName,
+    phones: s.phones.join(', '),
+    email: s.email || '',
+    direction: s.direction,
+    cabinet: s.cabinet,
+    status: s.status,
+    comment: s.comment || '',
+  };
 }
 
 export default function ApplicationDetail() {
@@ -82,8 +103,10 @@ export default function ApplicationDetail() {
   // пустым навсегда, а отчёт по каналам привлечения не собирался.
   // Состояние отдельное от form: блок обязан работать и в ветке isNew, где
   // карточки студента (и самой form) ещё нет.
+  // Отдельного флага «идёт сохранение» здесь нет намеренно: редактор
+  // закрывается сразу с новым значением, а при отказе сервера возвращается
+  // с тем же набранным текстом (см. onSaveSource).
   const [sourceEdit, setSourceEdit] = useState<{ source: string; sourceDetail: string } | null>(null);
-  const [sourceSaving, setSourceSaving] = useState(false);
 
   const formErrors = form
     ? validateAll(
@@ -160,15 +183,7 @@ export default function ApplicationDetail() {
           // заменялось серверным, и «Сохранить» возвращал старые значения.
           setStudent(s);
           if (opts?.resetForm || !formRef.current || !editRef.current) {
-            setForm({
-              fullName: s.fullName,
-              phones: s.phones.join(', '),
-              email: s.email || '',
-              direction: s.direction,
-              cabinet: s.cabinet,
-              status: s.status,
-              comment: s.comment || '',
-            });
+            setForm(formFromStudent(s));
           } else if (opts?.external && Date.now() > selfMutationUntilRef.current && cardFieldsDiffer(prev, s)) {
             toast('Карточка обновлена другим пользователем — ваши правки сохранены', 'info');
           }
@@ -254,9 +269,29 @@ export default function ApplicationDetail() {
   };
 
   const onReassign = async (patch: { managerId?: string | null; chinaManagerId?: string | null }) => {
-    if (!id) return;
-    await assignApplicationManager(id, patch);
-    await reload();
+    if (!id || !app) return;
+    let failure: unknown = null;
+    markSelfMutation();
+    const saved = await runOptimistic<Application, Application>({
+      current: app,
+      // Предсказываем только сами id: ФИО нового менеджера знает сервер, а
+      // ManagerBar отдаёт наверх лишь выбранный userId. Зато права на заявке
+      // (isMine → canAct) пересчитываются мгновенно, а подпись под слотом
+      // придёт с ответом. Выигрыш всё равно есть: было PATCH + полный
+      // reload() всей страницы (заявка + студент + договор), стал один PATCH.
+      optimistic: (prev) => ({ ...prev, ...patch }),
+      commit: setApp,
+      request: () => assignApplicationManager(id, patch),
+      // Мутации отдают заявку тем же составом связей, что и GET (MANAGER_INCLUDE),
+      // но льём поверх снимка: ключи, которых в ответе не окажется, не обнулятся.
+      reconcile: (prev, srv) => ({ ...prev, ...srv }),
+      onError: (_msg, e) => { failure = e; },
+    });
+    // ManagerBar сам показывает и успех, и причину отказа, и снимает свой
+    // индикатор сохранения — поэтому ошибку не глотаем, а возвращаем ему
+    // исходной: сообщение бэкенда лежит в e.response.data.message, обёртка
+    // превратила бы его в общее «Ошибка переназначения».
+    if (!saved) throw failure ?? new Error('Ошибка переназначения');
   };
 
   const onDeleteApp = async () => {
@@ -287,62 +322,102 @@ export default function ApplicationDetail() {
       return;
     }
     const phones = form.phones.split(',').map((p: string) => p.trim()).filter(Boolean);
-    try {
-      markSelfMutation();
-      await updateStudent(student.id, {
-        fullName: form.fullName.trim(),
-        phones,
-        email: form.email?.trim() || undefined,
-        direction: form.direction,
-        cabinet: parseInt(form.cabinet, 10),
-        status: form.status,
-        comment: form.comment?.trim() || undefined,
-      });
-      toast('Данные сохранены', 'success');
-      await reload({ resetForm: true });
-      setEdit(false);
-      setTouched({});
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка сохранения', 'error');
-    }
+    const payload = {
+      fullName: form.fullName.trim(),
+      phones,
+      email: form.email?.trim() || undefined,
+      direction: form.direction,
+      cabinet: parseInt(form.cabinet, 10),
+      status: form.status,
+      comment: form.comment?.trim() || undefined,
+    };
+    markSelfMutation();
+    const saved = await runOptimistic<Student, Student>({
+      current: student,
+      optimistic: (prev) => ({
+        ...prev,
+        ...payload,
+        // undefined в payload значит «поле не отправляем»: axios его не
+        // сериализует, и бэкенд (dto.email !== undefined) колонку не трогает.
+        // Значит и локально оно обязано остаться прежним — иначе очищенный
+        // email пропадал бы с экрана и возвращался с ответом сервера.
+        email: payload.email ?? prev.email,
+        comment: payload.comment ?? prev.comment,
+      }),
+      commit: setStudent,
+      request: () => updateStudent(student.id, payload),
+      // Льём ответ ПОВЕРХ снимка, а не заменяем им карточку целиком: в
+      // student висят documents и applicationForm, на которых держатся
+      // чек-лист и анкета ниже по странице. Пока сервер их возвращает, но
+      // стоит облегчить ответ PATCH — и чек-лист опустел бы молча.
+      reconcile: (prev, srv) => ({ ...prev, ...srv }),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    // Отказ сервера: карточка уже откачена, а режим редактирования НЕ
+    // закрываем — введённое остаётся на экране, человек правит и жмёт снова.
+    if (!saved) return;
+    toast('Данные сохранены', 'success');
+    // Форму переливаем ответом сервера (а не своим payload) — так в полях
+    // оказываются канонические значения: телефоны в том виде, в каком их
+    // сохранил бэкенд, кабинет, подставленный по направлению. Раньше ради
+    // этого делался лишний reload() всей страницы.
+    setForm(formFromStudent(saved));
+    setEdit(false);
+    setTouched({});
   };
 
   const onSaveSource = async () => {
-    if (!id || !sourceEdit) return;
-    setSourceSaving(true);
-    try {
-      markSelfMutation();
-      await updateApplication(id, {
-        // «Не указан» отправляем именно как null, а не undefined: undefined
-        // axios не сериализует, бэкенд поле не трогает — ошибочно
-        // проставленный источник нельзя было снять вообще, а тост при этом
-        // рапортовал об успехе. null проходит валидацию (@IsOptional в
-        // UpdateApplicationDto пропускает и null, и undefined, до
-        // @IsIn(LEAD_SOURCE_VALUES) дело не доходит) и обнуляет колонку —
-        // «неизвестно» в схеме выражается ровно через source = null
-        // (common/lead-source.ts).
-        source: sourceEdit.source || null,
-        sourceDetail: sourceEdit.sourceDetail.trim(),
-      });
-      toast('Источник привлечения сохранён', 'success');
-      setSourceEdit(null);
-      await reload();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка сохранения источника', 'error');
-    } finally {
-      setSourceSaving(false);
-    }
+    if (!id || !app || !sourceEdit) return;
+    // Снимок набранного — по нему восстанавливаем редактор, если сервер
+    // откажет: перенабирать уточнение из-за чужой сетевой ошибки человек
+    // не должен.
+    const typed = sourceEdit;
+    const patch = {
+      // «Не указан» отправляем именно как null, а не undefined: undefined
+      // axios не сериализует, бэкенд поле не трогает — ошибочно
+      // проставленный источник нельзя было снять вообще, а тост при этом
+      // рапортовал об успехе. null проходит валидацию (@IsOptional в
+      // UpdateApplicationDto пропускает и null, и undefined, до
+      // @IsIn(LEAD_SOURCE_VALUES) дело не доходит) и обнуляет колонку —
+      // «неизвестно» в схеме выражается ровно через source = null
+      // (common/lead-source.ts).
+      source: typed.source || null,
+      sourceDetail: typed.sourceDetail.trim(),
+    };
+    markSelfMutation();
+    // Редактор закрываем сразу: пока он открыт, вместо бейджа с новым
+    // источником видны те же самые поля ввода — оптимистичный результат
+    // просто некуда показать. Отдельный флаг «Сохранение…» больше не нужен,
+    // его роль играет сам изменившийся бейдж.
+    setSourceEdit(null);
+    const saved = await runOptimistic<Application, Application>({
+      current: app,
+      optimistic: (prev) => ({ ...prev, ...patch }),
+      commit: setApp,
+      request: () => updateApplication(id, patch),
+      // Льём поверх снимка: PATCH отдаёт заявку тем же составом связей, что и
+      // GET (MANAGER_INCLUDE), но если ответ когда-нибудь облегчат, вложенные
+      // менеджеры и студент не пропадут с экрана.
+      reconcile: (prev, srv) => ({ ...prev, ...srv }),
+      onError: (msg) => {
+        setSourceEdit(typed);
+        toast(msg, 'error');
+      },
+    });
+    if (saved) toast('Источник привлечения сохранён', 'success');
   };
 
   const onClearRepeat = async () => {
-    if (!id) return;
-    try {
-      await clearRepeatApplication(id);
-      toast('Пометка «Повторное обращение» снята', 'success');
-      await reload();
-    } catch (e: any) {
-      toast(e?.response?.data?.message || 'Ошибка', 'error');
-    }
+    if (!id || !app) return;
+    const saved = await runOptimistic<Application, Application>({
+      current: app,
+      optimistic: (prev) => ({ ...prev, repeatOfId: null }),
+      commit: setApp,
+      request: () => clearRepeatApplication(id),
+      reconcile: (prev, srv) => ({ ...prev, ...srv }),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    if (saved) toast('Пометка «Повторное обращение» снята', 'success');
   };
 
   const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -520,7 +595,6 @@ export default function ApplicationDetail() {
                 <select
                   value={sourceEdit.source}
                   onChange={(e) => setSourceEdit({ ...sourceEdit, source: e.target.value })}
-                  disabled={sourceSaving}
                 >
                   <option value="">Не указан</option>
                   {LEAD_SOURCES.map((s) => (
@@ -532,13 +606,12 @@ export default function ApplicationDetail() {
                   onChange={(e) => setSourceEdit({ ...sourceEdit, sourceDetail: e.target.value })}
                   maxLength={200}
                   placeholder="Уточнение: @ник, кампания, кто порекомендовал"
-                  disabled={sourceSaving}
                 />
-                <button className="btn btn-sm btn-secondary" onClick={() => setSourceEdit(null)} disabled={sourceSaving}>
+                <button className="btn btn-sm btn-secondary" onClick={() => setSourceEdit(null)}>
                   Отмена
                 </button>
-                <button className="btn btn-sm btn-primary" onClick={onSaveSource} disabled={sourceSaving}>
-                  {sourceSaving ? 'Сохранение…' : 'Сохранить'}
+                <button className="btn btn-sm btn-primary" onClick={onSaveSource}>
+                  Сохранить
                 </button>
               </div>
             ) : (

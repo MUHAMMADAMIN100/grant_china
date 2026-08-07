@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   createKnowledgeArticle,
@@ -14,6 +14,7 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import { useRealtime } from '../realtime';
+import { removeById, runOptimistic } from '../utils/optimistic';
 import Icon from '../Icon';
 import { fadeUp, staggerContainer } from '../motion';
 
@@ -46,15 +47,32 @@ export default function Knowledge() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [editor, setEditor] = useState<KnowledgeArticle | 'new' | null>(null);
 
-  const load = () => {
-    setLoading(true);
+  const includeDrafts = canEdit && showDrafts;
+
+  /**
+   * silent — обновление ФОНОМ, без подмены списка на «Загрузка...».
+   *
+   * Нужно потому, что knowledge:updated сервер шлёт ВСЕМ сотрудникам, включая
+   * автора правки: после собственного сохранения к нам возвращается эхо, и
+   * если на него гасить список, статья, которую человек только что закрыл,
+   * мигнёт «Загрузкой» на ровном месте. Полноэкранное ожидание оставляем там,
+   * где показывать действительно нечего: первый заход и смена фильтров.
+   */
+  const load = (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     listKnowledge({
       search: search || undefined,
       category: category || undefined,
-      drafts: canEdit && showDrafts,
+      drafts: includeDrafts,
     })
       .then(setItems)
-      .catch(() => setItems([]))
+      // Фоновое обновление не стираем: на экране лежит выборка по тем же
+      // фильтрам, просто чуть более старая. Регламент, который человек сейчас
+      // читает, не должен исчезать из-за сетевой заминки.
+      .catch(() => {
+        if (!silent) setItems([]);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -68,14 +86,64 @@ export default function Knowledge() {
     listKnowledgeCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
 
+  /**
+   * Фоновая сверка с сервером — после собственного действия и по realtime.
+   *
+   * Задержка склеивает эхо своего действия с собственным вызовом в один поход
+   * за списком и не даёт перезагрузке лечь между локальным изменением и
+   * ответом сервера. Задвоить строки она не может: load ЗАМЕНЯЕТ список
+   * целиком, а не дописывает в него пришедшую статью.
+   */
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReload = () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      load({ silent: true });
+    }, 500);
+  };
+  useEffect(() => () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+  }, []);
+
   // Регламент правит руководство, а читают его менеджеры — и до сих пор
   // видели прежний текст, пока не перезагрузят страницу. Для инструкции,
   // по которой человек прямо сейчас действует, это хуже, чем для списка.
   useRealtime({
-    'knowledge:updated': () => load(),
+    'knowledge:updated': () => scheduleReload(),
   });
 
   const categoryLabel = (value: string) => categories.find((c) => c.value === value)?.label ?? value;
+
+  /**
+   * Выборку и порядок задаёт сервер (knowledge.service.findAll): черновики
+   * только при drafts=true, раздел — точное совпадение, поиск — «содержит» по
+   * заголовку ИЛИ тексту без учёта регистра, сортировка sortOrder → createdAt
+   * по возрастанию. Повторяем это локально, чтобы сохранённая статья вставала
+   * ровно туда, где её покажет сервер, и не мелькала в списке, из которого она
+   * выпадает: снятый с публикации черновик при выключенном «показывать
+   * черновики» должен исчезнуть сразу, а не через полсекунды.
+   */
+  const matchesFilters = (a: KnowledgeArticle) =>
+    (includeDrafts || a.published) &&
+    (!category || a.category === category) &&
+    (!search ||
+      a.title.toLowerCase().includes(search.toLowerCase()) ||
+      a.body.toLowerCase().includes(search.toLowerCase()));
+
+  /**
+   * Поставить сохранённую статью на её место в списке. Сначала убираем прежнюю
+   * версию — так один и тот же id не может оказаться в списке дважды, чем бы ни
+   * было сохранение: правкой существующей статьи или созданием новой.
+   */
+  const applySaved = (list: KnowledgeArticle[], a: KnowledgeArticle) => {
+    const rest = removeById(list, a.id);
+    if (!matchesFilters(a)) return rest;
+    const at = rest.findIndex(
+      (x) => x.sortOrder > a.sortOrder || (x.sortOrder === a.sortOrder && x.createdAt > a.createdAt),
+    );
+    return at < 0 ? [...rest, a] : [...rest.slice(0, at), a, ...rest.slice(at)];
+  };
 
   const onDelete = async (a: KnowledgeArticle) => {
     const ok = await confirm({
@@ -85,13 +153,24 @@ export default function Knowledge() {
       danger: true,
     });
     if (!ok) return;
-    try {
-      await deleteKnowledgeArticle(a.id);
+    // Статья исчезает сразу. При отказе сервера она возвращается на место и,
+    // если была раскрыта, снова раскрывается: экран обязан вернуться ровно в то
+    // состояние, из которого человек нажал «Удалить».
+    const wasOpen = openId === a.id;
+    if (wasOpen) setOpenId(null);
+    const res = await runOptimistic<KnowledgeArticle[], unknown>({
+      current: items,
+      optimistic: (prev) => removeById(prev, a.id),
+      commit: setItems,
+      request: () => deleteKnowledgeArticle(a.id),
+      onError: (msg) => {
+        if (wasOpen) setOpenId(a.id);
+        toast(msg, 'error');
+      },
+    });
+    if (res !== null) {
       toast('Статья удалена', 'success');
-      if (openId === a.id) setOpenId(null);
-      load();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Не удалось удалить статью', 'error');
+      scheduleReload();
     }
   };
 
@@ -211,9 +290,19 @@ export default function Knowledge() {
             article={editor === 'new' ? null : editor}
             categories={categories}
             onClose={() => setEditor(null)}
-            onSaved={() => {
+            /*
+              Редактор отдаёт СОХРАНЁННУЮ статью, и список правится ею на месте —
+              вместо второго похода за всем разделом. Оптимистично, до ответа
+              сервера, тут показывать нечего: редактор — модалка поверх списка,
+              изменений под ней всё равно не видно, а закрывать форму заранее
+              значило бы при отказе возвращать её с уже набранным текстом статьи.
+              Текст регламента пишут долго — потерять его дороже, чем выиграть
+              двести миллисекунд.
+            */
+            onSaved={(saved) => {
               setEditor(null);
-              load();
+              setItems((prev) => applySaved(prev, saved));
+              scheduleReload();
             }}
           />
         )}
@@ -233,7 +322,8 @@ function ArticleEditor({
   article: KnowledgeArticle | null;
   categories: KnowledgeCategory[];
   onClose: () => void;
-  onSaved: () => void;
+  /** Отдаёт статью, которую вернул сервер: по ней родитель правит список без перезагрузки. */
+  onSaved: (saved: KnowledgeArticle) => void;
 }) {
   const { toast } = useUI();
   const [title, setTitle] = useState(article?.title ?? '');
@@ -264,15 +354,15 @@ function ArticleEditor({
       sortOrder: parseInt(sortOrder, 10) || 0,
     };
     try {
-      if (article) {
-        await updateKnowledgeArticle(article.id, payload);
-        toast('Статья обновлена', 'success');
-      } else {
-        await createKnowledgeArticle(payload);
-        toast('Статья добавлена', 'success');
-      }
-      onSaved();
+      // Отдаём наверх то, что реально сохранено: сервер тримит текст, подставляет
+      // updatedAt и автора правки — предсказать эти поля клиент не может.
+      const saved = article
+        ? await updateKnowledgeArticle(article.id, payload)
+        : await createKnowledgeArticle(payload);
+      toast(article ? 'Статья обновлена' : 'Статья добавлена', 'success');
+      onSaved(saved);
     } catch (err: any) {
+      // Форма остаётся открытой со всем набранным — причина отказа над полями.
       setError(err?.response?.data?.message?.toString() || 'Не удалось сохранить статью');
     } finally {
       setSaving(false);

@@ -23,6 +23,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import { formatDateTimeRu } from '../utils/datetime';
+import { removeById, replaceById, runOptimistic, tempId } from '../utils/optimistic';
 import Icon from '../Icon';
 
 const PAGE_SIZE = 30;
@@ -62,6 +63,14 @@ export default function Conversations() {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
   const [loadingThread, setLoadingThread] = useState(false);
 
+  // Живые ссылки на состояние для reconcile: к моменту ответа сервера лента и
+  // список могли измениться (пришло входящее по сокету), а замыкание помнит
+  // значения на момент отправки. Через ref берём то, что на экране СЕЙЧАС.
+  const messagesRef = useRef<ChannelMessage[]>([]);
+  const itemsRef = useRef<Conversation[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
@@ -70,9 +79,24 @@ export default function Conversations() {
   const [linking, setLinking] = useState(false);
 
   const threadRef = useRef<HTMLDivElement>(null);
+  /**
+   * Какой диалог открыт ПРЯМО СЕЙЧАС.
+   *
+   * Обработчики захватывают activeId в момент клика, а ответ сервера приходит
+   * позже — здесь менеджер за это время успевает уйти к следующему диалогу.
+   * По этому рефу они проверяют, что правят ту переписку, которая на экране, а
+   * не затирают открытую снимком предыдущей.
+   */
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
 
-  const loadList = useCallback(() => {
-    setLoading(true);
+  /**
+   * `silent` — обновление на фоне: список не подменяется строкой «Загрузка...».
+   * Со спиннером остаётся только смена фильтров, ради которой человек и ждёт
+   * ответа; входящее сообщение соседу гасить его список не должно.
+   */
+  const loadList = useCallback((opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     listConversations({
       search: search || undefined,
       channel: channel || undefined,
@@ -93,7 +117,7 @@ export default function Conversations() {
   }, [search, channel, mine, unread]);
 
   useEffect(() => {
-    const t = setTimeout(loadList, 300);
+    const t = setTimeout(() => loadList(), 300);
     return () => clearTimeout(t);
   }, [loadList]);
 
@@ -161,7 +185,10 @@ export default function Conversations() {
       if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
       reloadTimerRef.current = setTimeout(() => {
         reloadTimerRef.current = null;
-        loadList();
+        // Тихо: событие могло прийти от чужого действия. Заодно это та самая
+        // сверка с сервером после локальных правок — список и лента
+        // заменяются целиком, поэтому задвоиться нечему.
+        loadList({ silent: true });
         if (payload?.id && payload.id === activeId) loadThread(activeId);
       }, 500);
     },
@@ -185,65 +212,192 @@ export default function Conversations() {
   const channelLabel = (value: string) => channels.find((c) => c.value === value)?.label ?? value;
   const canSend = active ? (channels.find((c) => c.value === active.channel)?.outbound ?? false) : false;
 
+  /**
+   * Диалог живёт на экране в двух местах сразу — строкой в списке слева и
+   * открытой перепиской справа, — а счётчик над списком считает те же строки.
+   * Держим их одним снимком: при отказе сервера откат обязан вернуть всё
+   * вместе, иначе шапка покажет привязку, которой в списке уже нет.
+   */
+  type ConvPair = { items: Conversation[]; total: number; active: Conversation | null };
+  const commitPairFor = (conversationId: string) => (next: ConvPair) => {
+    setItems(next.items);
+    setTotal(next.total);
+    // Открытую переписку трогаем, только если она всё ещё открыта: иначе
+    // снимок предыдущего диалога вернул бы на экран не то, что человек читает.
+    if (activeIdRef.current === conversationId) setActive(next.active);
+  };
+  /** Одна и та же правка — и в строке списка, и в открытом диалоге. */
+  const patchPair = (prev: ConvPair, id: string, patch: Partial<Conversation>): ConvPair => ({
+    items: replaceById(prev.items, id, patch),
+    total: prev.total,
+    active: prev.active && prev.active.id === id ? { ...prev.active, ...patch } : prev.active,
+  });
+
+  /** Отправка меняет ленту сообщений и превью строки — тоже одним снимком. */
+  type SendPair = { messages: ChannelMessage[]; items: Conversation[] };
+  const commitSendTo = (conversationId: string) => (next: SendPair) => {
+    // Лента на экране может быть уже чужой — см. activeIdRef. Превью в списке
+    // при этом правим всегда: список общий и остаётся на месте.
+    if (activeIdRef.current === conversationId) setMessages(next.messages);
+    setItems(next.items);
+  };
+
+  /**
+   * Отправка ответа клиенту.
+   *
+   * Было: сообщение появлялось в ленте только ПОСЛЕ ответа сервера, а следом
+   * перезагружался весь список диалогов — ради одной строки превью. Стало:
+   * сообщение встаёт в ленту сразу (с временным id), превью правится точечно,
+   * а ответ сервера подменяет временное сообщение настоящим — у него свой id и
+   * точное время отправки, которые клиент придумать не может.
+   *
+   * Порядок строк в списке (сверху свежие) специально НЕ пересчитываем:
+   * менеджер работает потоком, и строка, прыгнувшая под курсором, сбивает
+   * прицел. Порядок придёт со следующей загрузкой по conversation:updated.
+   */
   const onSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
     if (!text || !activeId || sending) return;
+    const id = activeId;
+    const sentAt = new Date().toISOString();
+    const pending: ChannelMessage = {
+      id: tempId(),
+      conversationId: id,
+      direction: 'OUTBOUND',
+      text,
+      attachments: null,
+      externalId: null,
+      authorId: me?.id ?? null,
+      author: me ? { id: me.id, fullName: me.fullName } : null,
+      sentAt,
+      createdAt: sentAt,
+    };
+    // Одна отправка за раз, как и раньше: два параллельных запроса откатывались
+    // бы каждый на свой снимок ленты, и ответ первого стёр бы второе сообщение.
     setSending(true);
-    try {
-      const msg = await sendConversationMessage(activeId, text);
-      setMessages((prev) => [...prev, msg]);
-      setDraft('');
-      loadList();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Сообщение не отправлено', 'error');
-    } finally {
-      setSending(false);
-    }
+    setDraft('');
+    // Результат не разбираем: успех уже на экране, а причину отказа показал
+    // onError, вернув текст в поле ввода.
+    await runOptimistic<SendPair, ChannelMessage>({
+      current: { messages, items },
+      optimistic: (prev) => ({
+        messages: [...prev.messages, pending],
+        items: replaceById(prev.items, id, { lastMessageText: text, lastMessageAt: sentAt }),
+      }),
+      commit: commitSendTo(id),
+      request: () => sendConversationMessage(id, text),
+      // Заменяем предсказанное сообщение НА МЕСТЕ, а не дописываем настоящее к
+      // снимку «до». Дописывание к снимку тоже не задваивало (снимок ещё без
+      // нашей реплики), но было хрупким по двум причинам:
+      //  - оно молча полагается на то, что параллельных отправок нет (сейчас их
+      //    держит флаг sending; уберут его — ответ первого запроса стёр бы
+      //    второе сообщение);
+      //  - оно теряет всё, что успело прийти в ленту по сокету, пока летел наш
+      //    запрос: входящее сообщение клиента исчезло бы с экрана.
+      // Замена по временному id свободна от обоих.
+      reconcile: (_prev, msg) => ({
+        messages: messagesRef.current.map((m) => (m.id === pending.id ? msg : m)),
+        items: replaceById(itemsRef.current, id, { lastMessageText: msg.text ?? text, lastMessageAt: msg.sentAt }),
+      }),
+      onError: (message) => {
+        // Набранный текст возвращаем в поле: потерять готовый ответ вместе с
+        // ошибкой хуже самой ошибки. Но только если человек не начал печатать
+        // заново — затирать новый текст старым нельзя.
+        setDraft((cur) => (cur ? cur : text));
+        toast(message, 'error');
+      },
+    });
+    setSending(false);
   };
 
-  const onLink = async (applicationId: string) => {
+  /**
+   * Привязка диалога к заявке. Предсказуема целиком: заявка уже выбрана в
+   * поле, её подпись и владельцы известны — ждать сервер, чтобы показать ровно
+   * то же самое, незачем. Поэтому и принимаем сюда саму заявку, а не только id.
+   */
+  const onLink = async (app: Application) => {
     if (!activeId) return;
+    const id = activeId;
+    /** Подпись варианта — та же, что в поле поиска: понадобится при откате. */
+    const label = `${app.fullName} · ${app.phone}`;
     setLinking(true);
-    try {
-      const updated = await linkConversation(activeId, { applicationId });
-      setActive(updated);
-      setLinkQuery('');
-      setLinkOptions([]);
-      toast('Диалог привязан к заявке', 'success');
-      loadList();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Не удалось привязать диалог', 'error');
-    } finally {
-      setLinking(false);
-    }
+    setLinkQuery('');
+    setLinkOptions([]);
+    const saved = await runOptimistic<ConvPair, Conversation>({
+      current: { items, total, active },
+      optimistic: (prev) =>
+        patchPair(prev, id, {
+          applicationId: app.id,
+          application: {
+            id: app.id,
+            fullName: app.fullName,
+            status: app.status,
+            managerId: app.managerId,
+            chinaManagerId: app.chinaManagerId,
+          },
+        }),
+      commit: commitPairFor(id),
+      request: () => linkConversation(id, { applicationId: app.id }),
+      // Ответ сервера кладём поверх: вместе с заявкой могли подтянуться
+      // студент и ответственный, о которых клиент не знал.
+      reconcile: (prev, updated) => patchPair(prev, id, updated),
+      onError: (message) => {
+        // Возвращаем выбранную заявку в поле — иначе после отказа её пришлось
+        // бы искать заново.
+        setLinkQuery(label);
+        toast(message, 'error');
+      },
+    });
+    setLinking(false);
+    if (saved) toast('Диалог привязан к заявке', 'success');
   };
 
+  /** Снятие привязки предсказуемо полностью: обе ссылки просто обнуляются. */
   const onUnlink = async () => {
     if (!activeId) return;
+    const id = activeId;
     setLinking(true);
-    try {
-      const updated = await linkConversation(activeId, { applicationId: '', studentId: '' });
-      setActive(updated);
-      toast('Привязка снята', 'success');
-      loadList();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Не удалось снять привязку', 'error');
-    } finally {
-      setLinking(false);
-    }
+    const saved = await runOptimistic<ConvPair, Conversation>({
+      current: { items, total, active },
+      optimistic: (prev) =>
+        patchPair(prev, id, { studentId: null, student: null, applicationId: null, application: null }),
+      commit: commitPairFor(id),
+      request: () => linkConversation(id, { applicationId: '', studentId: '' }),
+      reconcile: (prev, updated) => patchPair(prev, id, updated),
+      onError: (message) => toast(message, 'error'),
+    });
+    setLinking(false);
+    if (saved) toast('Привязка снята', 'success');
   };
 
   const onAssign = async (userId: string) => {
     if (!activeId) return;
-    try {
-      const updated = await assignConversation(activeId, userId);
-      setActive(updated);
-      toast(userId ? 'Ответственный назначен' : 'Ответственный снят', 'success');
-      loadList();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Не удалось назначить ответственного', 'error');
-    }
+    const id = activeId;
+    const picked = users.find((u) => u.id === userId) ?? null;
+    const patch: Partial<Conversation> = {
+      assignedToId: userId || null,
+      assignedTo: picked ? { id: picked.id, fullName: picked.fullName } : null,
+    };
+    /**
+     * Фильтр «Мои» на бэкенде — это assignedToId = я (listConversations).
+     * Отдав диалог другому, из этого среза он уходит: строка должна исчезнуть
+     * сразу, вместе со счётчиком, а не висеть до следующей загрузки. Открытую
+     * переписку при этом не закрываем — человек её ещё читает.
+     */
+    const dropIfNotMine = (next: ConvPair, assignedToId: string | null): ConvPair =>
+      mine && assignedToId !== (me?.id ?? null)
+        ? { ...next, items: removeById(next.items, id), total: Math.max(0, next.total - 1) }
+        : next;
+    const saved = await runOptimistic<ConvPair, Conversation>({
+      current: { items, total, active },
+      optimistic: (prev) => dropIfNotMine(patchPair(prev, id, patch), userId || null),
+      commit: commitPairFor(id),
+      request: () => assignConversation(id, userId),
+      reconcile: (prev, updated) => dropIfNotMine(patchPair(prev, id, updated), updated.assignedToId),
+      onError: (message) => toast(message, 'error'),
+    });
+    if (saved) toast(userId ? 'Ответственный назначен' : 'Ответственный снят', 'success');
   };
 
   return (
@@ -399,8 +553,10 @@ export default function Conversations() {
                     className="btn btn-sm btn-primary"
                     disabled={linking || !linkOptions.some((a) => `${a.fullName} · ${a.phone}` === linkQuery.trim())}
                     onClick={() => {
+                      // Передаём саму заявку, а не id: из неё складывается
+                      // предсказанная привязка, которую видно до ответа сервера.
                       const found = linkOptions.find((a) => `${a.fullName} · ${a.phone}` === linkQuery.trim());
-                      if (found) onLink(found.id);
+                      if (found) onLink(found);
                     }}
                   >
                     Привязать

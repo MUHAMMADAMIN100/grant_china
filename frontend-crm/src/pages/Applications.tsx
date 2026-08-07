@@ -20,6 +20,7 @@ import DirectionOptions from '../components/DirectionOptions';
 import Pagination from '../components/Pagination';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import { toPeriodRange } from '../utils/datetime';
+import { removeById, replaceById, runOptimistic } from '../utils/optimistic';
 
 const PAGE_SIZE = 10;
 
@@ -219,6 +220,86 @@ export default function Applications() {
     return a.managerId === me?.id || a.chinaManagerId === me?.id;
   };
 
+  /**
+   * К каким вкладкам относится заявка. Формула повторяет tabCondition() из
+   * backend/src/applications/applications.service.ts: «Все» — всё, что не в
+   * ручном архиве; «Новые»/«В работе» — то же плюс статус; «Архив» — архивные
+   * ИЛИ помеченные как повторное обращение (потому и снятие пометки меняет
+   * счётчик «Архива», хотя ничего не архивирует).
+   *
+   * Формула нужна на клиенте, чтобы после действия пересчитать счётчики
+   * вкладок локально. Раньше один клик стоил ТРЁХ запросов — PATCH, GET
+   * списка и GET счётчиков, — хотя и новый состав списка, и новые счётчики
+   * полностью выводятся из одного изменённого поля.
+   */
+  const tabsOf = (a: Application): Record<ApplicationTab, boolean> => ({
+    all: !a.archivedAt,
+    new: !a.archivedAt && a.status === 'NEW',
+    in_work: !a.archivedAt && a.status !== 'NEW',
+    archive: !!a.archivedAt || !!a.repeatOfId,
+  });
+
+  /**
+   * Общий сценарий действия над строкой: изменение видно сразу, запрос уходит
+   * следом, отказ сервера возвращает всё ровно как было.
+   *
+   * Откатить нужно ТРИ вещи, а runOptimistic ведёт только items — снимок
+   * счётчиков и total снимаем и возвращаем здесь же: иначе после отказа
+   * вкладки показывали бы числа, которых на сервере нет.
+   *
+   * Ответ сервера доливаем поверх строки (reconcile): archivedAt/archivedById
+   * проставляет сервер, точное значение клиент предсказать не может.
+   * Перезагрузки списка это не требует — archive/unarchive шлют
+   * application:updated, и scheduleReload() всё равно сверит страницу с
+   * сервером; setItems заменяет список целиком, задваиваться строке не из чего.
+   */
+  const runRowAction = async (
+    a: Application,
+    patch: Partial<Application>,
+    request: () => Promise<Application>,
+    successMessage: string,
+  ) => {
+    const tabsBefore = tabsOf(a);
+    const tabsAfter = tabsOf({ ...a, ...patch });
+    // Осталась ли строка в ОТКРЫТОЙ вкладке: осталась — правим на месте,
+    // выпала — убираем вместе с total, иначе пагинация продолжит считать
+    // страницы по количеству, которого уже нет.
+    const staysInTab = tabsAfter[tab];
+    const countsBefore = tabCounts;
+    const totalBefore = total;
+
+    const nextCounts = { ...tabCounts };
+    for (const t of TAB_ORDER) {
+      if (tabsBefore[t] === tabsAfter[t]) continue;
+      // Math.max: счётчик мог приехать с сервера уже устаревшим (ту же заявку
+      // архивировал параллельно другой менеджер) — в минус его уводить нельзя.
+      nextCounts[t] = Math.max(0, nextCounts[t] + (tabsAfter[t] ? 1 : -1));
+    }
+    setTabCounts(nextCounts);
+    if (!staysInTab) setTotal(Math.max(0, totalBefore - 1));
+
+    const saved = await runOptimistic<Application[], Application>({
+      current: items,
+      optimistic: (prev) => (staysInTab ? replaceById(prev, a.id, patch) : removeById(prev, a.id)),
+      commit: setItems,
+      request,
+      // Сервер отдаёт заявку с менеджерами (MANAGER_INCLUDE), поэтому строку
+      // можно долить ответом целиком — колонка «Менеджер» не опустеет.
+      reconcile: (prev, srv) => (staysInTab ? replaceById(prev, a.id, srv) : removeById(prev, a.id)),
+      onError: (msg) => {
+        setTabCounts(countsBefore);
+        setTotal(totalBefore);
+        toast(msg, 'error');
+      },
+    });
+    if (!saved) return;
+    toast(successMessage, 'success');
+    // Единственный случай, когда список всё-таки надо перечитать: строка была
+    // на странице последней, а заявки во вкладке ещё есть — чем заполнить
+    // опустевшую страницу, знает только сервер.
+    if (!staysInTab && items.length === 1 && totalBefore > 1) load();
+  };
+
   const onArchive = async (a: Application, e: React.MouseEvent) => {
     e.stopPropagation();
     const ok = await confirm({
@@ -227,42 +308,38 @@ export default function Applications() {
       confirmText: 'В архив',
     });
     if (!ok) return;
-    try {
-      await archiveApplication(a.id);
-      toast('Заявка отправлена в архив', 'success');
-      load();
-      loadCounts();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Ошибка архивации', 'error');
-    }
+    // Дата здесь нужна только как признак «в архиве» для формулы вкладок;
+    // настоящую метку времени ставит сервер, её принесёт reconcile.
+    await runRowAction(
+      a,
+      { archivedAt: new Date().toISOString() },
+      () => archiveApplication(a.id),
+      'Заявка отправлена в архив',
+    );
   };
 
   // ТЗ 3.1 — эвристика «повторного обращения» по телефону ложно срабатывает на
   // общем семейном номере (брат и сестра). Без снятия пометки вторая заявка
   // навсегда остаётся во вкладке «Архив» и искажает её счётчик — поэтому
-  // перезагружаем и список, и счётчики вкладок.
+  // пересчитываем и состав списка, и счётчик «Архива».
   const onClearRepeat = async (a: Application, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await clearRepeatApplication(a.id);
-      toast('Пометка «Повторное обращение» снята', 'success');
-      load();
-      loadCounts();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Ошибка', 'error');
-    }
+    await runRowAction(
+      a,
+      { repeatOfId: null },
+      () => clearRepeatApplication(a.id),
+      'Пометка «Повторное обращение» снята',
+    );
   };
 
   const onUnarchive = async (a: Application, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await unarchiveApplication(a.id);
-      toast('Заявка возвращена из архива', 'success');
-      load();
-      loadCounts();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Ошибка', 'error');
-    }
+    await runRowAction(
+      a,
+      { archivedAt: null },
+      () => unarchiveApplication(a.id),
+      'Заявка возвращена из архива',
+    );
   };
 
   return (

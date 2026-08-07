@@ -15,6 +15,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { downloadProtectedFile } from '../utils/fileUrl';
 import { formatDateTimeRu } from '../utils/datetime';
+import { removeById, runOptimistic } from '../utils/optimistic';
 import TicketFormModal from './TicketFormModal';
 import Icon from '../Icon';
 
@@ -44,8 +45,14 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
   const uploadForRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
-  const load = () => {
-    setLoading(true);
+  /**
+   * `silent` — обновление на фоне: карточка не подменяется строкой «Загрузка...».
+   * Первый показ и переход к другому студенту — обычные, со спиннером; всё
+   * остальное (событие от другого сотрудника, возврат из формы) не должно
+   * гасить блок под руками у того, кто в него смотрит.
+   */
+  const load = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     listTickets({ studentId, pageSize: 20 })
       .then((res) => setTickets(res.items))
       .catch(() => setTickets([]))
@@ -59,10 +66,21 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
 
   useRealtime({
     'ticket:updated': (d: any) => {
-      if (d?.studentId === studentId) load();
+      // Событие приходит и на собственное удаление — перезагрузка сверит
+      // локально убранную строку с сервером. Список заменяется целиком,
+      // поэтому задвоиться нечему.
+      if (d?.studentId === studentId) load({ silent: true });
     },
   });
 
+  /**
+   * Удаление билета. Строка уходит сразу, запрос — следом.
+   *
+   * Было два похода на сервер на клик: DELETE и перезагрузка всего списка
+   * билетов студента. Стало — один; сервер отказал (нет прав, билет уже удалён
+   * другим сотрудником) — строка возвращается на место вместе с причиной.
+   * busyId не трогаем: блокировать нечего, строки на экране уже нет.
+   */
   const onDelete = async (t: Ticket) => {
     const ok = await confirm({
       title: 'Удалить билет',
@@ -71,16 +89,14 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
       danger: true,
     });
     if (!ok) return;
-    setBusyId(t.id);
-    try {
-      await deleteTicket(t.id);
-      toast('Билет удалён', 'success');
-      load();
-    } catch (err: any) {
-      toast(err?.response?.data?.message || 'Не удалось удалить билет', 'error');
-    } finally {
-      setBusyId(null);
-    }
+    const done = await runOptimistic<Ticket[], { ok: true }>({
+      current: tickets,
+      optimistic: (prev) => removeById(prev, t.id),
+      commit: setTickets,
+      request: () => deleteTicket(t.id),
+      onError: (message) => toast(message, 'error'),
+    });
+    if (done) toast('Билет удалён', 'success');
   };
 
   const onDownload = async (t: Ticket) => {
@@ -250,6 +266,9 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
         onChange={onFileSelected}
       />
 
+      {/* onSaved — честная перезагрузка, а не предсказание: id нового билета и
+          прикреплённый файл рождаются на бэкенде. Но тихая — модалка к этому
+          моменту закрыта, и карточке гаснуть незачем. */}
       <AnimatePresence>
         {modal?.kind === 'create' && (
           <TicketFormModal
@@ -257,7 +276,7 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
             studentId={studentId}
             studentName={studentName}
             onClose={() => setModal(null)}
-            onSaved={load}
+            onSaved={() => load({ silent: true })}
           />
         )}
         {modal?.kind === 'edit' && (
@@ -266,7 +285,7 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
             ticket={modal.ticket}
             studentName={studentName}
             onClose={() => setModal(null)}
-            onSaved={load}
+            onSaved={() => load({ silent: true })}
           />
         )}
       </AnimatePresence>

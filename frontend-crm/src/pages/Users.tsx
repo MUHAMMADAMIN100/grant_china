@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createUser, deleteUser, listUsers, updateUser } from '../api/users';
 import type { Region, Role, User } from '../api/types';
 import { REGION_BADGE, REGION_DESCRIPTION, REGION_LABEL, ROLE_BADGE, ROLE_DESCRIPTION, ROLE_LABEL } from '../api/types';
@@ -6,6 +6,7 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, required, validateAll } from '../utils/validators';
 import { useRealtime } from '../realtime';
+import { isTempId, removeById, replaceById, runOptimistic, tempId } from '../utils/optimistic';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 
 // Порядок ролей для выпадающих списков и легенды — от младшей к старшей,
@@ -78,50 +79,126 @@ export default function Users() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
+  /**
+   * Фоновая сверка с сервером — после собственного действия и по realtime.
+   *
+   * Задержка склеивает эхо своего действия с собственным вызовом в один запрос:
+   * user:updated сервер шлёт ВСЕМ сотрудникам, включая автора правки. Она же не
+   * даёт перезагрузке лечь между оптимистичным изменением и сверкой ответа —
+   * runOptimistic собирает итог из снимка ДО запроса, и результат вклинившейся
+   * перезагрузки был бы затёрт.
+   *
+   * Задвоить строки это не может: load ЗАМЕНЯЕТ список целиком, а не дописывает
+   * в него пришедшую запись. И сверка с ответом идёт от снимка «до», поэтому
+   * оптимистично добавленный сотрудник не превращается в двух — временная
+   * строка не остаётся рядом с настоящей.
+   */
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReload = () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      load();
+    }, 500);
+  };
+  useEffect(() => () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+  }, []);
+
   // Раздел был единственным (вместе с «Базой знаний») без живых обновлений:
   // Основатель менял сотруднику роль или регион, а у второго открытого
   // Администратора список оставался прежним до перезагрузки страницы. Для
   // раздела прав это опаснее, чем для остальных: расхождение видно не сразу,
   // а в момент, когда кто-то полагается на устаревшую картину.
   useRealtime({
-    'user:updated': () => load(),
+    'user:updated': () => scheduleReload(),
   });
+
+  /**
+   * Поиск делает сервер (users.service.findAll): email или ФИО «содержит» без
+   * учёта регистра, запрос тримится; порядок — новые сверху. Повторяем условие
+   * локально, иначе созданный сотрудник мелькнёт в отфильтрованном списке и
+   * пропадёт на первом же обновлении.
+   */
+  const matchesSearch = (u: User) => {
+    const q = search.trim().toLowerCase();
+    return !q || u.email.toLowerCase().includes(q) || u.fullName.toLowerCase().includes(q);
+  };
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched({ email: true, fullName: true, password: true });
     if (formInvalid) return;
     setError(null);
-    try {
-      await createUser(form);
-      setCreating(false);
-      setForm({ email: '', fullName: '', password: '', role: 'EMPLOYEE', region: 'BOTH' });
-      setTouched({});
-      load();
-    } catch (e: any) {
-      setError(e.response?.data?.message?.toString() || 'Ошибка создания');
+
+    // Снимок формы: при отказе сервера (занятый email — самый частый случай)
+    // панель вернётся с тем же паролем и ФИО. Заставлять придумывать пароль
+    // заново из-за чужой ошибки нельзя.
+    const draft = { ...form };
+    const optimisticRow: User = {
+      // Пароль в строку таблицы, разумеется, не кладём — только то, что видно.
+      id: tempId(),
+      email: draft.email.trim(),
+      fullName: draft.fullName.trim(),
+      role: draft.role,
+      region: draft.region,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Панель закрывается сразу, строка появляется сразу.
+    setCreating(false);
+    setForm({ email: '', fullName: '', password: '', role: 'EMPLOYEE', region: 'BOTH' });
+    setTouched({});
+
+    const saved = await runOptimistic<User[], User>({
+      current: items,
+      optimistic: (prev) => (matchesSearch(optimisticRow) ? [optimisticRow, ...prev] : prev),
+      commit: setItems,
+      request: () => createUser(draft),
+      // Сверка идёт от снимка ДО создания, поэтому настоящая строка встаёт на
+      // место временной, а не рядом с ней.
+      reconcile: (prev, created) => (matchesSearch(created) ? [created, ...prev] : prev),
+      onError: (msg) => {
+        setForm(draft);
+        setTouched({ email: true, fullName: true, password: true });
+        setCreating(true);
+        setError(msg);
+      },
+    });
+
+    if (saved !== null) {
+      toast('Пользователь создан', 'success');
+      scheduleReload();
     }
   };
 
   const onChangeRole = async (u: User, role: Role) => {
-    try {
-      await updateUser(u.id, { role });
-      load();
-    } catch (e: any) {
-      toast(e.response?.data?.message?.toString() || 'Не удалось изменить роль', 'error');
-    }
+    // Селект переключается сразу; при отказе сервера вернётся прежняя роль —
+    // ровно та, что была до клика.
+    const saved = await runOptimistic<User[], User>({
+      current: items,
+      optimistic: (prev) => replaceById(prev, u.id, { role }),
+      commit: setItems,
+      request: () => updateUser(u.id, { role }),
+      // Бэкенд может поправить не только роль (например, вместе с ней сбросить
+      // регион) — показываем сохранённого пользователя целиком.
+      reconcile: (prev, srv) => replaceById(prev, u.id, srv),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    if (saved !== null) scheduleReload();
   };
 
-  // Регион правим отдельным PATCH, как и роль: перезагрузка списка после ответа
-  // нужна, чтобы в таблице осталось то, что реально сохранил бэкенд, а не то,
-  // что успел выбрать пользователь.
+  // Регион правим отдельным PATCH, как и роль.
   const onChangeRegion = async (u: User, region: Region) => {
-    try {
-      await updateUser(u.id, { region });
-      load();
-    } catch (e: any) {
-      toast(e.response?.data?.message?.toString() || 'Не удалось изменить регион', 'error');
-    }
+    const saved = await runOptimistic<User[], User>({
+      current: items,
+      optimistic: (prev) => replaceById(prev, u.id, { region }),
+      commit: setItems,
+      request: () => updateUser(u.id, { region }),
+      reconcile: (prev, srv) => replaceById(prev, u.id, srv),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    if (saved !== null) scheduleReload();
   };
 
   const onDelete = async (u: User) => {
@@ -136,12 +213,18 @@ export default function Users() {
       danger: true,
     });
     if (!ok) return;
-    try {
-      await deleteUser(u.id);
+    // Строка исчезает сразу; сервер отказал (последний Основатель, чужие права)
+    // — возвращается на своё место, и человек видит причину.
+    const res = await runOptimistic<User[], unknown>({
+      current: items,
+      optimistic: (prev) => removeById(prev, u.id),
+      commit: setItems,
+      request: () => deleteUser(u.id),
+      onError: (msg) => toast(msg, 'error'),
+    });
+    if (res !== null) {
       toast('Пользователь удалён', 'success');
-      load();
-    } catch (e: any) {
-      toast(e.response?.data?.message?.toString() || 'Не удалось удалить', 'error');
+      scheduleReload();
     }
   };
 
@@ -264,13 +347,24 @@ export default function Users() {
                 <tr key={u.id} style={{ cursor: 'default' }}>
                   <td><strong>{u.fullName}</strong>{u.id === me?.id && <span style={{ color: '#5b6478', fontSize: 12 }}> (вы)</span>}</td>
                   <td data-label="Email">{u.email}</td>
+                  {/*
+                    Пока строка не подтверждена сервером, её id временный: PATCH
+                    и DELETE по нему уйдут в никуда. Поэтому все действия по такой
+                    строке гасим — до ответа это несколько сотен миллисекунд.
+                  */}
                   <td data-label="Роль">
                     {canEdit ? (
                       <select
                         value={u.role}
                         onChange={(e) => onChangeRole(u, e.target.value as Role)}
-                        disabled={u.id === me?.id}
-                        title={u.id === me?.id ? 'Нельзя изменить собственную роль' : undefined}
+                        disabled={u.id === me?.id || isTempId(u.id)}
+                        title={
+                          u.id === me?.id
+                            ? 'Нельзя изменить собственную роль'
+                            : isTempId(u.id)
+                              ? 'Пользователь ещё сохраняется'
+                              : undefined
+                        }
                       >
                         {ROLE_OPTIONS.map((r) => (
                           <option key={r} value={r}>{ROLE_LABEL[r]}</option>
@@ -291,6 +385,7 @@ export default function Users() {
                       <select
                         value={regionOf(u)}
                         onChange={(e) => onChangeRegion(u, e.target.value as Region)}
+                        disabled={isTempId(u.id)}
                         style={u.role === 'EMPLOYEE' ? undefined : { opacity: 0.55 }}
                       >
                         {REGION_OPTIONS.map((r) => (
@@ -313,15 +408,22 @@ export default function Users() {
                         <button
                           className="btn btn-sm btn-secondary"
                           onClick={() => setPwdTarget(u)}
-                          title="Сменить пароль"
+                          disabled={isTempId(u.id)}
+                          title={isTempId(u.id) ? 'Пользователь ещё сохраняется' : 'Сменить пароль'}
                         >
                           Пароль
                         </button>
                         <button
                           className="btn btn-sm btn-danger"
                           onClick={() => onDelete(u)}
-                          disabled={u.id === me?.id}
-                          title={u.id === me?.id ? 'Нельзя удалить самого себя' : undefined}
+                          disabled={u.id === me?.id || isTempId(u.id)}
+                          title={
+                            u.id === me?.id
+                              ? 'Нельзя удалить самого себя'
+                              : isTempId(u.id)
+                                ? 'Пользователь ещё сохраняется'
+                                : undefined
+                          }
                         >
                           Удалить
                         </button>

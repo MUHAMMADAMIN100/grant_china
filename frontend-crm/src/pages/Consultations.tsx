@@ -65,9 +65,19 @@ export default function Consultations() {
   // отбрасываем — это же снимает гонку с realtime-перезагрузкой.
   const reqRef = useRef(0);
 
-  const load = () => {
+  /**
+   * silent — обновление ФОНОМ, без подмены таблицы на «Загрузка...».
+   *
+   * Событие consultation:* сервер шлёт всем сотрудникам, включая автора записи:
+   * после собственного сохранения к нам возвращается эхо. Гасить на него уже
+   * заполненную таблицу незачем — человек только что закрыл форму и смотрит на
+   * список, а не на спиннер. Полноэкранное ожидание оставляем там, где
+   * показывать действительно нечего: первый заход, смена фильтров, страница.
+   */
+  const load = (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
     const my = ++reqRef.current;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     listConsultations({
       search: search || undefined,
@@ -87,6 +97,14 @@ export default function Consultations() {
       })
       .catch((e: any) => {
         if (my !== reqRef.current) return;
+        if (silent) {
+          // Фоновое обновление: на экране выборка по ТЕМ ЖЕ фильтрам, просто
+          // чуть более старая. Стирать её из-за сетевой заминки нельзя —
+          // человек потеряет строки, которые уже читает. Говорим прямо, что
+          // данные могли устареть, и оставляем их на месте.
+          setError('Не удалось обновить список — показаны данные на момент последнего успешного обновления');
+          return;
+        }
         // Без сброса items/total на экране осталась бы выборка ПРОШЛОГО
         // фильтра, а сброшенный loading выдал бы её за успешно применённый.
         // Пустая таблица без баннера читалась бы как «ничего не найдено».
@@ -125,9 +143,14 @@ export default function Consultations() {
     if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
     reloadTimerRef.current = setTimeout(() => {
       reloadTimerRef.current = null;
-      load();
+      load({ silent: true });
     }, 500);
   };
+  // Отложенное обновление переживает уход со страницы: гасим таймер, чтобы
+  // запрос не улетал уже за закрытым разделом.
+  useEffect(() => () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+  }, []);
   useRealtime({
     'consultation:new': () => scheduleReload(),
     'consultation:updated': () => scheduleReload(),
@@ -141,8 +164,18 @@ export default function Consultations() {
     setFilters({ [key]: value, page: '1' });
   };
 
+  /**
+   * Сохранение делает сама ConsultationFormModal и уже ДОЖДАЛАСЬ ответа сервера
+   * (создание консультации с датой повторного звонка синхронно заводит задачу —
+   * предсказывать такой результат нельзя, это операция с серверным расчётом).
+   * Здесь остаётся только свести таблицу с сервером, и делаем это тем же
+   * отложенным обновлением, что и realtime: событие consultation:* о нашем же
+   * действии прилетит через мгновение, и без склейки на одно сохранение
+   * приходилось бы ДВА похода за списком. Плюс таблица больше не гаснет —
+   * обновление фоновое.
+   */
   const onSaved = () => {
-    load();
+    scheduleReload();
   };
 
   return (
