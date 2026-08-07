@@ -25,9 +25,28 @@ const ALWAYS_ALLOWED_HOSTS = [
   'www.grantchina.tj',
   'grant-china-crm.vercel.app',
   'grant-china-landing.vercel.app',
-  'localhost:5173',
-  'localhost:5174',
 ];
+
+/**
+ * Адреса разработки — ТОЛЬКО вне продакшена.
+ *
+ * Раньше они лежали в списке выше, то есть действовали и на боевом сервере.
+ * Эта функция обслуживает три вещи разом: CORS для HTTP, рукопожатие сокета и
+ * запасную проверку CSRF. Боевая cookie ставится с SameSite=None и
+ * credentials:true — значит любой процесс, слушающий у сотрудника на
+ * localhost:5173 (чужой dev-сервер, локально поставленная программа,
+ * вредоносный npm-пакет в чьём-то проекте), получал право читать ответы
+ * боевого API и открывать сокет с его cookie.
+ *
+ * Нужен доступ с нестандартного адреса — задайте CORS_ORIGINS, он работает
+ * в любом окружении.
+ */
+const DEV_ALLOWED_HOSTS = ['localhost:5173', 'localhost:5174', '127.0.0.1:5173', '127.0.0.1:5174'];
+
+function isDevAllowed(host: string): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return DEV_ALLOWED_HOSTS.includes(host);
+}
 
 function parseCorsOriginsEnv(): string[] {
   // Читаем process.env напрямую (не через ConfigService): у WebSocketGateway
@@ -61,6 +80,7 @@ export const checkOrigin = (origin: string | undefined, cb: CorsOriginCallback):
       return cb(null, true);
     }
     if (ALWAYS_ALLOWED_HOSTS.includes(host)) return cb(null, true);
+    if (isDevAllowed(host)) return cb(null, true);
     // Поддомены grantchina.tj — домен принадлежит компании, это безопасно.
     // *.vercel.app сюда намеренно НЕ входит: это дыра (Проблема 1 аудита) —
     // любой человек бесплатно деплоит сайт на произвольный-адрес.vercel.app,
