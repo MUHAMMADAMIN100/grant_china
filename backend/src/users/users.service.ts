@@ -15,6 +15,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { notDeleted, tombstoneEmail } from '../common/soft-delete';
 import { invalidateUserCache } from '../auth/jwt.strategy';
 import { ActivityService } from '../activity/activity.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 // Подписи ролей для человекочитаемого журнала (ActivityLog.details) — та же
 // терминология, что в UI (frontend-crm/src/api/types.ts): в БД EMPLOYEE не
@@ -42,6 +43,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private activity: ActivityService,
+    private realtime: RealtimeGateway,
   ) {}
 
   async findAll(filters: { search?: string } = {}) {
@@ -154,6 +156,10 @@ export class UsersService {
       })
       .catch(() => undefined);
 
+    // emitAllStaff: раздел «Пользователи» к студенту не привязан, резать
+    // рассылку по региону не по чему. В payload только id — ФИО, почту и роль
+    // фронт возьмёт по HTTP, где @Roles(FOUNDER, ADMIN) отсечёт остальных.
+    this.realtime.emitAllStaff('user:updated', { id: user.id });
     return user;
   }
 
@@ -259,6 +265,10 @@ export class UsersService {
     }
 
     // Скрываем password из ответа клиенту
+    // Событие ПОСЛЕ всех проверок и записи. Уйди оно раньше — сорванная
+    // транзакция (например, guard последнего Основателя) обновила бы список
+    // у всех при неизменившейся базе.
+    this.realtime.emitAllStaff('user:updated', { id });
     const { password: _omit, ...safe } = user as any;
     return safe;
   }
@@ -299,6 +309,7 @@ export class UsersService {
       })
       .catch(() => undefined);
 
+    this.realtime.emitAllStaff('user:updated', { id });
     return { ok: true };
   }
 }

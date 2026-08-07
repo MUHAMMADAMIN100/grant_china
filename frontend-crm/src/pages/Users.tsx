@@ -5,6 +5,7 @@ import { REGION_BADGE, REGION_DESCRIPTION, REGION_LABEL, ROLE_BADGE, ROLE_DESCRI
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, required, validateAll } from '../utils/validators';
+import { useRealtime } from '../realtime';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 
 // Порядок ролей для выпадающих списков и легенды — от младшей к старшей,
@@ -76,6 +77,15 @@ export default function Users() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  // Раздел был единственным (вместе с «Базой знаний») без живых обновлений:
+  // Основатель менял сотруднику роль или регион, а у второго открытого
+  // Администратора список оставался прежним до перезагрузки страницы. Для
+  // раздела прав это опаснее, чем для остальных: расхождение видно не сразу,
+  // а в момент, когда кто-то полагается на устаревшую картину.
+  useRealtime({
+    'user:updated': () => load(),
+  });
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();

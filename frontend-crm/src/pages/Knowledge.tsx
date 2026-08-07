@@ -13,6 +13,7 @@ import { isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useUrlFilter } from '../hooks/useUrlFilter';
+import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import { fadeUp, staggerContainer } from '../motion';
 
@@ -66,6 +67,13 @@ export default function Knowledge() {
   useEffect(() => {
     listKnowledgeCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
+
+  // Регламент правит руководство, а читают его менеджеры — и до сих пор
+  // видели прежний текст, пока не перезагрузят страницу. Для инструкции,
+  // по которой человек прямо сейчас действует, это хуже, чем для списка.
+  useRealtime({
+    'knowledge:updated': () => load(),
+  });
 
   const categoryLabel = (value: string) => categories.find((c) => c.value === value)?.label ?? value;
 

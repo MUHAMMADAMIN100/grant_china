@@ -3,6 +3,7 @@ import { Prisma, Role } from '@prisma/client';
 import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { CreateKnowledgeArticleDto, UpdateKnowledgeArticleDto } from './dto/knowledge-article.dto';
 
 export type CurrentUser = { id: string; role: Role };
@@ -28,6 +29,7 @@ export class KnowledgeService {
   constructor(
     private prisma: PrismaService,
     private activity: ActivityService,
+    private realtime: RealtimeGateway,
   ) {}
 
   // ------------------------------------------------------------------
@@ -130,6 +132,11 @@ export class KnowledgeService {
         details: `Создана статья базы знаний «${article.title}»`,
       })
       .catch(() => undefined);
+    // emitAllStaff, а не emitForStudent: раздел общий для всех сотрудников и
+    // не привязан ни к студенту, ни к региону — резать рассылку не по чему.
+    // В payload только id: текст статьи фронт запросит по HTTP, где права уже
+    // проверены (правило проекта — ПД в сокет не уезжает).
+    this.realtime.emitAllStaff('knowledge:updated', { id: article.id });
     return article;
   }
 
@@ -159,6 +166,7 @@ export class KnowledgeService {
           (dto.published !== undefined ? (dto.published ? ' (опубликована)' : ' (снята с публикации)') : ''),
       })
       .catch(() => undefined);
+    this.realtime.emitAllStaff('knowledge:updated', { id: article.id });
     return article;
   }
 
@@ -175,6 +183,7 @@ export class KnowledgeService {
         details: `Удалена статья базы знаний «${existing.title}»`,
       })
       .catch(() => undefined);
+    this.realtime.emitAllStaff('knowledge:updated', { id });
     return { ok: true };
   }
 }
