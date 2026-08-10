@@ -137,6 +137,28 @@ export class StudentsController {
     return this.students.assignManager(id, body, user);
   }
 
+  /**
+   * ТЗ «Разделение воронок» — передача студента в китайский офис.
+   *
+   * Без @Roles намеренно: право проверяется в сервисе по КОНКРЕТНОМУ студенту
+   * (передаёт назначенный таджикский менеджер либо руководство), а роль сама по
+   * себе тут ничего не решает — чужого студента не передаст и менеджер.
+   */
+  @Post(':id/transfer-to-china')
+  transferToChina(
+    @Param('id') id: string,
+    @Body() body: { chinaManagerId: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.students.transferToChina(id, body?.chinaManagerId, user);
+  }
+
+  /** Возврат в таджикский офис — только Основатель (проверяется в сервисе). */
+  @Post(':id/return-from-china')
+  returnFromChina(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.students.returnFromChina(id, user);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: any) {
     return this.students.remove(id, user);

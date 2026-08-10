@@ -28,4 +28,9 @@ export const STUDENT_SAFE_FIELDS = {
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
+  // ТЗ «Разделение воронок» — факт передачи в китайский офис. В общем наборе,
+  // а не точечно: по нему решается доступ (hasAccess), а значит поле обязано
+  // приходить в КАЖДОЙ выборке студента, иначе проверка получит undefined и
+  // молча пропустит.
+  transferredToChinaAt: true,
 } as const;

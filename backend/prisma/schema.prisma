@@ -92,6 +92,7 @@ model User {
   managedChinaApplications Application[]  @relation("ApplicationChinaManager")
   managedStudents          Student[]      @relation("StudentManager")
   managedChinaStudents     Student[]      @relation("StudentChinaManager")
+  transferredStudents      Student[]      @relation("StudentTransferredBy")
   assignedTasks            Task[]         @relation("TaskAssignee")
   createdTasks             Task[]         @relation("TaskCreator")
 
@@ -370,6 +371,20 @@ model Student {
   manager         User?         @relation("StudentManager", fields: [managerId], references: [id], onDelete: SetNull)
   chinaManagerId  String?
   chinaManager    User?         @relation("StudentChinaManager", fields: [chinaManagerId], references: [id], onDelete: SetNull)
+
+  // ТЗ «Разделение воронок» — факт передачи из таджикского офиса в китайский.
+  //
+  // Отдельное поле, а не вывод из «есть chinaManagerId»: на момент внедрения у
+  // 198 студентов из 203 китайский менеджер УЖЕ проставлен заранее, «на
+  // будущее», хотя оплачен только первый этап. Считать их переданными означало
+  // бы разом убрать почти всю базу из видимости таджикских менеджеров, которые
+  // с ними работают прямо сейчас. Передача — это отдельное осознанное действие.
+  //
+  // Дата, а не флаг: она же отвечает на вопрос «когда передали», нужный и в
+  // журнале, и при разборе спорных случаев.
+  transferredToChinaAt DateTime?
+  transferredById      String?
+  transferredBy        User?     @relation("StudentTransferredBy", fields: [transferredById], references: [id], onDelete: SetNull)
   programId       String?
   program         Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
   createdAt       DateTime      @default(now())

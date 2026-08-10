@@ -34,6 +34,9 @@ import {
   PURPOSE_LABEL,
   RECEIPT_REQUIRED_ON_CREATE_PURPOSES,
   SCHEDULE_STAGES,
+  stagesForUser,
+  canSeeStage,
+  STAGE_OFFICE,
   STAGE_KIND,
   STAGE_LABEL,
   STAGE_ORDER,
@@ -359,6 +362,22 @@ export class PaymentsService {
    * проверка роли, потом загрузка записи, иначе Администратор по коду ответа
    * (403 против 404) отличал бы существующие платежи от несуществующих.
    */
+  /**
+   * ТЗ «Разделение воронок» — этап чужого офиса недоступен ни на чтение, ни
+   * на запись.
+   *
+   * 404, а не 403: сообщение «этап вам не положен» подтверждало бы, что по
+   * этому студенту такой этап существует и в нём есть движение. Весь остальной
+   * проект в подобных случаях отвечает «не найдено» (см. ensureReadAccess,
+   * loadPaymentForMutation) — держим единообразие, иначе разница в кодах
+   * ответа сама становится источником сведений.
+   */
+  private assertStageAllowed(stage: PaymentStage, user: CurrentUser) {
+    if (!canSeeStage(stage, user.role, user.region)) {
+      throw new NotFoundException('Этап не найден');
+    }
+  }
+
   private async loadPaymentForMutation(id: string, user: CurrentUser): Promise<PaymentRow> {
     this.assertCanWriteFinance(user);
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
@@ -386,7 +405,14 @@ export class PaymentsService {
     // в общем списке «Финансы» вместе с именем несуществующей карточки. Так же
     // безусловно это делают grants/contracts/tickets (см. studentScopeWhere в
     // grants.service.ts) — здесь фильтра просто не было.
-    const where: Prisma.PaymentWhereInput = { deletedAt: null, student: { deletedAt: null } };
+    // ТЗ «Разделение воронок»: в списке «Финансы» — только этапы своего офиса.
+    // Без этого таджикский менеджер видел бы суммы китайских этапов в общем
+    // списке, хотя карточка того же платежа отдавала бы 404.
+    const where: Prisma.PaymentWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+      stage: { in: stagesForUser(user.role, user.region) },
+    };
     const and: Prisma.PaymentWhereInput[] = [];
 
     if (filters.studentId) where.studentId = filters.studentId;
@@ -525,6 +551,11 @@ export class PaymentsService {
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
     if (!payment) throw new NotFoundException('Платёж не найден');
     this.ensureReadAccess(payment.student, user, 'Платёж не найден');
+    // ТЗ «Разделение воронок»: прямое обращение по идентификатору — главный
+    // обходной путь мимо порезанного списка. Тем же приёмом когда-то доставали
+    // студентов чужого региона: в списке пусто, а по прямой ссылке отдавалось
+    // всё. Проверено тестом — без этой строки менеджер получал чужой этап.
+    this.assertStageAllowed(payment.stage, user);
     return this.serialize(payment);
   }
 
@@ -533,8 +564,12 @@ export class PaymentsService {
     const student = await this.loadStudentScope(studentId);
     this.ensureReadAccess(student, user, 'Студент не найден');
     await this.ensureScheduleRows(studentId);
+    // ТЗ «Разделение воронок»: строки графика — только своего офиса. Резать
+    // надо здесь, на сервере: спрятать карточки вёрсткой недостаточно, план и
+    // остаток чужого этапа уехали бы в ответ и были бы видны любому, кто
+    // откроет вкладку «Сеть» в браузере.
     const rows = await this.prisma.paymentSchedule.findMany({
-      where: { studentId, deletedAt: null },
+      where: { studentId, deletedAt: null, stage: { in: stagesForUser(user.role, user.region) } },
       orderBy: { stageOrder: 'asc' },
     });
     return rows.map((r) => ({ ...r, plannedAmount: this.money(r.plannedAmount) }));
@@ -602,7 +637,12 @@ export class PaymentsService {
     let totalRemaining = new Prisma.Decimal(0);
     let overdueAmount = new Prisma.Decimal(0);
 
-    const stages = SCHEDULE_STAGES.map((stage) => {
+    // Своди́м ТОЛЬКО по своим этапам. Итоги (всего по договору, оплачено,
+    // остаток) считаются ниже из этого же массива — иначе через общую сумму
+    // утекли бы чужие цифры: менеджер не видел бы карточку чужого этапа, но
+    // видел бы его вклад в «Оплачено».
+    const visibleStages = SCHEDULE_STAGES.filter((st) => canSeeStage(st, user.role, user.region));
+    const stages = visibleStages.map((stage) => {
       const sched = scheduleRows.find((r) => r.stage === stage);
       const planned = new Prisma.Decimal(sched?.plannedAmount ?? 0);
       const paid = paidByStage.get(stage) ?? new Prisma.Decimal(0);
@@ -646,7 +686,12 @@ export class PaymentsService {
       };
     });
 
-    const onSitePayments = paymentsByStage.get('LIVING_EXPENSES') ?? [];
+    // «Расходы на месте» относятся к китайскому офису (STAGE_OFFICE), поэтому
+    // таджикскому менеджеру блок приходит пустым — не нулями «как будто трат
+    // нет», а именно пустым: ноль читался бы как факт, а факта он знать не
+    // должен. Фронт по флагу onSiteVisible прячет блок целиком.
+    const onSiteVisible = canSeeStage('LIVING_EXPENSES', user.role, user.region);
+    const onSitePayments = onSiteVisible ? (paymentsByStage.get('LIVING_EXPENSES') ?? []) : [];
     const onSiteByPurpose: Record<'ACCOMMODATION' | 'FOOD' | 'OTHER', Prisma.Decimal> = {
       ACCOMMODATION: new Prisma.Decimal(0),
       FOOD: new Prisma.Decimal(0),
@@ -665,6 +710,10 @@ export class PaymentsService {
       currency: 'TJS',
       enrollmentUnlocked,
       contractId: activeContract?.id ?? null,
+      // Какие офисы видны сотруднику — фронт по этому решает, какие блоки
+      // рисовать, и не гадает по составу stages.
+      visibleOffices: [...new Set(stagesForUser(user.role, user.region).map((st) => STAGE_OFFICE[st]))],
+      onSiteVisible,
       stages,
       onSite: {
         total: this.money(onSiteTotal),
@@ -704,6 +753,9 @@ export class PaymentsService {
     // должен даже по коду ответа отличать существующего студента от
     // несуществующего, раз вносить платежи ему всё равно запрещено.
     this.assertCanWriteFinance(user);
+    // ТЗ «Разделение воронок»: вносить оплату можно только по этапу СВОЕГО
+    // офиса. Тоже до загрузки студента и по той же причине.
+    this.assertStageAllowed(dto.stage, user);
     const student = await this.loadStudentScope(dto.studentId);
     if (!(isPrivileged(user.role) || canAccessStudentRecord(student, user))) {
       throw new ForbiddenException('Вносить платежи по этому студенту может только назначенный ему менеджер или Основатель');

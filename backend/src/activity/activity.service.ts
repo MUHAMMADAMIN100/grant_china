@@ -9,6 +9,8 @@ export type ActivityAction =
   | 'STUDENT_UPDATE'
   | 'STUDENT_CREATE'
   | 'STUDENT_DELETE'
+  // ТЗ «Разделение воронок» — передача студента между офисами и возврат.
+  | 'STUDENT_TRANSFER_CN'
   | 'MANAGER_CHANGE'
   | 'PROGRAM_CHANGE'
   // Финансовый модуль (payments/) — Double Check (ТЗ 1.1). Поле action это

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException, ConflictException, OnModuleInit } from '@nestjs/common';
 import { Direction, Prisma, Region, Role, StudentStatus } from '@prisma/client';
 import { containsInsensitive } from '../common/search';
 import * as bcrypt from 'bcryptjs';
@@ -8,7 +8,7 @@ import { UpdateStudentDto } from './dto/update-student.dto';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { isPrivileged } from '../common/roles';
+import { isPrivileged, isFounder } from '../common/roles';
 import { assignedFieldsForRegion, assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { buildPhoneSearch, normalizePhone, phoneContainsConditions } from '../common/phone';
 import { STUDENT_SAFE_FIELDS } from '../common/student-fields';
@@ -182,10 +182,22 @@ export class StudentsService implements OnModuleInit {
    *    либо ещё никому не назначенных («свободных» — их может взять любой).
    */
   private hasAccess(
-    student: { managerId: string | null; chinaManagerId?: string | null },
+    student: { managerId: string | null; chinaManagerId?: string | null; transferredToChinaAt?: Date | null },
     user: CurrentUser,
   ): boolean {
-    return canAccessStudentRecord(student, user);
+    if (!canAccessStudentRecord(student, user)) return false;
+    // ТЗ «Разделение воронок»: китайскому менеджеру карточка открывается
+    // ТОЛЬКО после передачи — как и в списке.
+    //
+    // Условие обязано стоять и здесь, и в фильтре списка. Проверено тестом:
+    // пока его тут не было, студент в списке у китайского менеджера не
+    // показывался, а по прямой ссылке карточка открывалась целиком. Ровно та
+    // же асимметрия «список режет, карточка нет», которую в этом проекте уже
+    // дважды находили — с регионами и с платежами.
+    if (user.region === 'CN' && !isPrivileged(user.role) && student.transferredToChinaAt === null) {
+      return false;
+    }
+    return true;
   }
 
   private ensureCanEdit(
@@ -450,6 +462,20 @@ export class StudentsService implements OnModuleInit {
           region: filters.currentUserRegion,
         }),
       });
+      // ТЗ «Разделение воронок»: китайский офис получает карточку СТРОГО в
+      // момент передачи, а не тогда, когда его менеджера вписали в поле.
+      //
+      // Без этого условия разделение не заработало бы вовсе: на момент
+      // внедрения у 198 студентов из 203 китайский менеджер уже проставлен
+      // заранее, «на будущее», хотя оплачен только первый этап и работает по
+      // ним Таджикистан. Они бы разом всплыли у китайских менеджеров как
+      // «переданные», а таджикские увидели бы их с пометкой об уходе.
+      //
+      // Решение заказчика: такие студенты остаются в работе у Таджикистана,
+      // пока кто-то не нажмёт «Передать в Китай».
+      if (filters.currentUserRegion === 'CN') {
+        and.push({ transferredToChinaAt: { not: null } });
+      }
     }
     // Фильтр по менеджеру (любой роли — TJ или CN).
     if (filters.managerUserId) {
@@ -759,6 +785,126 @@ export class StudentsService implements OnModuleInit {
     // момент emit», перетасовывать room-membership не нужно (см. realtime.gateway).
     this.realtime.emitForStudent(updated, 'student:updated', { studentId: id }, { studentId: id });
     this.realtime.emitForStudent(updated, 'application:updated', { studentId: id });
+    return updated;
+  }
+
+  /**
+   * ТЗ «Разделение воронок» — передача студента из таджикского офиса в китайский.
+   *
+   * КТО МОЖЕТ: назначенный таджикский менеджер студента либо руководство.
+   * Китайский менеджер передать не может — передавать ему нечего, он принимает.
+   *
+   * ЗАЧЕМ ЯВНЫЙ ВЫБОР ПОЛУЧАТЕЛЯ (решение заказчика): без него студент попадал
+   * бы в общую очередь китайского офиса и мог там зависнуть — «новый» видят
+   * все, отвечает никто. С явным выбором ответственный есть с первой секунды.
+   *
+   * ПОВТОРНАЯ ПЕРЕДАЧА не является ошибкой: менеджера в Китае могут сменить.
+   * Но дата первой передачи не переписывается — она отвечает на вопрос «когда
+   * студент ушёл из Таджикистана», и переписывать её значит терять факт.
+   */
+  async transferToChina(id: string, chinaManagerId: string, user: CurrentUser) {
+    const student = await this.prisma.student.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, fullName: true, managerId: true, chinaManagerId: true, transferredToChinaAt: true, direction: true },
+    });
+    if (!student) throw new NotFoundException('Студент не найден');
+
+    // Право передать: руководство либо ИМЕННО таджикский менеджер этого
+    // студента. canAccessStudentRecord тут не подходит — он пускает и
+    // китайского менеджера, и любого на «свободного» студента.
+    const allowed = isPrivileged(user.role) || student.managerId === user.id;
+    if (!allowed) throw new NotFoundException('Студент не найден');
+
+    const receiver = await this.prisma.user.findFirst({
+      where: { id: chinaManagerId, deletedAt: null },
+      select: { id: true, fullName: true, role: true, region: true },
+    });
+    // Получатель обязан реально работать по Китаю: иначе студент уедет тому,
+    // кто по правам доступа его же и не увидит — карточка повиснет в пустоте.
+    if (!receiver || (receiver.role === 'EMPLOYEE' && receiver.region === 'TJ')) {
+      throw new BadRequestException('Выберите менеджера, работающего по Китаю');
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.student.update({
+      where: { id },
+      data: {
+        chinaManagerId: receiver.id,
+        transferredById: user.id,
+        // Дату первой передачи не переписываем при смене получателя.
+        transferredToChinaAt: student.transferredToChinaAt ?? now,
+      },
+      select: STUDENT_SAFE_FIELDS,
+    });
+
+    this.fileResolver.invalidateForStudent(id);
+
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'STUDENT_TRANSFER_CN',
+        studentId: id,
+        studentName: student.fullName,
+        details: student.transferredToChinaAt
+          ? `Сменён ответственный в Китае: ${receiver.fullName}`
+          : `Передан в китайский офис, ответственный: ${receiver.fullName}`,
+        payload: { studentId: id, chinaManagerId: receiver.id },
+      })
+      .catch(() => undefined);
+
+    // Уведомление адресное — принимающему, а не всему офису: у студента есть
+    // конкретный ответственный, и «кто-то должен взять» тут не про кого.
+    this.notifications
+      .notifyUser(receiver.id, {
+        type: 'STUDENT_TRANSFER_CN',
+        title: 'Новый студент из Таджикистана',
+        message: `${student.fullName} передан вам в работу. Этапы китайского офиса открыты.`,
+        payload: { studentId: id },
+      })
+      .catch(() => undefined);
+
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId: id }, { studentId: id });
+    return updated;
+  }
+
+  /**
+   * Возврат студента в таджикский офис — только Основатель.
+   *
+   * Передача необратима для всех остальных намеренно: один ошибочный клик
+   * уводит студента из офиса, и без возврата исправить это можно было бы
+   * только правкой базы. Но и раздавать возврат широко нельзя — иначе граница
+   * между офисами перестаёт что-либо значить.
+   */
+  async returnFromChina(id: string, user: CurrentUser) {
+    if (!isFounder(user.role)) {
+      throw new ForbiddenException('Вернуть студента в таджикский офис может только Основатель');
+    }
+    const student = await this.prisma.student.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, fullName: true, transferredToChinaAt: true },
+    });
+    if (!student) throw new NotFoundException('Студент не найден');
+    if (!student.transferredToChinaAt) throw new ConflictException('Студент не передавался в Китай');
+
+    const updated = await this.prisma.student.update({
+      where: { id },
+      data: { transferredToChinaAt: null, transferredById: null },
+      select: STUDENT_SAFE_FIELDS,
+    });
+    this.fileResolver.invalidateForStudent(id);
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'STUDENT_TRANSFER_CN',
+        studentId: id,
+        studentName: student.fullName,
+        details: 'Возвращён в таджикский офис',
+        payload: { studentId: id },
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId: id }, { studentId: id });
     return updated;
   }
 

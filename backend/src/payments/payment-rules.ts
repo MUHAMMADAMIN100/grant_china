@@ -43,6 +43,56 @@ export const SCHEDULE_STAGES: PaymentStage[] = [
 ];
 
 /** Подписи этапов для ActivityLog/логов — фронт использует свои (волна 3). */
+/**
+ * ТЗ «Разделение воронок» — какому офису принадлежит этап.
+ *
+ * Заказчик обвёл на экране три карточки для Таджикистана и две для Китая:
+ *   Таджикистан — Этап 1 (первичная оплата), Этап 2 (документация),
+ *                 Этап 2.1 (после зачисления);
+ *   Китай       — Этап 1.1 (регистрация студента), Этап 3 (после переезда),
+ *                 а также блок «Расходы на месте» — это траты студента,
+ *                 который уже в Китае.
+ *
+ * ПОЧЕМУ ПОРЯДОК ЭТАПОВ В ПОДПИСЯХ ОСТАЛСЯ ПРЕЖНИМ (1, 1.1, 2, 2.1, 3), хотя
+ * по смыслу «регистрация студента» теперь идёт после «после зачисления»:
+ * значения enum в БД переименовывать нельзя — это DROP TYPE и потеря истории
+ * по 171 существующему платежу. Подписи и группировка на экране решают задачу,
+ * а идентификаторы остаются прежними.
+ *
+ * Это ЕДИНСТВЕННЫЙ источник истины о принадлежности этапа. Любая проверка
+ * доступа — и в списках, и в карточке, и при создании платежа — обязана
+ * спрашивать здесь, а не сравнивать этапы вручную. Ручные копии условий уже
+ * дважды приводили к дырам (регионы в списках, регионы в уведомлениях).
+ */
+export const STAGE_OFFICE: Record<PaymentStage, 'TJ' | 'CN'> = {
+  INITIAL: 'TJ',
+  DOCUMENTATION: 'TJ',
+  ENROLLMENT: 'TJ',
+  REGISTRATION: 'CN',
+  RELOCATION: 'CN',
+  LIVING_EXPENSES: 'CN',
+};
+
+/**
+ * Этапы, доступные сотруднику. FOUNDER и ADMIN видят всё — по ТЗ они
+ * наблюдают обе воронки целиком. Менеджер видит только этапы своего офиса;
+ * регион BOTH означает «ведёт оба направления», такому доступны все этапы.
+ *
+ * Пустой список невозможен: любой регион даёт хотя бы один офис.
+ */
+export function stagesForUser(role: string, region: string | null | undefined): PaymentStage[] {
+  const all = Object.keys(STAGE_OFFICE) as PaymentStage[];
+  if (role === 'FOUNDER' || role === 'ADMIN') return all;
+  if (region === 'TJ') return all.filter((s) => STAGE_OFFICE[s] === 'TJ');
+  if (region === 'CN') return all.filter((s) => STAGE_OFFICE[s] === 'CN');
+  return all;
+}
+
+/** true — сотруднику этот этап виден и доступен для работы. */
+export function canSeeStage(stage: PaymentStage, role: string, region: string | null | undefined): boolean {
+  return stagesForUser(role, region).includes(stage);
+}
+
 export const STAGE_LABEL: Record<PaymentStage, string> = {
   INITIAL: 'Этап 1. Первичная оплата',
   REGISTRATION: 'Этап 1.1. Регистрация студента',
