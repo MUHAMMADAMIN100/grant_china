@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, updateStudent, uploadPhoto } from '../api/students';
+import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, returnStudentFromChina, transferStudentToChina, updateStudent, uploadPhoto } from '../api/students';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
-import { DIRECTION_LABEL, STUDENT_STATUS_LABEL, isPrivileged } from '../api/types';
+import { DIRECTION_LABEL, STUDENT_STATUS_LABEL, isFounder, isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import DocumentsChecklist from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
+import ChinaTransferModal from '../components/ChinaTransferModal';
 import PaymentsSection from '../components/PaymentsSection';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
@@ -232,6 +233,10 @@ export default function StudentDetail() {
   // и «идёт сохранение» у него своё: блокировать всю карточку ради одного
   // клика незачем, а два клика подряд по «Да»/«Нет» дали бы гонку запросов.
   const [visaSaving, setVisaSaving] = useState(false);
+  // ТЗ «Разделение воронок» — модалка выбора получателя открывается кнопкой
+  // «Передать в Китай»; сама передача (как и возврат) идёт оптимистично,
+  // см. onTransferToChina/onReturnFromChina ниже.
+  const [chinaModalOpen, setChinaModalOpen] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -485,6 +490,68 @@ export default function StudentDetail() {
     if (failure) throw failure;
   };
 
+  /**
+   * ТЗ «Разделение воронок» — передача студента в китайский офис. Не
+   * финансовая операция (см. utils/optimistic.ts — критерий, что можно
+   * делать оптимистично), поэтому кнопка отрабатывает мгновенно.
+   *
+   * Дата первой передачи предсказывается ОДИН РАЗ: сервер намеренно не
+   * переписывает transferredToChinaAt при повторной передаче (смена
+   * получателя в Китае) — она отвечает на вопрос «когда студент ушёл из
+   * Таджикистана», а не «когда назначен текущий китайский менеджер». Клиент
+   * обязан рассуждать так же, иначе повторная передача молодила бы дату.
+   *
+   * Ошибку НЕ гасим тостом здесь — пробрасываем в модалку (как onReassign
+   * выше): она уже открыта, показывает причину рядом с формой и не закрывается,
+   * так что выбор получателя не теряется.
+   */
+  const onTransferToChina = async (chinaManagerId: string) => {
+    if (!id || !student) return;
+    let failure: any = null;
+    await runOptimistic<Student, Student>({
+      current: student,
+      optimistic: (prev) => ({
+        ...prev,
+        chinaManagerId,
+        transferredToChinaAt: prev.transferredToChinaAt ?? new Date().toISOString(),
+      }),
+      commit: setStudent,
+      request: () => transferStudentToChina(id, chinaManagerId),
+      reconcile: (_before, s) => s,
+      onError: (_message, e) => { failure = e; },
+    });
+    if (failure) throw failure;
+    toast('Студент передан в китайский офис', 'success');
+  };
+
+  /**
+   * Возврат в таджикский офис — доступен только Основателю (см. кнопку ниже),
+   * поэтому подтверждение через confirm(), как и остальные необратимые для
+   * рядового сотрудника действия карточки (например onDeleteStudent).
+   * chinaManagerId сервер НЕ обнуляет при возврате (students.service.ts
+   * returnFromChina) — китайский менеджер остаётся закреплён на случай
+   * повторной передачи, поэтому и здесь его не трогаем.
+   */
+  const onReturnFromChina = async () => {
+    if (!id || !student) return;
+    const ok = await confirm({
+      title: 'Вернуть в Таджикистан',
+      message: `${student.fullName} вернётся в работу таджикского офиса. Китайский менеджер потеряет доступ к карточке до следующей передачи.`,
+      confirmText: 'Вернуть',
+      danger: true,
+    });
+    if (!ok) return;
+    const saved = await runOptimistic<Student, Student>({
+      current: student,
+      optimistic: (prev) => ({ ...prev, transferredToChinaAt: null }),
+      commit: setStudent,
+      request: () => returnStudentFromChina(id),
+      reconcile: (_before, s) => s,
+      onError: (message) => toast(message, 'error'),
+    });
+    if (saved) toast('Студент возвращён в таджикский офис', 'success');
+  };
+
   const onRegenerate = async () => {
     if (!id) return;
     const ok = await confirm({
@@ -558,6 +625,18 @@ export default function StudentDetail() {
   // кнопку хуже, чем показать нужную на долю секунды позже.
   const canEdit = loading ? isAdmin : isAdmin || isMine;
 
+  // ТЗ «Разделение воронок» — та же граница прав, что проверяет сервер
+  // (students.service.ts transferToChina): руководство ЛИБО именно назначенный
+  // ТАДЖИКСКИЙ менеджер (managerId, не chinaManagerId — принимающий китайский
+  // менеджер передать не может, ему нечего передавать). Кнопка не показывается,
+  // если студент уже передан, — иначе клик привёл бы к молчаливой смене
+  // получателя вместо ожидаемого первого решения.
+  const canTransferToChina = !loading && !student!.transferredToChinaAt
+    && (isAdmin || student!.managerId === me?.id);
+  // Возврат — необратимое для рядового сотрудника решение, поэтому только
+  // Основатель (см. students.service.ts returnFromChina).
+  const canReturnFromChina = !loading && !!student!.transferredToChinaAt && isFounder(me?.role);
+
   // COMPLETED — legacy-значение статуса заявки (мигрировано в ENROLLED), но
   // у части старых заявок в БД оно ещё может встречаться "как есть" —
   // без него такие студенты никогда не увидели бы разблокированным этап 2.1.
@@ -574,6 +653,20 @@ export default function StudentDetail() {
             <span className="enrolled-badge" title="Студент зачислен">
               <Icon name="verified" size={16} />
               Зачислен
+            </span>
+          )}
+          {/* ТЗ «Разделение воронок» — та же роль, что у бейджа визы: показать
+              факт сразу в шапке, не открывая блок менеджеров. Единственный
+              бейдж, у которого условие показа НЕ зависит от canEdit — факт
+              передачи виден любому, кто вообще видит карточку. */}
+          {!loading && student!.transferredToChinaAt && (
+            <span
+              className="badge badge-info"
+              style={{ gap: 4 }}
+              title={`Передан в Китай ${new Date(student!.transferredToChinaAt).toLocaleDateString('ru-RU')}${student!.chinaManager ? ` · ${student!.chinaManager.fullName}` : ''}`}
+            >
+              <Icon name="flight_takeoff" size={14} />
+              Передан в Китай
             </span>
           )}
         </h2>
@@ -608,6 +701,40 @@ export default function StudentDetail() {
           chinaManager={student.chinaManager}
           onReassign={onReassign}
         />
+
+        {/* ТЗ «Разделение воронок». Показ кнопки, ведущей к 403, запрещён
+            правилами проекта — canTransferToChina/canReturnFromChina зеркалят
+            ровно те условия, что перепроверяет сервер (см. комментарии у
+            вычисления этих флагов выше), поэтому кнопка «Передать» видна
+            только руководству и назначенному таджикскому менеджеру, а
+            «Вернуть» — только Основателю. Бар целиком скрыт, если ни одно
+            условие не выполняется: пустая полоса без действия только путала бы. */}
+        {(canTransferToChina || canReturnFromChina) && (
+          <div className="access-bar">
+            <div className="access-bar-info">
+              <Icon name="flight_takeoff" size={22} />
+              <div>
+                <div className="access-bar-title">Передача в китайский офис</div>
+                <div className="access-bar-email">
+                  {student.transferredToChinaAt
+                    ? `Передан ${new Date(student.transferredToChinaAt).toLocaleDateString('ru-RU')}${student.chinaManager ? ` · ${student.chinaManager.fullName}` : ''}`
+                    : 'Пока ведётся таджикским офисом'}
+                </div>
+              </div>
+            </div>
+            {canTransferToChina && (
+              <button className="btn btn-sm btn-secondary" onClick={() => setChinaModalOpen(true)}>
+                <Icon name="flight_takeoff" size={16} style={{ marginRight: 4 }} />
+                Передать в Китай
+              </button>
+            )}
+            {canReturnFromChina && (
+              <button className="btn btn-sm btn-danger" onClick={onReturnFromChina}>
+                Вернуть в Таджикистан
+              </button>
+            )}
+          </div>
+        )}
 
         {student.applications && student.applications.length > 0 ? (
           !isEnrolled && (
@@ -910,6 +1037,18 @@ export default function StudentDetail() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {chinaModalOpen && student && (
+          <ChinaTransferModal
+            key="china-transfer"
+            studentId={student.id}
+            studentName={student.fullName}
+            onClose={() => setChinaModalOpen(false)}
+            onConfirm={onTransferToChina}
+          />
         )}
       </AnimatePresence>
       </div>

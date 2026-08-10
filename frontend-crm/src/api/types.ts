@@ -251,6 +251,17 @@ export interface Student {
   visaReceived?: boolean;
   /** Момент отметки о визе; проставляется сервером. null — визы ещё нет. */
   visaReceivedAt?: string | null;
+  /**
+   * ТЗ «Разделение воронок» (backend e143a7d) — момент передачи студента в
+   * китайский офис. null/undefined — студент ещё ведётся Таджикистаном.
+   * По этому же полю сервер решает доступ китайского менеджера к карточке
+   * (hasAccess): пока оно пустое, региональный CN-сотрудник карточку не
+   * видит вовсе, даже если chinaManagerId уже проставлен «на будущее».
+   * Дата первой передачи НЕ переписывается при смене получателя в Китае —
+   * поэтому клиент её тоже не имеет права предсказывать заново при повторной
+   * передаче (см. ChinaTransferModal / StudentDetail.onTransferToChina).
+   */
+  transferredToChinaAt?: string | null;
   managerId: string | null;
   manager?: ManagerInfo | null;
   chinaManagerId: string | null;
@@ -744,6 +755,21 @@ export interface PaymentSummary {
   enrollmentUnlocked: boolean;
   /** Раздел 5 ТЗ (волна 6) — id действующего (SIGNED) договора студента, null если его нет. */
   contractId: string | null;
+  /**
+   * ТЗ «Разделение воронок» — какие офисы видны сотруднику. stages уже
+   * приходят отфильтрованными сервером, это поле сюда добавлено на будущее
+   * (справочно): решение «показывать ли этап» принимает состав stages, а не
+   * этот массив на фронте.
+   */
+  visibleOffices: ('TJ' | 'CN')[];
+  /**
+   * ТЗ «Разделение воронок» — показывать ли блок «Расходы на месте» вообще.
+   * false для таджикского офиса: LIVING_EXPENSES ведёт только Китай. Именно
+   * ФЛАГ, а не пустой/нулевой onSite — ноль читался бы как факт «трат нет»,
+   * а таджикский менеджер вообще не должен знать эту цифру (см.
+   * PaymentsSection.tsx).
+   */
+  onSiteVisible: boolean;
   stages: PaymentStageSummary[];
   onSite: {
     total: string;

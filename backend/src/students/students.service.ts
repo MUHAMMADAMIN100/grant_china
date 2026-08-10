@@ -802,6 +802,43 @@ export class StudentsService implements OnModuleInit {
    * Но дата первой передачи не переписывается — она отвечает на вопрос «когда
    * студент ушёл из Таджикистана», и переписывать её значит терять факт.
    */
+  /**
+   * Кому можно передать этого студента — узкий список для окна выбора.
+   *
+   * ЗАЧЕМ ОТДЕЛЬНЫЙ ЭНДПОИНТ, А НЕ GET /users: тот закрыт @Roles(FOUNDER, ADMIN),
+   * и рядовой таджикский менеджер получал бы 403 при открытии окна — то есть
+   * кнопка «Передать в Китай» у него есть, а выбрать получателя не из чего.
+   * Расширять GET /users до менеджеров нельзя: там почта, роли и регионы всех
+   * сотрудников, а для передачи нужны имя и идентификатор китайских.
+   *
+   * Право спросить — то же, что право передать: иначе список сотрудников
+   * утечёт через «вспомогательный» запрос тому, кто саму передачу сделать
+   * не может.
+   */
+  async chinaTransferCandidates(id: string, user: CurrentUser) {
+    const student = await this.prisma.student.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, managerId: true },
+    });
+    if (!student) throw new NotFoundException('Студент не найден');
+    if (!(isPrivileged(user.role) || student.managerId === user.id)) {
+      throw new NotFoundException('Студент не найден');
+    }
+    return this.prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        role: 'EMPLOYEE',
+        // Тот же критерий, по которому transferToChina отклоняет получателя.
+        // Разойдутся — в списке появится тот, кого сервер потом не примет.
+        region: { in: ['CN', 'BOTH'] },
+      },
+      // Только имя и идентификатор: ни почты, ни роли — окну выбора больше
+      // ничего не нужно.
+      select: { id: true, fullName: true },
+      orderBy: { fullName: 'asc' },
+    });
+  }
+
   async transferToChina(id: string, chinaManagerId: string, user: CurrentUser) {
     const student = await this.prisma.student.findFirst({
       where: { id, deletedAt: null },

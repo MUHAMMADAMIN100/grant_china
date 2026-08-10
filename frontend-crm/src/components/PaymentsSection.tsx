@@ -461,39 +461,52 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
         {summary.stages.map(renderStageCard)}
       </div>
 
-      <div className="payments-block-title">Расходы на месте</div>
-      <div className="payments-onsite">
-        <div className="payments-onsite-totals">
-          <div><span>Всего</span><strong>{formatMoney(summary.onSite.total)}</strong></div>
-          <div><span>Проживание</span><strong>{formatMoney(summary.onSite.byPurpose.ACCOMMODATION)}</strong></div>
-          <div><span>Питание</span><strong>{formatMoney(summary.onSite.byPurpose.FOOD)}</strong></div>
-          <div><span>Другое</span><strong>{formatMoney(summary.onSite.byPurpose.OTHER)}</strong></div>
-        </div>
+      {/*
+        ТЗ «Разделение воронок» — «Расходы на месте» ведёт только китайский
+        офис (LIVING_EXPENSES вне STAGE_OFFICE Таджикистана). summary.onSiteVisible
+        уже отражает решение сервера (payments.service.ts canSeeStage): для
+        таджикского менеджера этот блок скрываем ЦЕЛИКОМ, а не показываем с
+        нулями. Ноль читается как факт «трат нет», хотя на деле это «вам не
+        положено это видеть» — два разных сообщения нельзя путать местами,
+        поэтому решение показывать/не показывать принимает флаг, а не суммы.
+      */}
+      {summary.onSiteVisible && (
+        <>
+          <div className="payments-block-title">Расходы на месте</div>
+          <div className="payments-onsite">
+            <div className="payments-onsite-totals">
+              <div><span>Всего</span><strong>{formatMoney(summary.onSite.total)}</strong></div>
+              <div><span>Проживание</span><strong>{formatMoney(summary.onSite.byPurpose.ACCOMMODATION)}</strong></div>
+              <div><span>Питание</span><strong>{formatMoney(summary.onSite.byPurpose.FOOD)}</strong></div>
+              <div><span>Другое</span><strong>{formatMoney(summary.onSite.byPurpose.OTHER)}</strong></div>
+            </div>
 
-        {onSiteAll.length === 0 ? (
-          <div className="empty" style={{ padding: 16 }}>Расходов на месте пока нет</div>
-        ) : (
-          <div className="payment-rows">
-            {onSiteVisible.map(renderPaymentRow)}
+            {onSiteAll.length === 0 ? (
+              <div className="empty" style={{ padding: 16 }}>Расходов на месте пока нет</div>
+            ) : (
+              <div className="payment-rows">
+                {onSiteVisible.map(renderPaymentRow)}
+              </div>
+            )}
+            {onSiteAll.length > ON_SITE_PAGE_SIZE && !onSiteExpanded && (
+              <button className="btn btn-sm btn-secondary" onClick={() => setOnSiteExpanded(true)}>
+                Показать ещё ({onSiteAll.length - ON_SITE_PAGE_SIZE})
+              </button>
+            )}
+
+            {canAddPayment && (
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary payment-stage-add-btn"
+                onClick={() => setModal({ kind: 'create', stage: 'LIVING_EXPENSES' })}
+              >
+                <Icon name="add" size={15} style={{ marginRight: 4 }} />
+                + Расход
+              </button>
+            )}
           </div>
-        )}
-        {onSiteAll.length > ON_SITE_PAGE_SIZE && !onSiteExpanded && (
-          <button className="btn btn-sm btn-secondary" onClick={() => setOnSiteExpanded(true)}>
-            Показать ещё ({onSiteAll.length - ON_SITE_PAGE_SIZE})
-          </button>
-        )}
-
-        {canAddPayment && (
-          <button
-            type="button"
-            className="btn btn-sm btn-secondary payment-stage-add-btn"
-            onClick={() => setModal({ kind: 'create', stage: 'LIVING_EXPENSES' })}
-          >
-            <Icon name="add" size={15} style={{ marginRight: 4 }} />
-            + Расход
-          </button>
-        )}
-      </div>
+        </>
+      )}
 
       <AnimatePresence>
         {modal?.kind === 'create' && (

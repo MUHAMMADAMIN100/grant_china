@@ -91,6 +91,37 @@ export async function deleteStudent(id: string) {
   return data;
 }
 
+/**
+ * ТЗ «Разделение воронок» — передача студента в китайский офис. Сервер сам
+ * перепроверяет и право (руководство либо назначенный таджикский менеджер),
+ * и получателя (обязан реально работать по Китаю) — см.
+ * backend/src/students/students.service.ts transferToChina().
+ */
+/**
+ * Кандидаты на приём студента в Китае.
+ *
+ * Отдельный узкий эндпоинт, а НЕ общий список сотрудников: GET /users закрыт
+ * для рядового менеджера (@Roles(FOUNDER, ADMIN)), и окно выбора у него
+ * открывалось пустым — кнопка «Передать» есть, а выбрать некого. Здесь сервер
+ * отдаёт только имя и идентификатор менеджеров, работающих по Китаю, и
+ * проверяет то же право, что и на саму передачу.
+ */
+export async function listChinaTransferCandidates(id: string) {
+  const { data } = await api.get<{ id: string; fullName: string }[]>(`/students/${id}/china-managers`);
+  return data;
+}
+
+export async function transferStudentToChina(id: string, chinaManagerId: string) {
+  const { data } = await api.post<Student>(`/students/${id}/transfer-to-china`, { chinaManagerId });
+  return data;
+}
+
+/** Возврат в таджикский офис — сервер разрешает только Основателю. */
+export async function returnStudentFromChina(id: string) {
+  const { data } = await api.post<Student>(`/students/${id}/return-from-china`);
+  return data;
+}
+
 export async function regenerateStudentPassword(id: string) {
   const { data } = await api.post<{ email: string; password: string }>(
     `/students/${id}/regenerate-password`,

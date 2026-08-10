@@ -432,7 +432,22 @@ export default function Students() {
                       whileHover={{ backgroundColor: 'rgba(0,0,0,0.02)', x: 2 }}
                       style={{ cursor: 'pointer' }}
                     >
-                      <td><strong>{s.fullName}</strong></td>
+                      <td>
+                        <strong>{s.fullName}</strong>
+                        {/* ТЗ «Разделение воронок» — тот же приём, что у визы (см. колонку
+                            «Виза» ниже): бейдж рядом с ФИО, чтобы факт передачи был виден
+                            без открытия карточки, но кликом по строке не переключался. */}
+                        {s.transferredToChinaAt && (
+                          <span
+                            className="badge badge-info"
+                            style={{ gap: 4, marginLeft: 8 }}
+                            title={`Передан в Китай · ${new Date(s.transferredToChinaAt).toLocaleDateString('ru-RU')}`}
+                          >
+                            <Icon name="flight_takeoff" size={13} />
+                            CN
+                          </span>
+                        )}
+                      </td>
                       <td data-label="Телефоны">{s.phones.join(', ') || '—'}</td>
                       <td data-label="Направление">{DIRECTION_LABEL[s.direction]}</td>
                       <td data-label="Кабинет">№{s.cabinet}</td>

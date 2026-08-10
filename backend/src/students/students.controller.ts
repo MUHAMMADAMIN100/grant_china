@@ -144,6 +144,12 @@ export class StudentsController {
    * (передаёт назначенный таджикский менеджер либо руководство), а роль сама по
    * себе тут ничего не решает — чужого студента не передаст и менеджер.
    */
+  /** Кандидаты на приём студента в Китае — для окна выбора. Право = право передать. */
+  @Get(':id/china-managers')
+  chinaTransferCandidates(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.students.chinaTransferCandidates(id, user);
+  }
+
   @Post(':id/transfer-to-china')
   transferToChina(
     @Param('id') id: string,
