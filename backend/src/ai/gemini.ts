@@ -27,6 +27,20 @@ export interface GeminiRequest {
   system: string;
   turns: GeminiTurn[];
   maxOutputTokens: number;
+  /**
+   * Потолок «размышления» модели в токенах.
+   *
+   * Gemini 3 Pro — думающая модель: часть бюджета вывода она тратит не на текст
+   * ответа, а на внутренние рассуждения (usageMetadata.thoughtsTokenCount). Без
+   * потолка поднятый maxOutputTokens она может целиком пустить на размышление —
+   * ровно это и случилось при повышении лимита с 4096 до 16 000: время ответа
+   * на боевом объёме данных перевалило за таймаут, хотя сам ответ — одна строка.
+   *
+   * Ограничиваем размышление, а не ответ: длинные перечни студентов должны
+   * помещаться целиком, а вот думать над «сколько у меня студентов» полминуты
+   * незачем.
+   */
+  thinkingBudget?: number;
   /** Секунды до отказа. Без него зависший запрос держал бы воркер бесконечно. */
   timeoutSec?: number;
 }
@@ -89,6 +103,9 @@ export async function callGemini(req: GeminiRequest): Promise<GeminiResult> {
         contents: req.turns.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
         generationConfig: {
           maxOutputTokens: req.maxOutputTokens,
+          // thinkingConfig, а не thinkingLevel: последнего в v1beta нет, запрос
+          // с ним отлетает с 400 «Unknown name thinkingLevel» (проверено).
+          ...(req.thinkingBudget ? { thinkingConfig: { thinkingBudget: req.thinkingBudget } } : {}),
           // Низкая температура намеренно: помощник обязан пересказывать
           // регламент, а не сочинять вариации. Творчество здесь — это
           // выдуманный порядок действий, за которым сотрудник пойдёт в работу.
