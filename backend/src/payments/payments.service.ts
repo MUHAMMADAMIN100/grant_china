@@ -44,6 +44,7 @@ import {
   assertPurposeAllowedForActor,
   assertPurposeSelectable,
   isPurposeAllowedForStage,
+  selfApprovalBlock,
 } from './payment-rules';
 
 /**
@@ -1147,19 +1148,25 @@ export class PaymentsService {
   }
 
   /**
-   * Double Check, финальный акцепт (ТЗ 1.1). Только FOUNDER (роль проверяет
-   * RolesGuard в контроллере). Инвариант анти-самоподтверждения проверяет
-   * ДВА поля, не одно (Проблема 6 аудита волны 1):
-   *  - submittedById !== user.id — нельзя одобрить то, что сам же подал;
-   *  - createdById !== user.id — нельзя одобрить то, что сам же завёл.
-   * Раньше проверялось только submittedById, и обход выглядел так: Основатель
-   * заводит платёж (DRAFT) на любую сумму, ЛЮБОЙ администратор нажимает
-   * «Подтвердить» (submit() пускает назначенного менеджера/администратора —
-   * см. loadPaymentForSubmit), после чего тот же Основатель одобряет
-   * СВОЙ ЖЕ платёж. Смысл ТЗ 1.1 — «Основатель ПРОВЕРЯЕТ фактическое
-   * поступление денежных средств», т.е. чужую работу, а не свою: кто бы ни
-   * подал платёж, Основатель, лично внёсший данные, не может быть тем, кто
-   * их же и акцептует.
+   * Double Check, финальный акцепт (ТЗ 1.1). Только FOUNDER — роль проверяет
+   * RolesGuard в контроллере.
+   *
+   * Запрет самоодобрения вынесен в selfApprovalBlock() (payment-rules.ts) и по
+   * решению владельца от 12.08.2026 на Основателя больше не распространяется —
+   * причины и последствия расписаны там же. Здесь важно другое: остальные
+   * гейты акцепта НЕ ослаблены и снимать их нельзя.
+   *
+   *  - статус строго PENDING_APPROVAL — нельзя акцептовать черновик;
+   *  - обязателен живой чек — без доказательства оплаты одобрения нет
+   *    ни у кого, включая Основателя;
+   *  - updatedAt сверяется с открытой карточкой — иначе одобряется не то,
+   *    что человек видел на экране;
+   *  - сам перевод статуса идёт через updateMany с WHERE status —
+   *    два одновременных клика дадут одно одобрение, а не два.
+   *
+   * После снятия разделения рук именно эти четыре проверки и запись в
+   * ActivityLog остаются единственным контролем над платежом, проведённым
+   * одним человеком.
    */
   async approve(id: string, updatedAtCheck: string | undefined, user: CurrentUser) {
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
@@ -1167,16 +1174,8 @@ export class PaymentsService {
     if (payment.status !== 'PENDING_APPROVAL') {
       throw new ConflictException('Одобрить можно только платёж, ожидающий одобрения');
     }
-    if (payment.createdById && payment.createdById === user.id) {
-      throw new ConflictException(
-        'Нельзя одобрить платёж, который вы сами внесли в систему. Основатель проверяет чужую работу — попросите завести платёж другого сотрудника.',
-      );
-    }
-    if (payment.submittedById && payment.submittedById === user.id) {
-      throw new ConflictException(
-        'Нельзя одобрить платёж, который вы сами подали на одобрение. Пусть данные внесёт и подаст менеджер — так работает двухстороннее подтверждение.',
-      );
-    }
+    const selfBlock = selfApprovalBlock(payment, user);
+    if (selfBlock) throw new ConflictException(selfBlock);
     if (!(await this.hasLiveReceipt(id))) {
       throw new BadRequestException('У платежа нет подтверждающего чека — одобрение невозможно');
     }

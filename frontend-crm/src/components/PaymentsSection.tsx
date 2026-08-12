@@ -7,6 +7,7 @@ import {
   canManageFinance,
   canWriteFinance,
   isFounder,
+  selfApprovalBlock,
 } from '../api/types';
 import {
   approvePayment,
@@ -248,15 +249,11 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
     // Сотрудник ведёт лишь свои записи — ровно так же рассуждает payments.service.
     const canMutate = canWrite && (isFdr || p.createdById === me?.id);
     const canRecall = canWrite && (isFdr || p.submittedById === me?.id);
-    // Double Check (ТЗ 1.1): бэкенд блокирует одобрение, если пользователь
-    // причастен к платежу — как автор ИЛИ как подавший. Оба условия должны
-    // быть отражены здесь, иначе кнопка активна, а клик возвращает 409.
-    const submittedByMe = !!p.submittedById && p.submittedById === me?.id;
-    const createdByMe = !!p.createdById && p.createdById === me?.id;
-    const cannotApprove = submittedByMe || createdByMe;
-    const cannotApproveReason = createdByMe
-      ? 'Вы внесли этот платёж — одобрить должен другой пользователь'
-      : 'Вы подали этот платёж — одобрить должен другой пользователь';
+    // Double Check (ТЗ 1.1) — одна общая функция с бэкендом и со списком
+    // «На одобрении». Для Основателя запрета нет (решение владельца),
+    // поэтому кнопка у него активна.
+    const cannotApproveReason = selfApprovalBlock(p, me);
+    const cannotApprove = cannotApproveReason !== null;
 
     const showDraftActions = (p.status === 'DRAFT' || p.status === 'REJECTED') && canMutate;
     const showRecall = p.status === 'PENDING_APPROVAL' && canRecall;
@@ -328,7 +325,7 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
                   className="btn btn-sm btn-primary"
                   onClick={() => handleApprove(p)}
                   disabled={cannotApprove}
-                  title={cannotApprove ? cannotApproveReason : undefined}
+                  title={cannotApproveReason ?? undefined}
                 >
                   Одобрить
                 </button>

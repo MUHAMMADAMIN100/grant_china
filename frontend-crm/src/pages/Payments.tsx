@@ -10,6 +10,7 @@ import {
   SCHEDULE_PAYMENT_STAGES,
   isFounder,
   isPrivileged,
+  selfApprovalBlock,
 } from '../api/types';
 import { approvePayment, listPayments, listPendingPayments, pendingPaymentsCount, rejectPayment } from '../api/payments';
 import { listUsers } from '../api/users';
@@ -394,17 +395,12 @@ export default function Payments() {
                     <tbody>
                       {pendingItems.map((p) => {
                         const receiptUrl = firstReceiptUrl(p);
-                        // Double Check (ТЗ 1.1): Основатель проверяет ЧУЖУЮ работу.
-                        // Бэкенд (payments.service.approve) блокирует одобрение,
-                        // если пользователь причастен к платежу — как автор ИЛИ
-                        // как подавший. Фронт обязан отражать оба условия, иначе
-                        // кнопка активна, а клик возвращает 409.
-                        const submittedByMe = !!p.submittedById && p.submittedById === me?.id;
-                        const createdByMe = !!p.createdById && p.createdById === me?.id;
-                        const cannotApprove = submittedByMe || createdByMe;
-                        const cannotApproveReason = createdByMe
-                          ? 'Вы внесли этот платёж — одобрить должен другой пользователь'
-                          : 'Вы подали этот платёж — одобрить должен другой пользователь';
+                        // Double Check (ТЗ 1.1) — условие спрашиваем у общей
+                        // функции, а не пишем заново: рукописная копия здесь и
+                        // расходилась с бэкендом. Сейчас для Основателя запрета
+                        // нет, и кнопка обязана быть активной.
+                        const cannotApproveReason = selfApprovalBlock(p, me);
+                        const cannotApprove = cannotApproveReason !== null;
                         return (
                           <tr key={p.id} onClick={() => navigate(`/students/${p.studentId}`)} style={{ cursor: 'pointer' }}>
                             <td><strong>{p.student?.fullName || '—'}</strong></td>
@@ -438,7 +434,7 @@ export default function Payments() {
                                     className="btn btn-sm btn-primary"
                                     onClick={() => handleApprove(p)}
                                     disabled={cannotApprove}
-                                    title={cannotApprove ? cannotApproveReason : undefined}
+                                    title={cannotApproveReason ?? undefined}
                                   >
                                     Одобрить
                                   </button>

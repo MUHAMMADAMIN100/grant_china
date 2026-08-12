@@ -96,6 +96,36 @@ export const canWriteFinance = (role?: Role | null): boolean =>
  */
 export const canManageFinance = (role?: Role | null): boolean => role === 'FOUNDER';
 
+/**
+ * Зеркало selfApprovalBlock() из backend/src/payments/payment-rules.ts.
+ * Возвращает причину, по которой кнопка «Одобрить» должна быть недоступна,
+ * либо null, если одобрять можно.
+ *
+ * ЗАЧЕМ ОБЩАЯ ФУНКЦИЯ. Это правило жило тремя рукописными копиями — в
+ * Payments.tsx, в PaymentsSection.tsx и на бэкенде. Ровно из-за такой схемы
+ * («список фильтрует, карточка нет») в проекте уже трижды расходились условия
+ * доступа. Здесь цена расхождения — либо активная кнопка, отдающая 409, либо
+ * серая кнопка у того, кому одобрять положено.
+ *
+ * Про Основателя: с 12.08.2026 запрет на него не распространяется — решение
+ * владельца, развёрнуто описано в бэкендовом файле. Фронт обязан повторять
+ * это ровно, а не «на всякий случай» блокировать больше.
+ */
+export const selfApprovalBlock = (
+  payment: { createdById?: string | null; submittedById?: string | null },
+  me: { id?: string; role?: Role | null } | null | undefined,
+): string | null => {
+  if (!me?.id) return null;
+  if (me.role === 'FOUNDER') return null;
+  if (payment.createdById && payment.createdById === me.id) {
+    return 'Нельзя одобрить платёж, который вы сами внесли в систему';
+  }
+  if (payment.submittedById && payment.submittedById === me.id) {
+    return 'Нельзя одобрить платёж, который вы сами подали на одобрение';
+  }
+  return null;
+};
+
 export type Direction =
   | 'BACHELOR'
   | 'MASTER'
