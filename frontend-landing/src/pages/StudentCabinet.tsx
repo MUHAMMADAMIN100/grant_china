@@ -8,6 +8,7 @@ import {
   studentLogout,
   studentMe,
   studentUploadDocument,
+  studentUploadPhoto,
   type StudentMe,
 } from '../studentApi';
 import { connectStudentRealtime, useStudentRealtime, getSocket } from '../realtime';
@@ -76,6 +77,8 @@ export default function StudentCabinet() {
   const [tab, setTab] = useState<'home' | 'programs'>('home');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const otherRef = useRef<HTMLInputElement>(null);
+  const photoRef = useRef<HTMLInputElement>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   const showToast = (kind: 'ok' | 'err', text: string) => {
     setToast({ kind, text });
@@ -113,6 +116,27 @@ export default function StudentCabinet() {
   const logout = async () => {
     await studentLogout();
     navigate('/login');
+  };
+
+  /** Смена фото профиля. Новый URL применяем сразу из ответа, не дожидаясь load(). */
+  const onPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast('err', 'Фото должно быть изображением (JPG, PNG…)');
+      return;
+    }
+    setPhotoUploading(true);
+    try {
+      const { photoUrl } = await studentUploadPhoto(file);
+      setMe((prev) => (prev ? { ...prev, photoUrl } : prev));
+      showToast('ok', 'Фото обновлено');
+    } catch (err: any) {
+      showToast('err', err?.response?.data?.message || 'Не удалось загрузить фото');
+    } finally {
+      setPhotoUploading(false);
+    }
   };
 
   const onUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
@@ -343,12 +367,55 @@ export default function StudentCabinet() {
           transition={{ duration: 0.4, delay: 0.05 }}
         >
           <div className="stu-profile">
-            <div className="stu-photo">
-              {me.photoUrl ? (
-                <img src={buildFileUrl(me.photoUrl)} alt="" />
-              ) : (
-                <Icon name="person" size={60} />
-              )}
+            {/* Доработка 12.08.2026 — студент меняет фото сам. Вся зона фото —
+                кнопка: и пустой силуэт, и текущий снимок кликабельны, подпись
+                снизу проговаривает действие для тех, кто не догадается. */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="stu-photo"
+                onClick={() => photoRef.current?.click()}
+                disabled={photoUploading}
+                aria-label="Сменить фото профиля"
+                title="Сменить фото профиля"
+                style={{ cursor: 'pointer', border: 'none', padding: 0, position: 'relative', overflow: 'hidden' }}
+              >
+                {me.photoUrl ? (
+                  <img src={buildFileUrl(me.photoUrl)} alt="" />
+                ) : (
+                  <Icon name="person" size={60} />
+                )}
+                {photoUploading && (
+                  <span
+                    style={{
+                      position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
+                      background: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600,
+                    }}
+                  >
+                    Загрузка…
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => photoRef.current?.click()}
+                disabled={photoUploading}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                  font: 'inherit', fontSize: 13, color: '#2563eb', display: 'inline-flex',
+                  alignItems: 'center', gap: 4,
+                }}
+              >
+                <Icon name="photo_camera" size={15} />
+                {me.photoUrl ? 'Сменить фото' : 'Загрузить фото'}
+              </button>
+              <input
+                ref={photoRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={onPhotoChange}
+              />
             </div>
             <div className="stu-profile-info">
               <h1 className="stu-profile-name">{me.fullName}</h1>

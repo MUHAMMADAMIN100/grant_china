@@ -261,6 +261,7 @@ export class PayslipsService {
         missedAmount: m.timeliness.missedAmount.toFixed(2),
       },
       paymentsAmountTotal: m.paymentsAmountTotal.toFixed(2),
+      documentTypesAdded: m.documentTypesAdded,
     };
   }
 
@@ -276,6 +277,7 @@ export class PayslipsService {
       conversionRate: this.rateStr(m.conversionRate),
       timelinessRate: this.rateStr(m.timelinessRate),
       deliveryRate: this.rateStr(m.deliveryRate),
+      documentTypesAdded: m.documentTypesAdded,
     };
   }
 

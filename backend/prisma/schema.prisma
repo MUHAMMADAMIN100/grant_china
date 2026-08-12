@@ -1543,6 +1543,11 @@ enum BonusRuleKind {
   FIXED_PER_RELOCATION // amount × количество доведённых до переезда
   FIXED_PER_CONSULTATION // amount × количество проведённых консультаций
   KPI_THRESHOLD_BONUS // премия, если metric >= threshold: amount ЛИБО rate × оклад
+  // Доработка 12.08.2026 — «100 сомони за каждый документ». amount × количество
+  // ТИПОВ документов, впервые появившихся у студентов менеджера за период.
+  // Считает kpi.service.documentTypesAdded; правила дедупликации — там же.
+  // Добавление значения в конец enum безопасно для `prisma db push`.
+  FIXED_PER_DOCUMENT
 }
 
 // Метрика для KPI_THRESHOLD_BONUS. Значения = ровно те, что считает

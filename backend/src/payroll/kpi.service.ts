@@ -58,6 +58,24 @@ export interface ManagerPeriodMetrics {
   /** Σ APPROVED-платежей, paidAt в периоде — база PERCENT_OF_PAYMENTS. */
   paymentsAmountTotal: Prisma.Decimal;
   paymentsAmountByStage: Partial<Record<PaymentStage, Prisma.Decimal>>;
+  /**
+   * Доработка 12.08.2026 — база FIXED_PER_DOCUMENT («100 сомони за документ»).
+   *
+   * Определение: количество пар (студент, ТИП документа), у которых ПЕРВЫЙ
+   * документ этого типа появился в периоде. Атрибуция — таджикскому менеджеру
+   * студента (managerId): документация — этап его офиса, и бонус его,
+   * кто бы ни нажал кнопку загрузки (менеджер, Основатель или сам студент
+   * из личного кабинета).
+   *
+   * Защита от накрутки — та же логика необратимой вехи, что у claimEnrolled:
+   *  - считается ТИП, а не файл: десять сканов одного паспорта = один бонус;
+   *  - MIN(createdAt) берётся ПО ВСЕМ документам, включая удалённые
+   *    (deletedAt намеренно НЕ фильтруется): удалил-загрузил-снова не
+   *    передвигает первую дату и не даёт второй бонус;
+   *  - RECEIPT и TICKET исключены — это файлы разделов Финансы и Билеты
+   *    (MANAGED_DOCUMENT_TYPES), а не документация студента.
+   */
+  documentTypesAdded: number;
 }
 
 const ZERO = new Prisma.Decimal(0);
@@ -88,6 +106,7 @@ function emptyMetrics(): ManagerPeriodMetrics {
     timeliness: { onTimeAmount: ZERO, lateAmount: ZERO, missedAmount: ZERO },
     paymentsAmountTotal: ZERO,
     paymentsAmountByStage: {},
+    documentTypesAdded: 0,
   };
 }
 
@@ -127,7 +146,7 @@ export class KpiService {
   private async computeSingle(managerId: string | undefined, range: PeriodRange) {
     const managerFilter = managerId ? managerId : { not: null };
 
-    const [transactionResults, timelinessRows] = await Promise.all([
+    const [transactionResults, timelinessRows, documentTypesAdded] = await Promise.all([
       this.prisma.$transaction([
         this.prisma.application.count({
           where: { deletedAt: null, firstTouchById: managerFilter as any, firstTouchAt: { gte: range.from, lt: range.to } },
@@ -167,6 +186,7 @@ export class KpiService {
         }),
       ]),
       this.timelinessQuery(managerId, range),
+      this.documentTypesQuery(managerId, range),
     ]);
     const [leadsProcessed, consultationsHeld, contractsAgg, relocatedCount, enrolledCount, lostCount, paymentsByStageRows] =
       transactionResults;
@@ -188,8 +208,52 @@ export class KpiService {
       metrics.paymentsAmountTotal = metrics.paymentsAmountTotal.plus(amount);
     }
     metrics.timeliness = timelinessRows;
+    metrics.documentTypesAdded = documentTypesAdded;
     finalizeRates(metrics);
     return metrics;
+  }
+
+  /**
+   * Количество ТИПОВ документов, впервые появившихся за период у студентов
+   * менеджера (определение и антинакрутка — см. ManagerPeriodMetrics).
+   * managerId = undefined — по всем менеджерам разом (metricScope=TEAM).
+   */
+  private async documentTypesQuery(managerId: string | undefined, range: PeriodRange): Promise<number> {
+    const managerCondition = managerId ? Prisma.sql`s."managerId" = ${managerId}` : Prisma.sql`s."managerId" IS NOT NULL`;
+    const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
+      WITH first_docs AS (
+        SELECT d."studentId", d."type", MIN(d."createdAt") AS first_at
+        FROM "Document" d
+        WHERE d."type" NOT IN ('RECEIPT', 'TICKET')
+        GROUP BY 1, 2
+      )
+      SELECT COUNT(*) AS count
+      FROM first_docs fd
+      JOIN "Student" s ON s.id = fd."studentId" AND s."deletedAt" IS NULL AND ${managerCondition}
+      WHERE fd.first_at >= ${range.from} AND fd.first_at < ${range.to}
+    `;
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  private async documentTypesByManagerQuery(
+    managerIds: string[],
+    range: PeriodRange,
+  ): Promise<Array<{ manager_id: string; count: bigint }>> {
+    if (managerIds.length === 0) return [];
+    return this.prisma.$queryRaw<Array<{ manager_id: string; count: bigint }>>`
+      WITH first_docs AS (
+        SELECT d."studentId", d."type", MIN(d."createdAt") AS first_at
+        FROM "Document" d
+        WHERE d."type" NOT IN ('RECEIPT', 'TICKET')
+        GROUP BY 1, 2
+      )
+      SELECT s."managerId" AS manager_id, COUNT(*) AS count
+      FROM first_docs fd
+      JOIN "Student" s ON s.id = fd."studentId" AND s."deletedAt" IS NULL
+        AND s."managerId" IN (${Prisma.join(managerIds)})
+      WHERE fd.first_at >= ${range.from} AND fd.first_at < ${range.to}
+      GROUP BY s."managerId"
+    `;
   }
 
   /**
@@ -204,7 +268,7 @@ export class KpiService {
     for (const id of idSet) result.set(id, emptyMetrics());
     if (idSet.size === 0) return result;
 
-    const [transactionResults, timelinessRows] = await Promise.all([
+    const [transactionResults, timelinessRows, documentTypesRows] = await Promise.all([
       this.prisma.$transaction([
         this.prisma.application.groupBy({
           by: ['firstTouchById'],
@@ -259,6 +323,7 @@ export class KpiService {
         `,
       ]),
       this.timelinessByManagerQuery(managerIds, range),
+      this.documentTypesByManagerQuery(managerIds, range),
     ]);
     const [leadsRows, consultRows, contractRows, relocatedRows, enrolledRows, lostRows, paymentsRows] = transactionResults;
 
@@ -309,6 +374,10 @@ export class KpiService {
           missedAmount: toDecimal(r.missed_amount),
         };
       }
+    }
+    for (const r of documentTypesRows) {
+      const m = pick(r.manager_id);
+      if (m) m.documentTypesAdded = Number(r.count);
     }
     for (const m of result.values()) finalizeRates(m);
     return result;

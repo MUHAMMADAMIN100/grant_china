@@ -155,6 +155,45 @@ export class StudentAuthController {
     return { form: updated.applicationForm };
   }
 
+  /**
+   * Доработка 12.08.2026 — студент сам меняет фото профиля из кабинета.
+   *
+   * Тот же контракт, что у CRM-загрузки (students.controller POST :id/photo):
+   * только изображения, тот же лимит размера, файл в /uploads под общей
+   * защитой file-resolver. Старый файл НЕ удаляется (правило проекта —
+   * ничего не удалять): photoUrl просто указывает на новый.
+   *
+   * Троттлинг: фото — не документооборот, 10 смен в минуту хватит любому
+   * живому человеку, а вот заливать гигабайты в /uploads циклом не выйдет.
+   */
+  @UseGuards(StudentJwtGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('photo')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: uploadStorage,
+      limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '209715200', 10) },
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(new BadRequestException('Только изображения'), false);
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async uploadPhoto(@CurrentUser() user: any, @UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Файл не передан');
+    const url = `/uploads/${file.filename}`;
+    const updated = await this.prisma.student.update({
+      where: { id: user.id },
+      data: { photoUrl: url },
+      select: { photoUrl: true, managerId: true, chinaManagerId: true },
+    });
+    // Менеджеры видят новое фото сразу: карточка и список слушают student:updated.
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId: user.id }, { studentId: user.id });
+    return { photoUrl: updated.photoUrl };
+  }
+
   // Студент загружает свой документ
   @UseGuards(StudentJwtGuard)
   @Post('documents')

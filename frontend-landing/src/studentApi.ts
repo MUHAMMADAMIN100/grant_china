@@ -142,6 +142,18 @@ export async function studentMe() {
   return data;
 }
 
+/**
+ * Смена фото профиля из кабинета (доработка 12.08.2026). Сервер принимает
+ * только изображения; после ответа новое фото уже видно менеджерам в CRM —
+ * бэкенд шлёт им student:updated.
+ */
+export async function studentUploadPhoto(file: File) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const { data } = await client.post<{ photoUrl: string }>('/student-auth/photo', fd);
+  return data;
+}
+
 export async function studentUploadDocument(file: File, type: string) {
   const fd = new FormData();
   fd.append('file', file);

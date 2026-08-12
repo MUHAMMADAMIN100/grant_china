@@ -292,6 +292,7 @@ export class RulesService {
       case 'FIXED_PER_CONTRACT':
       case 'FIXED_PER_ENROLLMENT':
       case 'FIXED_PER_RELOCATION':
+      case 'FIXED_PER_DOCUMENT':
         if (!f.amount) throw new BadRequestException('Для фиксированного правила обязателен amount');
         if (!f.cap) throw new BadRequestException('Для фиксированного правила обязателен потолок (cap) — предохранитель от опечатки');
         break;

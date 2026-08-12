@@ -1001,7 +1001,8 @@ export type BonusRuleKind =
   | 'FIXED_PER_ENROLLMENT'
   | 'FIXED_PER_RELOCATION'
   | 'FIXED_PER_CONSULTATION'
-  | 'KPI_THRESHOLD_BONUS';
+  | 'KPI_THRESHOLD_BONUS'
+  | 'FIXED_PER_DOCUMENT';
 
 export const BONUS_RULE_KIND_LABEL: Record<BonusRuleKind, string> = {
   PERCENT_OF_CONTRACTS: '% от суммы подписанных договоров',
@@ -1012,6 +1013,10 @@ export const BONUS_RULE_KIND_LABEL: Record<BonusRuleKind, string> = {
   FIXED_PER_RELOCATION: 'Фиксированная сумма за переезд',
   FIXED_PER_CONSULTATION: 'Фиксированная сумма за консультацию',
   KPI_THRESHOLD_BONUS: 'Премия за достижение порога KPI',
+  // Доработка 12.08.2026. Считается по ТИПАМ документов (банк, медсправка,
+  // судимость…), впервые появившимся у студентов менеджера за период —
+  // повторные файлы того же типа бонус не дублируют (kpi.service.ts).
+  FIXED_PER_DOCUMENT: 'Фиксированная сумма за документ студента',
 };
 
 export type KpiMetric =

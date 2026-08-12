@@ -137,6 +137,10 @@ function computeSimpleLine(rule: BonusRuleConfig, m: ManagerPeriodMetrics, close
       if (!rule.amount) return null;
       return { raw: rule.amount.times(m.consultationsHeld), base: `${m.consultationsHeld} × ${rule.amount.toFixed(2)} TJS` };
     }
+    case 'FIXED_PER_DOCUMENT': {
+      if (!rule.amount) return null;
+      return { raw: rule.amount.times(m.documentTypesAdded), base: `${m.documentTypesAdded} × ${rule.amount.toFixed(2)} TJS` };
+    }
     default:
       return null;
   }
