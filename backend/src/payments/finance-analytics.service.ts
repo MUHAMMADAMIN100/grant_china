@@ -135,6 +135,15 @@ export class FinanceAnalyticsService {
           _count: true,
           orderBy: { method: 'asc' },
         }),
+        // Смешанные платежи (12.08.2026) в разбивке «наличные/безнал» делятся
+        // ПО СВОИМ ЧАСТЯМ (решение владельца): наличная часть — в кассу,
+        // безналичная — в банк. Отдельный агрегат по MIXED, суммы частей
+        // вливаются в строки CASH/CASHLESS ниже, третьей категории в отчёте нет.
+        this.prisma.payment.aggregate({
+          where: { ...approvedWhere, method: 'MIXED' },
+          _sum: { cashAmount: true, cashlessAmount: true },
+          _count: true,
+        }),
         this.prisma.payment.groupBy({
           by: ['createdById'],
           where: approvedWhere,
@@ -207,7 +216,7 @@ export class FinanceAnalyticsService {
       ]),
       this.payments.pendingCount(),
     ]);
-    const [totalAgg, byStageRows, byPurposeRows, byMethodRows, byManagerRows, monthlyRows, overduePlannedRows] =
+    const [totalAgg, byStageRows, byPurposeRows, byMethodRows, mixedAgg, byManagerRows, monthlyRows, overduePlannedRows] =
       transactionResults;
 
     const managerIds = byManagerRows.map((r) => r.createdById).filter((id): id is string => Boolean(id));
@@ -234,12 +243,35 @@ export class FinanceAnalyticsService {
         count: r._count,
         amount: money(r._sum?.amount),
       })),
-      byMethod: byMethodRows.map((r) => ({
-        method: r.method,
-        label: METHOD_LABEL[r.method],
-        count: r._count,
-        amount: money(r._sum?.amount),
-      })),
+      // Смешанные платежи растворяются в двух базовых строках: их наличная
+      // часть прибавляется к «Наличным», безналичная — к «Безналу», счётчик
+      // смешанного платежа попадает в обе строки (он реально коснулся и
+      // кассы, и банка). Сумма amount при этом не задваивается — берутся
+      // именно части. Строка MIXED в отчёт не выходит.
+      byMethod: (() => {
+        const mixedCount = Number(mixedAgg._count ?? 0);
+        const mixedCash = new Prisma.Decimal(mixedAgg._sum?.cashAmount ?? 0);
+        const mixedCashless = new Prisma.Decimal(mixedAgg._sum?.cashlessAmount ?? 0);
+        const base = new Map<string, { count: number; amount: Prisma.Decimal }>([
+          ['CASH', { count: 0, amount: new Prisma.Decimal(0) }],
+          ['CASHLESS', { count: 0, amount: new Prisma.Decimal(0) }],
+        ]);
+        for (const r of byMethodRows) {
+          if (r.method === 'MIXED') continue;
+          base.set(r.method, { count: Number(r._count), amount: new Prisma.Decimal(r._sum?.amount ?? 0) });
+        }
+        if (mixedCount > 0) {
+          const cash = base.get('CASH')!;
+          cash.count += mixedCount;
+          cash.amount = cash.amount.plus(mixedCash);
+          const cashless = base.get('CASHLESS')!;
+          cashless.count += mixedCount;
+          cashless.amount = cashless.amount.plus(mixedCashless);
+        }
+        return (['CASH', 'CASHLESS'] as const)
+          .map((m) => ({ method: m, label: METHOD_LABEL[m], count: base.get(m)!.count, amount: money(base.get(m)!.amount) }))
+          .filter((r) => r.count > 0);
+      })(),
       byManager: byManagerRows.map((r) => ({
         managerId: r.createdById,
         // Ищем БЕЗ фильтра deletedAt (см. managers выше) — уволенный сотрудник

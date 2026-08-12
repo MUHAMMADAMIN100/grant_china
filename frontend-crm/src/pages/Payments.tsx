@@ -5,6 +5,7 @@ import type { Payment, PaymentMethod, PaymentPurpose, PaymentStage, PaymentStatu
 import {
   PAYMENT_METHOD_LABEL,
   PAYMENT_PURPOSE_LABEL,
+  paymentMethodDisplay,
   PAYMENT_STAGE_LABEL,
   PAYMENT_STATUS_LABEL,
   SCHEDULE_PAYMENT_STAGES,
@@ -339,7 +340,7 @@ export default function Payments() {
                           <td><strong>{p.student?.fullName || '—'}</strong></td>
                           <td data-label="Этап">{PAYMENT_STAGE_LABEL[p.stage]}</td>
                           <td data-label="Назначение">{PAYMENT_PURPOSE_LABEL[p.purpose]}</td>
-                          <td data-label="Способ">{PAYMENT_METHOD_LABEL[p.method]}</td>
+                          <td data-label="Способ">{paymentMethodDisplay(p)}</td>
                           <td data-label="Сумма">{formatMoney(p.amount)}</td>
                           <td data-label="Дата">{new Date(p.paidAt).toLocaleDateString('ru-RU')}</td>
                           <td data-label="Статус"><PaymentStatusBadge status={p.status} /></td>
@@ -406,7 +407,7 @@ export default function Payments() {
                             <td><strong>{p.student?.fullName || '—'}</strong></td>
                             <td data-label="Этап">{PAYMENT_STAGE_LABEL[p.stage]}</td>
                             <td data-label="Назначение">{PAYMENT_PURPOSE_LABEL[p.purpose]}</td>
-                            <td data-label="Способ">{PAYMENT_METHOD_LABEL[p.method]}</td>
+                            <td data-label="Способ">{paymentMethodDisplay(p)}</td>
                             <td data-label="Сумма">{formatMoney(p.amount)}</td>
                             <td data-label="Дата поступления">{new Date(p.paidAt).toLocaleDateString('ru-RU')}</td>
                             <td data-label="Подано">{p.submittedAt ? new Date(p.submittedAt).toLocaleString('ru-RU') : '—'}</td>

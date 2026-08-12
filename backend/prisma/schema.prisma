@@ -663,6 +663,11 @@ enum PaymentPurpose {
 enum PaymentMethod {
   CASH
   CASHLESS
+  // Смешанная оплата (12.08.2026): часть наличными, часть безналом — одним
+  // платежом. Разбивка хранится в Payment.cashAmount/cashlessAmount, их сумма
+  // обязана равняться amount (инвариант держит payment-rules.ts). Добавление
+  // значения в конец enum безопасно для `prisma db push`.
+  MIXED
 }
 
 // Double Check (ТЗ 1.1): деньги считаются полученными ТОЛЬКО в APPROVED.
@@ -728,6 +733,14 @@ model Payment {
   // Деньги — только Decimal. Float даёт 0.1+0.2=0.30000000000000004 и
   // расхождение в сводке «оплачено/осталось». 12,2 = до 9 999 999 999.99 TJS.
   amount   Decimal @db.Decimal(12, 2)
+  // Разбивка СМЕШАННОЙ оплаты (method = MIXED): сколько наличными и сколько
+  // безналом. Заполнены ТОЛЬКО у MIXED (у остальных NULL — инвариант держит
+  // payment-rules.normalizeMethodParts), cashAmount + cashlessAmount = amount.
+  // Аналитика «наличные/безнал» делит смешанные платежи по этим частям —
+  // сверка с кассой и банковской выпиской остаётся точной (решение владельца
+  // 12.08.2026). Обе колонки nullable — ADD COLUMN NULL, безопасно для db push.
+  cashAmount     Decimal? @db.Decimal(12, 2)
+  cashlessAmount Decimal? @db.Decimal(12, 2)
   // Валюта проекта одна (сомони). Поле оставлено, чтобы не переделывать схему,
   // если когда-нибудь появится вторая; UI селектор валюты НЕ показывает.
   currency String  @default("TJS")

@@ -516,7 +516,7 @@ export type PaymentPurpose =
   | 'CONSULTATION'
   | 'OTHER';
 
-export type PaymentMethod = 'CASH' | 'CASHLESS';
+export type PaymentMethod = 'CASH' | 'CASHLESS' | 'MIXED';
 
 /** Double Check (ТЗ 1.1): деньги считаются полученными ТОЛЬКО в APPROVED. */
 export type PaymentStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'VOID';
@@ -655,7 +655,23 @@ export const DEFAULT_PAYMENT_PURPOSE: Record<PaymentStage, PaymentPurpose> = {
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   CASH: 'Наличные',
   CASHLESS: 'Безналичный расчёт',
+  MIXED: 'Смешанная (нал + безнал)',
 };
+
+/**
+ * Подпись способа оплаты С РАЗБИВКОЙ для смешанных: «Смешанная: 3 000 нал +
+ * 7 000 безнал». Для обычных способов — просто название. Единая точка, чтобы
+ * список платежей, карточка студента и очередь одобрения показывали разбивку
+ * одинаково.
+ */
+export const paymentMethodDisplay = (p: {
+  method: PaymentMethod;
+  cashAmount?: string | null;
+  cashlessAmount?: string | null;
+}): string =>
+  p.method === 'MIXED' && p.cashAmount && p.cashlessAmount
+    ? `Смешанная: ${p.cashAmount} нал + ${p.cashlessAmount} безнал`
+    : PAYMENT_METHOD_LABEL[p.method];
 
 export const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
   DRAFT: 'Черновик',
@@ -719,6 +735,9 @@ export interface Payment {
   method: PaymentMethod;
   /** Decimal сериализован строкой на бэкенде ("12345.67") — арифметику на фронте не делать. */
   amount: string;
+  /** Разбивка смешанной оплаты (method=MIXED): cashAmount + cashlessAmount = amount. У остальных null. */
+  cashAmount?: string | null;
+  cashlessAmount?: string | null;
   currency: string;
   paidAt: string;
   dueDate: string | null;

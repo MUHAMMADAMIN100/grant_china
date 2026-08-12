@@ -41,6 +41,22 @@ export class UpdatePaymentDto {
   @Matches(AMOUNT_RE, { message: 'Сумма должна быть положительным числом (до двух знаков после точки)' })
   amount?: string;
 
+  /**
+   * Разбивка смешанной оплаты. null осмыслен («очистить разбивку» при смене
+   * способа с MIXED на обычный), поэтому @IsOptional, а не @ValidateIf —
+   * инвариант целиком проверяет payment-rules.normalizeMethodParts по
+   * ИТОГОВОМУ состоянию платежа (после мёржа с существующими значениями).
+   */
+  @IsOptional()
+  @ValidateIf((o) => o.cashAmount !== undefined && o.cashAmount !== null)
+  @Matches(AMOUNT_RE, { message: 'Наличная часть должна быть положительным числом (до двух знаков после точки)' })
+  cashAmount?: string | null;
+
+  @IsOptional()
+  @ValidateIf((o) => o.cashlessAmount !== undefined && o.cashlessAmount !== null)
+  @Matches(AMOUNT_RE, { message: 'Безналичная часть должна быть положительным числом (до двух знаков после точки)' })
+  cashlessAmount?: string | null;
+
   @ValidateIf((o) => o.paidAt !== undefined)
   @IsString()
   paidAt?: string;

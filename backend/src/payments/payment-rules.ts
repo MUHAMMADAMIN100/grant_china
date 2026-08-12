@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { PaymentKind, PaymentMethod, PaymentPurpose, PaymentStage, PaymentStatus, Region } from '@prisma/client';
+import { PaymentKind, PaymentMethod, PaymentPurpose, PaymentStage, PaymentStatus, Prisma, Region } from '@prisma/client';
 
 /**
  * Порядок этапов в UI и отчётах. НЕ порядок объявления enum PaymentStage —
@@ -201,7 +201,53 @@ export function purposesForActor(role: string, region: Region | string | null | 
 export const METHOD_LABEL: Record<PaymentMethod, string> = {
   CASH: 'Наличные',
   CASHLESS: 'Безналичный расчёт',
+  MIXED: 'Смешанная (нал + безнал)',
 };
+
+/**
+ * Смешанная оплата (12.08.2026) — инвариант разбивки сумм.
+ *
+ * method = MIXED: обе части обязательны, каждая больше нуля, сумма частей
+ * равна amount копейка в копейку. «Смешанная» с нулевой частью — это обычная
+ * оплата одним способом, и оформлять её как смешанную значит портить
+ * разбивку «касса/банк» в аналитике.
+ *
+ * Любой другой method: частей быть не должно. Пришли — это ошибка клиента
+ * (например, сменили способ с MIXED, а разбивку прислали старую); молча
+ * отбросить = потерять данные без предупреждения, поэтому 400.
+ *
+ * Возвращает то, что нужно записать в БД: у MIXED — обе части, у остальных
+ * NULL в обеих колонках (в т.ч. затирание старой разбивки при смене способа).
+ */
+export function normalizeMethodParts(
+  method: PaymentMethod,
+  amount: Prisma.Decimal,
+  cashAmount: string | null | undefined,
+  cashlessAmount: string | null | undefined,
+): { cashAmount: Prisma.Decimal | null; cashlessAmount: Prisma.Decimal | null } {
+  if (method !== 'MIXED') {
+    if (cashAmount != null || cashlessAmount != null) {
+      throw new BadRequestException('Разбивка «наличные/безнал» указывается только при смешанной оплате');
+    }
+    return { cashAmount: null, cashlessAmount: null };
+  }
+  if (cashAmount == null || cashlessAmount == null) {
+    throw new BadRequestException('Для смешанной оплаты укажите обе части: сколько наличными и сколько безналом');
+  }
+  const cash = new Prisma.Decimal(cashAmount);
+  const cashless = new Prisma.Decimal(cashlessAmount);
+  if (cash.lessThanOrEqualTo(0) || cashless.lessThanOrEqualTo(0)) {
+    throw new BadRequestException(
+      'Обе части смешанной оплаты должны быть больше нуля — иначе это обычная оплата одним способом',
+    );
+  }
+  if (!cash.plus(cashless).equals(amount)) {
+    throw new BadRequestException(
+      `Части смешанной оплаты (${cash.toFixed(2)} + ${cashless.toFixed(2)} = ${cash.plus(cashless).toFixed(2)}) не сходятся с общей суммой ${amount.toFixed(2)}`,
+    );
+  }
+  return { cashAmount: cash, cashlessAmount: cashless };
+}
 
 /**
  * purpose ↔ stage: платежи по графику и расходы на месте — разные блоки, и

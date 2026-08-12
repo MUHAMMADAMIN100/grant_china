@@ -80,6 +80,9 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
   const [purpose, setPurpose] = useState<PaymentPurpose>(initialPurpose);
   const [method, setMethod] = useState<PaymentMethod>(payment?.method ?? 'CASH');
   const [amount, setAmount] = useState(payment?.amount ?? '');
+  // Смешанная оплата: разбивка «сколько наличными / сколько безналом».
+  const [cashPart, setCashPart] = useState(payment?.cashAmount ?? '');
+  const [cashlessPart, setCashlessPart] = useState(payment?.cashlessAmount ?? '');
   const [paidAt, setPaidAt] = useState(payment ? payment.paidAt.slice(0, 10) : todayStr());
   const [reference, setReference] = useState(payment?.reference ?? '');
   const [comment, setComment] = useState(payment?.comment ?? '');
@@ -93,6 +96,33 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
   const amountValid = PAYMENT_AMOUNT_RE.test(amount) && parseFloat(amount) > 0;
+
+  /**
+   * Разбивка смешанной оплаты. Считаем в КОПЕЙКАХ (целые числа), а не
+   * float-суммах: 0.1 + 0.2 !== 0.3, и честная разбивка вроде 33.33 + 66.67
+   * из-за плавающей точки случайно проходила бы или падала. Бэкенд сверяет
+   * Decimal'ами — фронт обязан давать тот же вердикт.
+   */
+  const toCents = (v: string) => Math.round(parseFloat(v) * 100);
+  const cashValid = PAYMENT_AMOUNT_RE.test(cashPart) && parseFloat(cashPart) > 0;
+  const cashlessValid = PAYMENT_AMOUNT_RE.test(cashlessPart) && parseFloat(cashlessPart) > 0;
+  const partsMatch =
+    cashValid && cashlessValid && amountValid && toCents(cashPart) + toCents(cashlessPart) === toCents(amount);
+  const mixedValid = method !== 'MIXED' || partsMatch;
+
+  /**
+   * Удобство: ввёл общую сумму и наличную часть — безналичная досчитывается
+   * сама (и наоборот). Только подстановка значения в пустое/пересчёт другого
+   * поля; вручную введённое пользователем значение не перетирается без нужды.
+   */
+  const complement = (fromCash: boolean, raw: string) => {
+    if (!amountValid || !PAYMENT_AMOUNT_RE.test(raw)) return;
+    const rest = toCents(amount) - toCents(raw);
+    if (rest <= 0) return;
+    const restStr = (rest / 100).toFixed(2);
+    if (fromCash) setCashlessPart(restStr);
+    else setCashPart(restStr);
+  };
   const requiresReceiptAlways = RECEIPT_REQUIRED_PURPOSES.includes(purpose);
   const hasReceipt = isEdit ? receipts.length > 0 : files.length > 0;
 
@@ -112,6 +142,7 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
 
   const doCreate = async (submit: boolean) => {
     if (!amountValid) { setTouched(true); toast('Введите корректную сумму', 'error'); return; }
+    if (!mixedValid) { setTouched(true); toast('Части смешанной оплаты должны сходиться с общей суммой', 'error'); return; }
     if (submit && submitDisabled) { toast('Прикрепите чек перед отправкой на одобрение', 'error'); return; }
     if (!submit && draftDisabled) { toast(receiptRequiredCaption, 'error'); return; }
     setSaving(submit ? 'submit' : 'draft');
@@ -137,6 +168,8 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
         purpose,
         method,
         amount,
+        cashAmount: method === 'MIXED' ? cashPart : undefined,
+        cashlessAmount: method === 'MIXED' ? cashlessPart : undefined,
         paidAt,
         reference: reference.trim() || undefined,
         comment: comment.trim() || undefined,
@@ -157,6 +190,7 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
   const doSaveEdit = async (thenSubmit: boolean) => {
     if (!payment) return;
     if (!amountValid) { setTouched(true); toast('Введите корректную сумму', 'error'); return; }
+    if (!mixedValid) { setTouched(true); toast('Части смешанной оплаты должны сходиться с общей суммой', 'error'); return; }
     // Защита в глубину: та же проверка, что и на создании (doCreate) — без
     // неё смена назначения на «Проживание»/«Питание» в уже существующем
     // черновике проходила бы мимо блокировки кнопки (проблема 5 ревью).
@@ -168,6 +202,10 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
         purpose,
         method,
         amount,
+        // Смена способа со смешанного на обычный обязана затереть старую
+        // разбивку — иначе бэкенд честно откажет «части только у смешанной».
+        cashAmount: method === 'MIXED' ? cashPart : null,
+        cashlessAmount: method === 'MIXED' ? cashlessPart : null,
         paidAt,
         reference: reference.trim(),
         comment: comment.trim(),
@@ -273,7 +311,7 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
           <div className="form-group">
             <label>Способ оплаты *</label>
             <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy}>
-              {(['CASH', 'CASHLESS'] as PaymentMethod[]).map((m) => (
+              {(['CASH', 'CASHLESS', 'MIXED'] as PaymentMethod[]).map((m) => (
                 <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m]}</option>
               ))}
             </select>
@@ -303,7 +341,50 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
           </div>
         </div>
 
-        {method === 'CASHLESS' && (
+        {method === 'MIXED' && (
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label>Из них наличными (сомони) *</label>
+              <input
+                value={cashPart}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^\d.]/g, '');
+                  setCashPart(v);
+                  complement(true, v);
+                }}
+                onBlur={() => setTouched(true)}
+                placeholder="0.00"
+                inputMode="decimal"
+                className={touched && method === 'MIXED' && !cashValid ? 'input-error' : ''}
+                disabled={busy}
+              />
+            </div>
+            <div className="form-group">
+              <label>Из них безналом (сомони) *</label>
+              <input
+                value={cashlessPart}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^\d.]/g, '');
+                  setCashlessPart(v);
+                  complement(false, v);
+                }}
+                onBlur={() => setTouched(true)}
+                placeholder="0.00"
+                inputMode="decimal"
+                className={touched && method === 'MIXED' && !cashlessValid ? 'input-error' : ''}
+                disabled={busy}
+              />
+            </div>
+          </div>
+        )}
+        {method === 'MIXED' && touched && !mixedValid && (
+          <div className="form-error-text" style={{ marginTop: -6, marginBottom: 8 }}>
+            Обе части должны быть больше нуля и в сумме давать общую сумму платежа
+          </div>
+        )}
+
+        {/* Квитанция нужна и безналу, и безналичной части смешанной оплаты. */}
+        {(method === 'CASHLESS' || method === 'MIXED') && (
           <div className="form-group">
             <label>Номер квитанции / транзакции</label>
             <input

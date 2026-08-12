@@ -4,6 +4,7 @@ import type { Payment, PaymentStage, PaymentStageSummary, PaymentSummary } from 
 import {
   PAYMENT_METHOD_LABEL,
   PAYMENT_PURPOSE_LABEL,
+  paymentMethodDisplay,
   canManageFinance,
   canWriteFinance,
   isFounder,
@@ -270,7 +271,7 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
           <PaymentStatusBadge status={p.status} />
           <span className="payment-row-amount">{formatMoney(p.amount)}</span>
           <span className="payment-row-purpose">{PAYMENT_PURPOSE_LABEL[p.purpose]}</span>
-          <span className="payment-row-method">{PAYMENT_METHOD_LABEL[p.method]}</span>
+          <span className="payment-row-method">{paymentMethodDisplay(p)}</span>
           <span className="payment-row-date">{new Date(p.paidAt).toLocaleDateString('ru-RU')}</span>
         </div>
         <div className="payment-row-meta">

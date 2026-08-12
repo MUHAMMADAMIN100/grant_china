@@ -44,6 +44,7 @@ import {
   assertPurposeAllowedForActor,
   assertPurposeSelectable,
   isPurposeAllowedForStage,
+  normalizeMethodParts,
   selfApprovalBlock,
 } from './payment-rules';
 
@@ -80,6 +81,8 @@ const PAYMENT_SELECT = {
   purpose: true,
   method: true,
   amount: true,
+  cashAmount: true,
+  cashlessAmount: true,
   currency: true,
   paidAt: true,
   dueDate: true,
@@ -159,6 +162,10 @@ export class PaymentsService {
     return {
       ...payment,
       amount: this.money(payment.amount),
+      // Разбивка смешанной оплаты. null у обычных способов — фронт по нему
+      // понимает, что показывать нечего (money() превратил бы null в '0.00').
+      cashAmount: payment.cashAmount == null ? null : this.money(payment.cashAmount),
+      cashlessAmount: payment.cashlessAmount == null ? null : this.money(payment.cashlessAmount),
     };
   }
 
@@ -796,6 +803,10 @@ export class PaymentsService {
     }
 
     const amount = this.parseAmount(dto.amount);
+    // Смешанная оплата: разбивка «наличные/безнал» проверяется и нормализуется
+    // единым правилом (у не-MIXED частей быть не должно, у MIXED — сходиться
+    // с amount копейка в копейку).
+    const parts = normalizeMethodParts(dto.method, amount, dto.cashAmount, dto.cashlessAmount);
     // На СОЗДАНИИ окно проверяется всегда: новую запись задним числом заводят
     // только вручную, и подменить ею закрытый расчётный период нельзя.
     // Фолбэк new Date() в границы укладывается заведомо — проверять его незачем.
@@ -827,6 +838,8 @@ export class PaymentsService {
           purpose: dto.purpose,
           method: dto.method,
           amount,
+          cashAmount: parts.cashAmount,
+          cashlessAmount: parts.cashlessAmount,
           currency: 'TJS',
           paidAt,
           dueDate,
@@ -965,6 +978,23 @@ export class PaymentsService {
     if (dto.purpose !== undefined) data.purpose = dto.purpose;
     if (dto.method !== undefined) data.method = dto.method;
     if (dto.amount !== undefined) data.amount = this.parseAmount(dto.amount);
+
+    // Смешанная оплата: инвариант разбивки проверяется по ИТОГОВОМУ состоянию
+    // платежа (после мёржа правки с существующими значениями) — правка одной
+    // лишь суммы у MIXED без пересланной разбивки обязана упасть с понятной
+    // ошибкой, а смена способа с MIXED на обычный — затереть старую разбивку.
+    // Обе колонки пишутся всегда: частичная запись оставила бы «хвост» от
+    // прежнего способа.
+    {
+      const nextMethod = dto.method ?? payment.method;
+      const nextAmount = dto.amount !== undefined ? this.parseAmount(dto.amount) : payment.amount;
+      const nextCash = dto.cashAmount !== undefined ? dto.cashAmount : payment.cashAmount?.toFixed(2) ?? null;
+      const nextCashless =
+        dto.cashlessAmount !== undefined ? dto.cashlessAmount : payment.cashlessAmount?.toFixed(2) ?? null;
+      const parts = normalizeMethodParts(nextMethod, nextAmount, nextCash, nextCashless);
+      data.cashAmount = parts.cashAmount;
+      data.cashlessAmount = parts.cashlessAmount;
+    }
     if (dto.paidAt !== undefined) {
       const nextPaidAt = this.parseDate(dto.paidAt, 'Некорректная дата поступления');
       // Форма редактирования шлёт paidAt ВСЕГДА, даже если менеджер дату не

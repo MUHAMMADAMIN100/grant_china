@@ -87,6 +87,9 @@ export interface CreatePaymentPayload {
   purpose: PaymentPurpose;
   method: PaymentMethod;
   amount: string;
+  /** Разбивка смешанной оплаты (method=MIXED): обязательны обе, сумма = amount. */
+  cashAmount?: string;
+  cashlessAmount?: string;
   paidAt?: string;
   reference?: string;
   comment?: string;
@@ -110,6 +113,8 @@ export async function createPayment(payload: CreatePaymentPayload) {
   fd.append('purpose', payload.purpose);
   fd.append('method', payload.method);
   fd.append('amount', payload.amount);
+  if (payload.cashAmount) fd.append('cashAmount', payload.cashAmount);
+  if (payload.cashlessAmount) fd.append('cashlessAmount', payload.cashlessAmount);
   if (payload.paidAt) fd.append('paidAt', payload.paidAt);
   if (payload.reference) fd.append('reference', payload.reference);
   if (payload.comment) fd.append('comment', payload.comment);
@@ -131,6 +136,9 @@ export interface UpdatePaymentPayload {
   purpose?: PaymentPurpose;
   method?: PaymentMethod;
   amount?: string;
+  /** null — очистить разбивку (смена способа со смешанного на обычный). */
+  cashAmount?: string | null;
+  cashlessAmount?: string | null;
   paidAt?: string;
   reference?: string;
   comment?: string;

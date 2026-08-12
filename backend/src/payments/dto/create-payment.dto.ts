@@ -22,6 +22,20 @@ export class CreatePaymentDto {
   @Matches(AMOUNT_RE, { message: 'Сумма должна быть положительным числом (до двух знаков после точки)' })
   amount: string;
 
+  /**
+   * Смешанная оплата (method = MIXED): сколько из общей суммы наличными и
+   * сколько безналом. Инвариант «обе > 0, сумма частей = amount, у остальных
+   * способов частей нет» держит payment-rules.normalizeMethodParts —
+   * DTO проверяет только формат числа.
+   */
+  @IsOptional()
+  @Matches(AMOUNT_RE, { message: 'Наличная часть должна быть положительным числом (до двух знаков после точки)' })
+  cashAmount?: string;
+
+  @IsOptional()
+  @Matches(AMOUNT_RE, { message: 'Безналичная часть должна быть положительным числом (до двух знаков после точки)' })
+  cashlessAmount?: string;
+
   /** Дата фактического поступления денег. Если не передана — берётся текущий момент. */
   @IsOptional()
   @IsString()
