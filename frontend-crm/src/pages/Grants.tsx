@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   GRANT_INTAKE_LABEL,
   GRANT_STATUS_BADGE,
@@ -277,7 +277,7 @@ export default function Grants() {
             )}
           </div>
 
-          <AnimatePresence mode="wait">
+          <>
             {loading ? (
               <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 Загрузка...
@@ -372,7 +372,7 @@ export default function Grants() {
                 </table>
               </motion.div>
             )}
-          </AnimatePresence>
+          </>
 
           {!loading && (
             <Pagination page={page} total={total} pageSize={PAGE_SIZE} onChange={(p) => setFilter('page', String(p))} />

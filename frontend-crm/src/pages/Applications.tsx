@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   applicationTabCounts,
   archiveApplication,
@@ -447,7 +447,7 @@ export default function Applications() {
 
         {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 
-        <AnimatePresence mode="wait">
+        <>
           {loading ? (
             <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               Загрузка...
@@ -566,7 +566,7 @@ export default function Applications() {
               </table>
             </motion.div>
           )}
-        </AnimatePresence>
+        </>
 
         {!loading && (
           <Pagination

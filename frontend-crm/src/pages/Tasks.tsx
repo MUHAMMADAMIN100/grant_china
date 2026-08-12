@@ -419,7 +419,7 @@ export default function Tasks() {
           )}
         </AnimatePresence>
 
-        <AnimatePresence mode="wait">
+        <>
           {loading ? (
             <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               Загрузка...
@@ -560,7 +560,7 @@ export default function Tasks() {
               })}
             </motion.div>
           )}
-        </AnimatePresence>
+        </>
       </div>
     </motion.div>
   );

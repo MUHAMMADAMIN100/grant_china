@@ -363,7 +363,7 @@ export default function Programs() {
 
         {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 
-        <AnimatePresence mode="wait">
+        <>
           {loading ? (
             <motion.div key="l" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               Загрузка...
@@ -434,7 +434,7 @@ export default function Programs() {
               ))}
             </motion.div>
           )}
-        </AnimatePresence>
+        </>
       </div>
 
       {/* Модалка редактирования */}

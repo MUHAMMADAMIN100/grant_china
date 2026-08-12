@@ -1,5 +1,5 @@
 import { Outlet, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import NotificationBell from './NotificationBell';
 import AiAssistant from './AiAssistant';
@@ -60,34 +60,42 @@ export default function Layout() {
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.3 }}
         >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={title}
-              className="topbar-title"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {title}
-            </motion.div>
-          </AnimatePresence>
+          {/* БЕЗ AnimatePresence mode="wait" — НАМЕРЕННО (баг 12.08.2026).
+              Прежняя схема показывала новый заголовок только после того, как
+              старый доиграет анимацию ухода. Если анимация прерывалась —
+              быстрые клики по меню, свёрнутая вкладка, планшет в фоне (rAF
+              приостановлен и exit не завершается никогда) — очередь ждала
+              вечно, и в шапке на ВСЕХ разделах застревало чужое название
+              («Договоры» на Билетах и Студентах). Заголовок обязан быть
+              синхронен с адресом строки браузера в ту же отрисовку; анимация
+              допустима только входная — она не является условием показа. */}
+          <motion.div
+            key={title}
+            className="topbar-title"
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {title}
+          </motion.div>
           <div className="topbar-actions">
             <NotificationBell />
           </div>
         </motion.div>
         <div className="content">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={loc.pathname}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          {/* Тот же отказ от AnimatePresence mode="wait", что у заголовка
+              выше, и по той же причине: здесь зависший exit оставил бы на
+              экране ЦЕЛУЮ прежнюю страницу. Смена раздела обязана показывать
+              новый раздел немедленно; входная анимация — украшение, а не
+              условие показа. */}
+          <motion.div
+            key={loc.pathname}
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <Outlet />
+          </motion.div>
         </div>
       </div>
       {/* ТЗ 6.1 и 6.2 — живут в Layout, а не на конкретной странице: помощник

@@ -488,7 +488,7 @@ export default function Tickets() {
             </select>
           </div>
 
-          <AnimatePresence mode="wait">
+          <>
             {loading ? (
               <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 Загрузка...
@@ -620,7 +620,7 @@ export default function Tickets() {
                 </table>
               </motion.div>
             )}
-          </AnimatePresence>
+          </>
 
           {!loading && (
             <Pagination page={page} total={total} pageSize={PAGE_SIZE} onChange={(p) => setFilter('page', String(p))} />
