@@ -6,7 +6,7 @@ import {
   PAYMENT_PURPOSE_LABEL,
   paymentMethodDisplay,
   canManageFinance,
-  canWriteFinance,
+  canWritePayments,
   isFounder,
   selfApprovalBlock,
 } from '../api/types';
@@ -65,13 +65,13 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
 
   const isFdr = isFounder(me?.role);
   /**
-   * ТЗ v3 раздел 4, критерий приёмки №4: «Администратор имеет доступ к финансам
-   * СТРОГО в режиме Read-Only». Все методы записи по платежам на бэкенде теперь
-   * помечены @Roles(FOUNDER, EMPLOYEE) — Администратор получает на них 403.
-   * Поэтому кнопки этих действий ему не показываем вовсе: disabled-кнопка без
-   * объяснения читается как поломка интерфейса (правило проекта).
+   * 12.08.2026 (решение владельца): Администратор ВНОСИТ платежи по любому
+   * студенту — canWritePayments (FOUNDER, ADMIN, EMPLOYEE), зеркало бэкенда.
+   * Прежний строгий read-only из ТЗ v3 в части платежей снят. Одобрение,
+   * отклонение, аннулирование и график — по-прежнему только Основатель
+   * (isFdr/canManageSchedule ниже).
    */
-  const canWrite = canWriteFinance(me?.role);
+  const canWrite = canWritePayments(me?.role);
   /**
    * График платежей (PUT /payments/schedule) сузился до @Roles(FOUNDER):
    * плановая сумма и срок этапа — предмет договора со студентом, менять их
@@ -79,9 +79,9 @@ export default function PaymentsSection({ studentId, canEdit }: Props) {
    */
   const canManageSchedule = canManageFinance(me?.role);
   /**
-   * Внести платёж можно, только если верно и «студент мой», и «роль пишет в
-   * финансы». Разделение важно именно для Администратора: canEdit у него
-   * истинно по всем студентам, а права записи нет.
+   * Внести платёж = «студент доступен» И «роль пишет в платежи». У
+   * Администратора canEdit истинно по всем студентам, и с 12.08.2026 запись
+   * в платежи ему открыта — кнопка «Внести оплату» у него есть везде.
    */
   const canAddPayment = canEdit && canWrite;
 

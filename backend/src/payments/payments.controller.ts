@@ -311,7 +311,7 @@ export class PaymentsController {
    * receiptUploadOptions.
    */
   @Post()
-  @Roles(Role.FOUNDER, Role.EMPLOYEE)
+  @Roles(Role.FOUNDER, Role.ADMIN, Role.EMPLOYEE)
   @UseInterceptors(AnyFilesInterceptor(receiptUploadOptions))
   create(
     @UploadedFiles() files: Express.Multer.File[] | undefined,
@@ -322,19 +322,19 @@ export class PaymentsController {
   }
 
   @Patch(':id')
-  @Roles(Role.FOUNDER, Role.EMPLOYEE)
+  @Roles(Role.FOUNDER, Role.ADMIN, Role.EMPLOYEE)
   update(@Param('id') id: string, @Body() dto: UpdatePaymentDto, @CurrentUser() user: any) {
     return this.payments.update(id, dto, user);
   }
 
   @Post(':id/submit')
-  @Roles(Role.FOUNDER, Role.EMPLOYEE)
+  @Roles(Role.FOUNDER, Role.ADMIN, Role.EMPLOYEE)
   submit(@Param('id') id: string, @CurrentUser() user: any) {
     return this.payments.submit(id, user);
   }
 
   @Post(':id/recall')
-  @Roles(Role.FOUNDER, Role.EMPLOYEE)
+  @Roles(Role.FOUNDER, Role.ADMIN, Role.EMPLOYEE)
   recall(@Param('id') id: string, @CurrentUser() user: any) {
     return this.payments.recall(id, user);
   }
@@ -358,14 +358,14 @@ export class PaymentsController {
   }
 
   @Delete(':id')
-  @Roles(Role.FOUNDER, Role.EMPLOYEE)
+  @Roles(Role.FOUNDER, Role.ADMIN, Role.EMPLOYEE)
   remove(@Param('id') id: string, @CurrentUser() user: any) {
     return this.payments.remove(id, user);
   }
 
   /** Догрузка чеков к существующему платежу — тоже пачкой (ТЗ v3 раздел 2). Возвращает МАССИВ созданных документов. */
   @Post(':id/receipts')
-  @Roles(Role.FOUNDER, Role.EMPLOYEE)
+  @Roles(Role.FOUNDER, Role.ADMIN, Role.EMPLOYEE)
   @UseInterceptors(AnyFilesInterceptor(receiptUploadOptions))
   addReceipt(
     @Param('id') id: string,
@@ -376,7 +376,7 @@ export class PaymentsController {
   }
 
   @Delete('receipts/:docId')
-  @Roles(Role.FOUNDER, Role.EMPLOYEE)
+  @Roles(Role.FOUNDER, Role.ADMIN, Role.EMPLOYEE)
   removeReceipt(@Param('docId') docId: string, @CurrentUser() user: any) {
     return this.payments.removeReceipt(docId, user);
   }

@@ -951,10 +951,22 @@ export class StudentsService implements OnModuleInit {
   async remove(id: string, user: CurrentUser) {
     const existing = await this.findOne(id);
     this.ensureCanEdit(existing, user);
-    await this.prisma.student.update({
-      where: { id },
-      data: { deletedAt: new Date() },
-    });
+    const now = new Date();
+    // Заявки уходят ВМЕСТЕ со студентом (12.08.2026). Раньше удаление студента
+    // не трогало его заявки, и в разделе «Заявки» навсегда оставались сироты:
+    // строка с менеджером и статусом, ведущая на несуществующую карточку.
+    // Владелец увидел такие строки от тестовых студентов [QA] — но так же
+    // вела себя и обычная работа: менеджер удалял дубль карточки, а заявка
+    // дубля продолжала висеть в общем списке.
+    // Обе записи мягко и одной транзакцией: заявка без студента и студент без
+    // заявки — одинаково осиротевшие половины одной истории.
+    await this.prisma.$transaction([
+      this.prisma.student.update({ where: { id }, data: { deletedAt: now } }),
+      this.prisma.application.updateMany({
+        where: { studentId: id, deletedAt: null },
+        data: { deletedAt: now },
+      }),
+    ]);
     // БАГ 4 аудита: сбрасываем кэш StudentJwtGuard, иначе удалённый студент
     // ещё до 30 секунд может ходить в личный кабинет по старому токену.
     invalidateStudentCache(id);

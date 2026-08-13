@@ -90,6 +90,16 @@ export const canWriteFinance = (role?: Role | null): boolean =>
   role === 'FOUNDER' || role === 'EMPLOYEE';
 
 /**
+ * ПЛАТЕЖИ — отдельная ось (12.08.2026, зеркало canWritePayments из
+ * backend/src/common/roles.ts): Администратор ВНОСИТ оплаты по любому
+ * студенту — создать, править свой черновик, чеки, подать, отозвать.
+ * Одобрение/отклонение/аннулирование и график — по-прежнему только
+ * Основатель; договоры остаются на canWriteFinance и Администратору закрыты.
+ */
+export const canWritePayments = (role?: Role | null): boolean =>
+  role === 'FOUNDER' || role === 'ADMIN' || role === 'EMPLOYEE';
+
+/**
  * Полное управление финансовым контуром — только Основатель: одобрение
  * платежей, график платежей, подписание/расторжение договоров, утверждение
  * зарплатных листов, формулы бонусов. Зеркало canManageFinance() на бэкенде.
@@ -603,8 +613,10 @@ export const PAYMENT_PURPOSE_LABEL: Record<PaymentPurpose, string> = {
  */
 export const PAYMENT_PURPOSES_BY_REGION: Record<Region, PaymentPurpose[]> = {
   CN: ['PREPAYMENT', 'TUITION_ACCOMMODATION'],
-  TJ: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
-  BOTH: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+  // 12.08.2026: менеджерам ТJ/BOTH открыты все пять типов, включая
+  // «Оплату за регистрацию в университете» — зеркало backend payment-rules.ts.
+  TJ: ['PREPAYMENT', 'UNIVERSITY_REGISTRATION', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+  BOTH: ['PREPAYMENT', 'UNIVERSITY_REGISTRATION', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
 };
 
 /** Назначения, допустимые для расходов на месте (kind=ON_SITE) — зеркало backend payment-rules.ts. */
@@ -630,9 +642,9 @@ export function paymentPurposesFor(
 ): PaymentPurpose[] {
   const byStage =
     PAYMENT_STAGE_KIND[stage] === 'ON_SITE' ? ON_SITE_PAYMENT_PURPOSES : SCHEDULE_PAYMENT_PURPOSES;
-  if (isFounder(role)) return byStage;
-  // Администратор в финансах не пишет — форма ему и так недоступна, но список
-  // не должен обещать ему пунктов, которых он не проведёт.
+  // 12.08.2026: Администратор вносит платежи по любому студенту со всеми
+  // пятью типами — как Основатель (одобрение ему по-прежнему закрыто).
+  if (isFounder(role) || role === 'ADMIN') return byStage;
   if (role !== 'EMPLOYEE') return [];
   const byRegion = PAYMENT_PURPOSES_BY_REGION[region ?? 'BOTH'] ?? PAYMENT_PURPOSES_BY_REGION.BOTH;
   return byStage.filter((p) => byRegion.includes(p));

@@ -9,7 +9,7 @@ import {
   PAYMENT_STAGE_KIND,
   PAYMENT_STAGE_LABEL,
   RECEIPT_REQUIRED_PURPOSES,
-  canWriteFinance,
+  canWritePayments,
   paymentPurposesFor,
 } from '../api/types';
 import { addPaymentReceipts, createPayment, removePaymentReceipt, submitPayment, updatePayment } from '../api/payments';
@@ -44,24 +44,20 @@ export default function PaymentFormModal({ studentId, stage, payment, onClose, o
   const me = useAuth((s) => s.user);
   const { toast } = useUI();
   /**
-   * ТЗ v3 раздел 4, критерий приёмки №4 — Администратор в финансах read-only.
-   * Создание/правка платежа и работа с чеками на бэкенде теперь под
-   * @Roles(FOUNDER, EMPLOYEE), то есть для ADMIN это 403.
-   *
-   * Защита в глубину: путь сюда уже закрыт в PaymentsSection (кнопки «Внести
-   * оплату» и «Редактировать» ему не показываются), но форма — единственное
-   * место, где живут кнопки записи, и она не должна зависеть от того, кто её
-   * открыл. Кнопки именно скрываются, а не гасятся: disabled без объяснения
+   * 12.08.2026: запись в платежи открыта FOUNDER, ADMIN и EMPLOYEE
+   * (canWritePayments, зеркало @Roles на бэкенде). Защита в глубину
+   * сохраняется: форма сама проверяет право, а не полагается на то, кто её
+   * открыл. Кнопки скрываются, а не гасятся: disabled без объяснения
    * читается как поломка.
    */
-  const canWrite = canWriteFinance(me?.role);
+  const canWrite = canWritePayments(me?.role);
   const isEdit = !!payment;
   const kind = PAYMENT_STAGE_KIND[stage];
   /**
-   * ТЗ v3 раздел 3 — ровно пять типов оплат, и «Оплата за регистрацию в
-   * университете» доступна только Основателю (бэкенд отвечает 403 остальным,
-   * см. assertPurposeAllowedForRole). Список считается от роли, чтобы
-   * недоступный пункт не появлялся в выпадающем списке вовсе.
+   * Пять типов оплат по роли и региону (paymentPurposesFor — зеркало бэкенда).
+   * С 12.08.2026 менеджерам ТJ/BOTH и Администратору доступны все пять,
+   * включая «Оплату за регистрацию в университете»; у Китая — свой список.
+   * Недоступный пункт не появляется в выпадающем списке вовсе.
    */
   const purposeOptions = paymentPurposesFor(stage, me?.role, me?.region);
 

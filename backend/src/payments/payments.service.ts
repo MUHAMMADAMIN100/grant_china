@@ -21,7 +21,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ActivityService } from '../activity/activity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FileResolverService } from '../files/file-resolver.service';
-import { canManageFinance, canWriteFinance, isPrivileged } from '../common/roles';
+import { canManageFinance, canWritePayments, isPrivileged } from '../common/roles';
 import { assignedFieldsForRegion, assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { phoneContainsConditions } from '../common/phone';
 import { localDayStart } from '../scheduler/time';
@@ -351,9 +351,12 @@ export class PaymentsService {
    * сработала.
    */
   private assertCanWriteFinance(user: CurrentUser) {
-    if (!canWriteFinance(user.role)) {
+    // canWritePayments, а не canWriteFinance: с 12.08.2026 Администратор
+    // ВНОСИТ платежи (решение владельца, см. common/roles.ts). Договоры и
+    // график остаются ему закрыты — у них свои проверки.
+    if (!canWritePayments(user.role)) {
       throw new ForbiddenException(
-        'Администратор работает с финансами в режиме просмотра. Внести или изменить платёж может Основатель или назначенный менеджер студента.',
+        'Внести или изменить платёж может Основатель, Администратор или назначенный менеджер студента.',
       );
     }
   }
@@ -389,7 +392,12 @@ export class PaymentsService {
   private async loadPaymentForMutation(id: string, user: CurrentUser): Promise<PaymentRow> {
     this.assertCanWriteFinance(user);
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
-    const allowed = payment && (isPrivileged(user.role) || payment.createdById === user.id);
+    // canManageFinance (только FOUNDER), а НЕ isPrivileged: Администратор с
+    // 12.08.2026 вносит платежи, но чужие черновики править не должен — как и
+    // менеджер, он мутирует только СВОИ записи (createdById). Вернуть сюда
+    // isPrivileged значит снова открыть Администратору незаметную правку
+    // чужих данных — ровно то, что чинил аудит ТЗ v3.
+    const allowed = payment && (canManageFinance(user.role) || payment.createdById === user.id);
     // Проблема 9 аудита волны 1: раньше «платёж не найден» (404) и «платёж
     // чужой» (403) различались кодом ответа — менеджер мог перебором id
     // подтверждать существование чужих платежей. Весь остальной проект
@@ -1067,10 +1075,9 @@ export class PaymentsService {
    * canAccessStudentRecord() всегда true для ADMIN/FOUNDER.
    */
   private async loadPaymentForSubmit(id: string, user: CurrentUser): Promise<PaymentRow> {
-    // ТЗ v3 раздел 4: «подать на одобрение» — это изменение финансовых данных
-    // (платёж уходит в очередь к Основателю), Администратору оно закрыто.
-    // Комментарий выше про «менеджер внёс, администратор подал» описывал
-    // прежнее поведение и больше не действует.
+    // С 12.08.2026 Администратор подаёт СВОИ платежи (см. canWritePayments в
+    // common/roles.ts); чужие черновики — по-прежнему нет: «подать» значит
+    // «ручаюсь, что деньги пришли», поручиться за чужие цифры нельзя.
     this.assertCanWriteFinance(user);
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
     // Требуем ЯВНОГО назначения, а не canAccessStudentRecord(): та формула
@@ -1092,8 +1099,10 @@ export class PaymentsService {
           ? payment.student.managerId === user.id
           : payment.student.chinaManagerId === user.id,
       );
+    // canManageFinance, а не isPrivileged: Администратор подаёт только то,
+    // что сам внёс (createdById) — та же логика, что в loadPaymentForMutation.
     const allowed =
-      payment && (isPrivileged(user.role) || payment.createdById === user.id || isAssignedManager);
+      payment && (canManageFinance(user.role) || payment.createdById === user.id || isAssignedManager);
     // 404 в обоих случаях (Проблема 9 аудита волны 1) — не быть оракулом существования.
     if (!allowed) throw new NotFoundException('Платёж не найден');
     return payment;
@@ -1143,12 +1152,12 @@ export class PaymentsService {
   }
 
   async recall(id: string, user: CurrentUser) {
-    // ТЗ v3 раздел 4: отзыв снимает платёж из очереди на одобрение — изменение
-    // состояния денег, Администратору закрыто.
+    // С 12.08.2026 Администратор отзывает СВОИ поданные платежи; чужие —
+    // только Основатель (canManageFinance, в пару к loadPaymentForMutation).
     this.assertCanWriteFinance(user);
     const payment = await this.prisma.payment.findFirst({ where: { id, deletedAt: null }, select: PAYMENT_SELECT });
     if (!payment) throw new NotFoundException('Платёж не найден');
-    const allowed = isPrivileged(user.role) || payment.submittedById === user.id;
+    const allowed = canManageFinance(user.role) || payment.submittedById === user.id;
     // 404, а не 403: 403 подтвердил бы существование чужого платежа. Тот же
     // приём, что в loadPaymentForMutation и students.service.findOne.
     if (!allowed) throw new NotFoundException('Платёж не найден');

@@ -175,21 +175,25 @@ export function isSelectablePurpose(purpose: PaymentPurpose): boolean {
  */
 export const PURPOSES_BY_REGION: Record<Region, PaymentPurpose[]> = {
   CN: ['PREPAYMENT', 'TUITION_ACCOMMODATION'],
-  TJ: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
-  BOTH: ['PREPAYMENT', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+  // Решение владельца 12.08.2026: менеджерам Таджикистана открыты ВСЕ пять
+  // типов, включая «Оплату за регистрацию в университете» — прежнее правило
+  // «регистрацию проводит только Основатель» (ТЗ v3 раздел 3) снято для ТJ
+  // и BOTH. Для Китая список из ТЗ оставлен как был.
+  TJ: ['PREPAYMENT', 'UNIVERSITY_REGISTRATION', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
+  BOTH: ['PREPAYMENT', 'UNIVERSITY_REGISTRATION', 'DOCUMENTATION', 'FULL_PAYMENT', 'TUITION_ACCOMMODATION'],
 };
 
 /**
  * Типы, которые конкретный сотрудник может провести.
  *
  * FOUNDER — все пять («полное управление» в его строке таблицы).
+ * ADMIN — все пять (решение владельца 12.08.2026: Администратор вносит оплаты
+ *   по любому студенту как менеджер; прежний read-only из ТЗ v3 снят —
+ *   см. canWriteFinance в common/roles.ts). Одобрение ему по-прежнему закрыто.
  * EMPLOYEE — по региону.
- * ADMIN — пустой список: в финансовой части он только читает, и создать платёж
- *   любого типа ему всё равно не даст canWriteFinance. Возвращаем пустоту, а не
- *   набор «как у менеджера», чтобы список в интерфейсе не обещал ему лишнего.
  */
 export function purposesForActor(role: string, region: Region | string | null | undefined): PaymentPurpose[] {
-  if (role === 'FOUNDER') return SELECTABLE_PURPOSES;
+  if (role === 'FOUNDER' || role === 'ADMIN') return SELECTABLE_PURPOSES;
   if (role !== 'EMPLOYEE') return [];
   return PURPOSES_BY_REGION[(region as Region) ?? 'BOTH'] ?? PURPOSES_BY_REGION.BOTH;
 }

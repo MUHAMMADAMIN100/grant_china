@@ -300,8 +300,16 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 
-/* Tables */
-.table-wrap { overflow-x: hidden; width: 100%; }
+/* Tables.
+   Баг 12.08.2026 (скрины владельца с планшета): раньше стояло
+   overflow-x: hidden у обёртки + overflow-wrap: anywhere у ячеек. «anywhere»
+   уменьшает минимальную ширину колонки до одного символа, hidden запрещает
+   таблице прокручиваться — на узком экране колонки сжимались в кашу:
+   «12.08.2026» рассыпалась в столбик по цифре, «Языковые курсы» и заголовки
+   ломались посреди слова. Теперь узкая таблица прокручивается вбок ЦЕЛИКОМ
+   (прокрутка у обёртки — страница вбок не ездит), а перенос в ячейке
+   разрешён только обычный, по границам слов. */
+.table-wrap { overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch; }
 .table {
   width: 100%; border-collapse: collapse;
   table-layout: auto;
@@ -309,7 +317,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .table th, .table td {
   padding: 12px 14px; text-align: left;
   border-bottom: 1px solid var(--border);
-  word-wrap: break-word; overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .table th {
   font-size: 12px; font-weight: 600; color: var(--text-soft);
@@ -319,11 +327,13 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .table tbody tr { cursor: pointer; transition: background .1s; }
 .table tbody tr:hover { background: var(--bg); }
 
-/* Badges */
+/* Badges. white-space: nowrap — плашка («Нет» у визы, статусы) не имеет
+   права ломаться на «Не / т» в узкой колонке (второй скрин владельца 12.08). */
 .badge {
   display: inline-flex; align-items: center;
   padding: 3px 10px; border-radius: 6px;
   font-size: 12px; font-weight: 600;
+  white-space: nowrap;
 }
 .badge-info { background: var(--info-soft); color: var(--info); }
 .badge-warning { background: var(--warning-soft); color: var(--warning); }
