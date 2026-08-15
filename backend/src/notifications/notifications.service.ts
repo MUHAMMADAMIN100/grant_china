@@ -5,6 +5,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { notDeleted } from '../common/soft-delete';
 import { assignedFieldsForRegion, assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { isPrivileged } from '../common/roles';
+import { StaffBotService } from '../telegram/staff-bot.service';
 
 interface NotifyPayload {
   type: string;
@@ -15,7 +16,24 @@ interface NotifyPayload {
 
 @Injectable()
 export class NotificationsService {
-  constructor(private prisma: PrismaService, private realtime: RealtimeGateway) {}
+  constructor(
+    private prisma: PrismaService,
+    private realtime: RealtimeGateway,
+    private staffBot: StaffBotService,
+  ) {}
+
+  /**
+   * Дубль уведомления в Telegram (12.08.2026). Вызывается ПОСЛЕ рассылки по
+   * сокетам — с тем же списком получателей, который уже посчитан правами
+   * доступа выше. Расширять его здесь нельзя: разделение офисов и приватность
+   * студентов держатся именно на этом списке.
+   *
+   * Без await: доставка в мессенджер не должна ни задерживать ответ API, ни
+   * отменять операцию, если Telegram недоступен.
+   */
+  private pushTelegram(userIds: string[], data: NotifyPayload): void {
+    this.staffBot.pushToUsers(userIds, data.title, data.message).catch(() => undefined);
+  }
 
   /**
    * Уведомление об изменении студента. Получатели — ТОЛЬКО назначенные
@@ -66,6 +84,7 @@ export class NotificationsService {
     for (const u of activeRecipients) {
       this.realtime.emitUser(u.id, 'notification:new', { type: data.type });
     }
+    this.pushTelegram(activeRecipients.map((u) => u.id), data);
   }
 
   /**
@@ -123,6 +142,7 @@ export class NotificationsService {
     for (const u of activeRecipients) {
       this.realtime.emitUser(u.id, 'notification:new', { type: data.type });
     }
+    this.pushTelegram(activeRecipients.map((u) => u.id), data);
   }
 
   /**
@@ -150,6 +170,7 @@ export class NotificationsService {
     for (const u of users) {
       this.realtime.emitUser(u.id, 'notification:new', { type: data.type });
     }
+    this.pushTelegram(users.map((u) => u.id), data);
   }
 
   /**
@@ -180,6 +201,7 @@ export class NotificationsService {
     for (const u of founders) {
       this.realtime.emitUser(u.id, 'notification:new', { type: data.type });
     }
+    this.pushTelegram(founders.map((u) => u.id), data);
   }
 
   async notifyUser(userId: string, data: NotifyPayload) {
@@ -193,6 +215,7 @@ export class NotificationsService {
       },
     });
     this.realtime.emitUser(userId, 'notification:new', { id: notif.id, type: data.type });
+    this.pushTelegram([userId], data);
     return notif;
   }
 

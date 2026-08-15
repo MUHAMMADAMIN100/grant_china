@@ -144,7 +144,49 @@ model User {
   assignedConversations Conversation[]       @relation("ConversationAssignee")
   sentMessages          ChannelMessage[]     @relation("ChannelMessageAuthor")
 
+  // 12.08.2026 — привязка Telegram сотрудника. СВЯЗЬ, а не скаляр: см. правило
+  // абзацем выше — новый скаляр у User разъехался бы по всем findFirst без
+  // select (так когда-то утёк хэш пароля).
+  telegramLink TelegramLink? @relation("TelegramLinkUser")
+
   @@index([deletedAt])
+}
+
+/// Привязка сотрудника к чату Telegram-бота (уведомления о задачах,
+/// консультациях и т.п. приходят ему лично).
+///
+/// ОТДЕЛЬНАЯ ТАБЛИЦА, А НЕ ПОЛЯ У User — по правилу из модели User: любой
+/// новый скаляр там автоматически попадает в ответы API, где выборка идёт без
+/// явного select. chatId — идентификатор переписки в Telegram, по сути
+/// контакт сотрудника; ему в общем ответе делать нечего.
+model TelegramLink {
+  id String @id @default(uuid())
+
+  userId String @unique
+  // Cascade: уволили сотрудника физически — привязка не переживает его. При
+  // обычном soft-delete строка остаётся, но рассылка сама пропускает
+  // удалённых (см. notifications.service).
+  user   User   @relation("TelegramLinkUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Одноразовый код в deep-link'е `t.me/bot?start=<code>`. Уникален: по нему
+  /// бот находит, КОМУ принадлежит нажатый «Старт».
+  linkCode String @unique
+
+  /// id чата с ботом. null — код выдан, но сотрудник ещё не нажал «Старт».
+  /// String, а не BigInt: Telegram отдаёт числа за пределами int32, а хранить
+  /// их как строку проще, чем ловить переполнение при сериализации.
+  chatId String?
+
+  /// Имя в Telegram на момент привязки — чтобы в CRM было видно, ЧЕЙ аккаунт
+  /// привязан («@ivan» вместо голого числа).
+  username String?
+
+  linkedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([chatId])
 }
 
 // Заявка на обучение: создаётся через лендинг (POST /applications/public),

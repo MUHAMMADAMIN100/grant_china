@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConsultationsController } from './consultations.controller';
 import { ConsultationsService } from './consultations.service';
 import { TasksModule } from '../tasks/tasks.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   // PrismaService/ActivityService/RealtimeGateway — глобальные модули
@@ -9,7 +10,9 @@ import { TasksModule } from '../tasks/tasks.module';
   // TasksModule — ЕДИНСТВЕННАЯ зависимость раздела 3.2: ConsultationsService
   // создаёт/переносит/гасит автозадачи только через TasksService, без
   // прямого доступа к prisma.task (граница модуля, см. apiSurface проекта).
-  imports: [TasksModule],
+  // NotificationsModule — уведомление о новой консультации (12.08.2026):
+  // падает в колокольчик менеджеру и оттуда автоматически в его Telegram.
+  imports: [TasksModule, NotificationsModule],
   controllers: [ConsultationsController],
   providers: [ConsultationsService],
 })

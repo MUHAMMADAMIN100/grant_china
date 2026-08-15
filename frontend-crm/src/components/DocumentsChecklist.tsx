@@ -17,6 +17,9 @@ export const REQUIRED_DOCUMENTS: { type: string; label: string; hint?: string }[
   { type: 'PARENTS_PASSPORT', label: 'Паспорт родителей' },
   { type: 'DIPLOMA', label: 'Аттестат', hint: 'Или табель оценок + справка со школы' },
   { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
+  // 12.08.2026 — зеркало backend/src/common/documents.ts. Приглашение готовит
+  // университет, загружает менеджер; студент его скачивает для визы.
+  { type: 'INVITATION', label: 'Приглашение из университета', hint: 'Загружает менеджер — нужно для визы' },
 ];
 
 /**

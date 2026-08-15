@@ -22,6 +22,11 @@ export const REQUIRED_DOCUMENT_TYPES: DocumentTypeDef[] = [
   { type: 'PARENTS_PASSPORT', label: 'Паспорт родителей' },
   { type: 'DIPLOMA', label: 'Аттестат' },
   { type: 'RECOMMENDATION', label: 'Рекомендательное письмо' },
+  // 12.08.2026 — приглашение из университета. Загружает менеджер (студент его
+  // не готовит, а получает), но студенту оно ДОСТУПНО на скачивание: с этим
+  // документом он идёт в посольство за визой. Поэтому в
+  // STUDENT_RESTRICTED_DOC_TYPES (common/access.ts) НЕ добавлено.
+  { type: 'INVITATION', label: 'Приглашение из университета' },
 ];
 
 /**

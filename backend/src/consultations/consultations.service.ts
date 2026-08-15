@@ -10,6 +10,7 @@ import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { ActivityService } from '../activity/activity.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
@@ -61,6 +62,7 @@ export class ConsultationsService {
     private tasks: TasksService,
     private activity: ActivityService,
     private realtime: RealtimeGateway,
+    private notifications: NotificationsService,
   ) {}
 
   private parseDate(raw: string, message: string): Date {
@@ -291,6 +293,20 @@ export class ConsultationsService {
     // сразу со ссылкой на существующую заявку считается касанием.
     if (linkedApplication) {
       await claimFirstTouch(this.prisma, linkedApplication.id, linkedApplication.managerId, user.id);
+    }
+
+    // 12.08.2026 — уведомление о новой консультации: в колокольчик, а оттуда
+    // автоматически в Telegram назначенному менеджеру. Не всему офису:
+    // получатель — тот, кто её ведёт (и руководство, которое видит всё).
+    if (managerId) {
+      this.notifications
+        .notifyUser(managerId, {
+          type: 'CONSULTATION_NEW',
+          title: 'Новая консультация',
+          message: `${result.fullName}, ${result.phone} — ${KIND_LABEL[result.kind].toLowerCase()}`,
+          payload: { consultationId: result.id, studentId: result.studentId },
+        })
+        .catch(() => undefined);
     }
 
     this.activity

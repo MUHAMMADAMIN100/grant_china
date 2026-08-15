@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { StaffBotService } from '../telegram/staff-bot.service';
 
 /**
  * Управление сотрудниками.
@@ -32,7 +33,36 @@ import { CurrentUser } from '../auth/current-user.decorator';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private users: UsersService) {}
+  constructor(
+    private users: UsersService,
+    private staffBot: StaffBotService,
+  ) {}
+
+  /**
+   * Привязка своего Telegram (12.08.2026). БЕЗ @Roles намеренно: каждый
+   * сотрудник подключает СВОЙ мессенджер, и роль тут ни при чём. userId
+   * всегда берётся из токена — подключить чужой Telegram нельзя даже
+   * подделав тело запроса, потому что тела у этих запросов нет.
+   *
+   * Объявлены ВЫШЕ маршрутов с параметром (:id) — иначе 'me' попал бы в них
+   * как значение параметра.
+   */
+  @Get('me/telegram')
+  telegramStatus(@CurrentUser() current: { sub: string }) {
+    return this.staffBot.statusFor(current.sub);
+  }
+
+  @Post('me/telegram/link')
+  async telegramLink(@CurrentUser() current: { sub: string }) {
+    const url = await this.staffBot.buildLinkUrl(current.sub);
+    return { url };
+  }
+
+  @Post('me/telegram/unlink')
+  async telegramUnlink(@CurrentUser() current: { sub: string }) {
+    await this.staffBot.unlink(current.sub);
+    return { ok: true };
+  }
 
   @Get()
   @Roles(Role.FOUNDER, Role.ADMIN)
