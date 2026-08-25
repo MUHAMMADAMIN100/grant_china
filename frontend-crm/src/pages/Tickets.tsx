@@ -27,8 +27,9 @@ import { exportTicketsCsv } from '../utils/ticketsReport';
 import { removeById, runOptimistic } from '../utils/optimistic';
 import TicketFormModal from '../components/TicketFormModal';
 import Pagination from '../components/Pagination';
+import StatTile, { type StatDetail } from '../components/StatTile';
 import Icon from '../Icon';
-import { fadeUp, staggerContainer } from '../motion';
+import { staggerContainer } from '../motion';
 
 const PAGE_SIZE = 20;
 /**
@@ -388,13 +389,125 @@ export default function Tickets() {
     }
   };
 
-  const statCards = stats
+  /** 'YYYY-MM-DD' для ссылок в список — там фильтр периода принимает именно даты. */
+  const ymd = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const inDays = (n: number): Date => new Date(Date.now() + n * 86400000);
+
+  const TICKET_SCOPE_NOTE = isAdmin
+    ? 'Считаются билеты всех студентов компании. Удалённые не входят.'
+    : 'Считаются билеты только ваших студентов. Удалённые не входят.';
+  /**
+   * Оговорка не для красоты. Сводка считает «ближайшие вылеты» БЕЗ отменённых
+   * и строго от текущего момента, а фильтр списка умеет только диапазон дат и
+   * не умеет «любой статус, кроме отменённого». Ссылка честная, но выборка в
+   * списке может оказаться чуть шире цифры на плитке — про это лучше сказать
+   * прямо, чем дать человеку самому наткнуться на расхождение.
+   */
+  const WINDOW_NOTE =
+    'Список открывается фильтром по датам вылета. В нём могут оказаться и отменённые рейсы — сводка их не считает, а фильтр списка отсеять не умеет.';
+
+  const statCards: Array<{
+    label: string;
+    value: number;
+    color: string;
+    bg: string;
+    icon: string;
+    detail?: StatDetail;
+  }> = stats
     ? [
-        { label: 'Всего билетов', value: stats.total, color: '#3b82f6', bg: '#eff6ff', icon: 'flight' },
-        { label: 'Вылет ≤ 7 дней', value: stats.upcoming7, color: '#d52b2b', bg: '#fff0f0', icon: 'flight_takeoff' },
-        { label: 'Вылет ≤ 30 дней', value: stats.upcoming30, color: '#f59e0b', bg: '#fffbeb', icon: 'event_upcoming' },
-        { label: 'Не выкуплено', value: stats.booked, color: '#8b5cf6', bg: '#f5f3ff', icon: 'pending_actions' },
-        { label: 'Отменённых', value: stats.cancelled, color: '#64748b', bg: '#f1f5f9', icon: 'cancel' },
+        {
+          label: 'Всего билетов',
+          value: stats.total,
+          color: '#3b82f6',
+          bg: '#eff6ff',
+          icon: 'flight',
+          detail: {
+            meaning: 'Все билеты в системе — прошедшие рейсы и отменённые тоже.',
+            period: 'Текущее состояние базы, а не за период.',
+            formula: TICKET_SCOPE_NOTE,
+            rowsTitle: 'Из чего складывается',
+            rows: [
+              {
+                label: 'Ближайшие вылеты (≤ 30 дней)',
+                value: String(stats.upcoming30),
+                share: stats.total > 0 ? stats.upcoming30 / stats.total : undefined,
+              },
+              {
+                label: 'Забронированы, но не выкуплены',
+                value: String(stats.booked),
+                tone: stats.booked > 0 ? 'warning' : undefined,
+                to: '/tickets?status=BOOKED',
+                share: stats.total > 0 ? stats.booked / stats.total : undefined,
+              },
+              {
+                label: 'Отменённые',
+                value: String(stats.cancelled),
+                to: '/tickets?status=CANCELLED',
+                share: stats.total > 0 ? stats.cancelled / stats.total : undefined,
+              },
+            ],
+            link: { to: '/tickets', label: 'Открыть все билеты' },
+            note: 'Строки выше пересекаются между собой — это разные срезы одного и того же списка, а не слагаемые «всего».',
+          },
+        },
+        {
+          label: 'Вылет ≤ 7 дней',
+          value: stats.upcoming7,
+          color: '#d52b2b',
+          bg: '#fff0f0',
+          icon: 'flight_takeoff',
+          detail: {
+            meaning:
+              'Студенты, которые улетают на этой неделе. Самый срочный срез: по ним всё должно быть закрыто — билет выкуплен, документы на руках.',
+            period: `Вылет с сегодня по ${inDays(7).toLocaleDateString('ru-RU')} включительно.`,
+            formula: `${TICKET_SCOPE_NOTE} Отменённые рейсы не считаются. Уже улетевшие — тоже: окно начинается с текущего момента.`,
+            link: { to: `/tickets?range=custom&from=${ymd(new Date())}&to=${ymd(inDays(7))}`, label: 'Открыть ближайшие' },
+            note: WINDOW_NOTE,
+          },
+        },
+        {
+          label: 'Вылет ≤ 30 дней',
+          value: stats.upcoming30,
+          color: '#f59e0b',
+          bg: '#fffbeb',
+          icon: 'event_upcoming',
+          detail: {
+            meaning: 'Все вылеты ближайшего месяца — горизонт планирования по встречам в Китае и заселению.',
+            period: `Вылет с сегодня по ${inDays(30).toLocaleDateString('ru-RU')} включительно.`,
+            formula: `${TICKET_SCOPE_NOTE} Отменённые рейсы не считаются. Цифра включает в себя и «Вылет ≤ 7 дней».`,
+            link: { to: `/tickets?range=custom&from=${ymd(new Date())}&to=${ymd(inDays(30))}`, label: 'Открыть на месяц' },
+            note: WINDOW_NOTE,
+          },
+        },
+        {
+          label: 'Не выкуплено',
+          value: stats.booked,
+          color: '#8b5cf6',
+          bg: '#f5f3ff',
+          icon: 'pending_actions',
+          detail: {
+            meaning:
+              'Билеты в статусе «Забронирован», у которых вылет ещё впереди: место придержано, но не оплачено. Главный риск раздела — бронь сгорает молча.',
+            period: 'Срез на сейчас: считаются только будущие вылеты.',
+            formula: `${TICKET_SCOPE_NOTE} Условия: статус «Забронирован» и дата вылета не в прошлом.`,
+            link: { to: '/tickets?status=BOOKED', label: 'Открыть брони' },
+            note: 'В списке по этому фильтру будут и прошедшие рейсы, оставшиеся в статусе «Забронирован», — их сводка не считает.',
+          },
+        },
+        {
+          label: 'Отменённых',
+          value: stats.cancelled,
+          color: '#64748b',
+          bg: '#f1f5f9',
+          icon: 'cancel',
+          detail: {
+            meaning: 'Билеты, рейс по которым отменён. Они остаются в базе как история и не попадают ни в один срез ближайших вылетов.',
+            period: 'Текущее состояние базы, а не за период.',
+            formula: TICKET_SCOPE_NOTE,
+            link: { to: '/tickets?status=CANCELLED', label: 'Открыть отменённые' },
+          },
+        },
       ]
     : [];
 
@@ -406,17 +519,15 @@ export default function Tickets() {
       {stats && (
         <motion.div className="stats-grid" variants={staggerContainer} initial="hidden" animate="show">
           {statCards.map((c) => (
-            <motion.div key={c.label} className="stat-card" variants={fadeUp}>
-              <div className="stat-icon-row">
-                <div>
-                  <div className="stat-label">{c.label}</div>
-                  <div className="stat-value" style={{ color: c.color }}>{c.value}</div>
-                </div>
-                <div className="stat-icon" style={{ background: c.bg, color: c.color }}>
-                  <Icon name={c.icon} size={24} />
-                </div>
-              </div>
-            </motion.div>
+            <StatTile
+              key={c.label}
+              label={c.label}
+              value={c.value}
+              color={c.color}
+              bg={c.bg}
+              icon={c.icon}
+              detail={c.detail}
+            />
           ))}
         </motion.div>
       )}

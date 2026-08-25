@@ -11,8 +11,9 @@ import { payslipBase } from '../utils/payrollReport';
 import Pagination from '../components/Pagination';
 import PayslipStatusBadge from '../components/PayslipStatusBadge';
 import PayslipDetailModal from '../components/PayslipDetailModal';
+import StatTile, { type StatDetail } from '../components/StatTile';
 import Icon from '../Icon';
-import { fadeUp, staggerContainer } from '../motion';
+import { staggerContainer } from '../motion';
 
 const PAGE_SIZE = 12;
 // Не чаще раза в 30 секунд — «в реальном времени» не значит «пересчитывать
@@ -24,6 +25,14 @@ function monthInputLabel(period: string): string {
   const [y, m] = period.split('-').map((v) => parseInt(v, 10));
   if (!y || !m) return period;
   const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  return `${MONTHS[m - 1]} ${y}`;
+}
+
+/** Тот же месяц, но в именительном падеже: «За август 2026», а не «За августа 2026». */
+function monthTitleLabel(period: string): string {
+  const [y, m] = period.split('-').map((v) => parseInt(v, 10));
+  if (!y || !m) return period;
+  const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
   return `${MONTHS[m - 1]} ${y}`;
 }
 
@@ -132,7 +141,29 @@ export default function MyPayroll() {
     'payslip:updated': () => { loadPayslips(); scheduleReload(); },
   });
 
-  const statCards = kpi
+  /**
+   * Расшифровки плиток KPI. Здесь они нужнее, чем где бы то ни было: на этих
+   * четырёх цифрах считается бонусная часть зарплаты, а формулы до сих пор
+   * жили только в kpi.service.ts. «Своевременность 62%» без объяснения — это
+   * повод для спора с руководством, а не показатель.
+   *
+   * Прочерк вместо процента означает «нет базы для расчёта» (например, ноль
+   * обработанных лидов), а НЕ ноль — про это в каждой расшифровке сказано
+   * отдельно, иначе прочерк читается как провал.
+   */
+  const periodLabel = `Расчётный период — ${monthTitleLabel(period)}.`;
+  const metricsSinceNote = kpi
+    ? `Метрики раздела «Зарплата» ведутся с ${new Date(kpi.metricsSince).toLocaleDateString('ru-RU')} — за более ранние месяцы цифр в системе нет.`
+    : undefined;
+
+  const statCards: Array<{
+    label: string;
+    value: string;
+    icon: string;
+    color: string;
+    bg: string;
+    detail?: StatDetail;
+  }> = kpi
     ? [
         {
           label: 'Обработано лидов / консультаций',
@@ -140,6 +171,20 @@ export default function MyPayroll() {
           icon: 'record_voice_over',
           color: '#3b82f6',
           bg: '#eff6ff',
+          detail: {
+            meaning:
+              'Слева — сколько заявок вы взяли первыми за месяц. Справа — сколько консультаций по ним провели. Лиды — знаменатель вашей конверсии, поэтому цифра слева работает и на вас, и против вас.',
+            period: periodLabel,
+            formula:
+              'Лид засчитывается тому, кто первым коснулся заявки, и только один раз. Консультация — по назначенному на неё менеджеру, по дате проведения внутри месяца.',
+            rowsTitle: 'Показатели месяца',
+            rows: [
+              { label: 'Обработано лидов', value: String(kpi.leadsProcessed) },
+              { label: 'Проведено консультаций', value: String(kpi.consultationsHeld) },
+              { label: 'Подписано договоров', value: String(kpi.contractsSigned), tone: 'success' },
+            ],
+            note: metricsSinceNote,
+          },
         },
         {
           label: 'Конверсия в договор',
@@ -147,6 +192,22 @@ export default function MyPayroll() {
           icon: 'handshake',
           color: '#10b981',
           bg: '#ecfdf5',
+          detail: {
+            meaning:
+              'Какая доля взятых вами лидов дошла до подписанного договора. Черновик договора не считается — только подписанный.',
+            period: periodLabel,
+            formula: 'Подписанные договоры ÷ обработанные лиды за тот же месяц.',
+            rowsTitle: 'Числитель и знаменатель',
+            rows: [
+              { label: 'Подписано договоров', value: String(kpi.contractsSigned) },
+              { label: 'Обработано лидов', value: String(kpi.leadsProcessed) },
+              { label: 'Конверсия', value: formatPercent(kpi.conversionRate), tone: 'success' },
+            ],
+            note:
+              kpi.conversionRate === null
+                ? 'Прочерк — это не ноль: за месяц не было ни одного обработанного лида, делить не на что.'
+                : 'Договор и лид могут относиться к разным месяцам: договор считается по месяцу подписания, лид — по месяцу первого касания.',
+          },
         },
         {
           label: 'Своевременность оплат',
@@ -154,6 +215,17 @@ export default function MyPayroll() {
           icon: 'schedule',
           color: '#f59e0b',
           bg: '#fffbeb',
+          detail: {
+            meaning:
+              'Какая доля денег по вашим студентам пришла в срок. Считается ПО СУММАМ, а не по числу платежей: один крупный просроченный этап весит больше трёх мелких вовремя.',
+            period: periodLabel,
+            formula:
+              'Сумма, поступившая до срока ÷ (пришедшая вовремя + пришедшая с опозданием + не пришедшая вовсе) по этапам графика с наступившим сроком.',
+            note:
+              kpi.timelinessRate === null
+                ? 'Прочерк — это не ноль: в месяце не было ни одного этапа графика с наступившим сроком, считать нечего.'
+                : 'Этапы, срок которых ещё не наступил, в расчёт не входят — они не могут быть ни вовремя, ни с опозданием.',
+          },
         },
         {
           label: 'Доведение: зачисление / переезд',
@@ -161,6 +233,23 @@ export default function MyPayroll() {
           icon: 'flight_takeoff',
           color: '#d52b2b',
           bg: '#fff0f0',
+          detail: {
+            meaning:
+              'Сколько ваших студентов за месяц дошли до зачисления и сколько из них уже уехали в Китай. Процент в скобках — доля доведённых среди всех завершённых: зачисленные против тех, кого убрали в архив так и не зачислив.',
+            period: periodLabel,
+            formula:
+              'Зачислено ÷ (зачислено + потеряно). Потерянные — заявки, ушедшие в архив за этот месяц без зачисления. Незакрытые заявки в расчёт не входят: их исход ещё не известен.',
+            rowsTitle: 'Показатели месяца',
+            rows: [
+              { label: 'Зачислено', value: String(kpi.enrolledCount), tone: 'success' },
+              { label: 'Переехало в Китай', value: String(kpi.relocatedCount) },
+              { label: 'Доведение', value: formatPercent(kpi.deliveryRate) },
+            ],
+            note:
+              kpi.deliveryRate === null
+                ? 'Прочерк — это не ноль: за месяц не завершилась ни одна заявка — ни зачислением, ни архивом.'
+                : metricsSinceNote,
+          },
         },
       ]
     : [];
@@ -199,17 +288,16 @@ export default function MyPayroll() {
             <>
               <motion.div className="stats-grid" variants={staggerContainer} initial="hidden" animate="show">
                 {statCards.map((c) => (
-                  <motion.div key={c.label} className="stat-card" variants={fadeUp}>
-                    <div className="stat-icon-row">
-                      <div>
-                        <div className="stat-label">{c.label}</div>
-                        <div className="stat-value" style={{ color: c.color, fontSize: 22 }}>{c.value}</div>
-                      </div>
-                      <div className="stat-icon" style={{ background: c.bg, color: c.color }}>
-                        <Icon name={c.icon} size={24} />
-                      </div>
-                    </div>
-                  </motion.div>
+                  <StatTile
+                    key={c.label}
+                    label={c.label}
+                    value={c.value}
+                    color={c.color}
+                    bg={c.bg}
+                    icon={c.icon}
+                    valueFontSize={22}
+                    detail={c.detail}
+                  />
                 ))}
               </motion.div>
 

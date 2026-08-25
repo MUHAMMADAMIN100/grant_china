@@ -10,7 +10,7 @@ import { useAuth } from '../store/auth';
 import { currentMonthKey } from '../utils/datetime';
 import { formatMoney, formatPercent } from '../utils/money';
 import { fadeUp, staggerContainer, listItem } from '../motion';
-import Icon from '../Icon';
+import StatTile, { type StatDetail, type StatDetailRow } from '../components/StatTile';
 
 /**
  * ТЗ 5.2 «интерфейс сотрудника» — компактный виджет своих KPI и предварительного
@@ -82,12 +82,122 @@ export default function Dashboard() {
   // легаси-статусов почему-то не отработала на конкретной базе.
   const enrolled = countByStatus(['ENROLLED', 'COMPLETED']);
 
-  const statCards = [
-    { label: 'Всего заявок', value: appStats?.total ?? '—', color: '#3b82f6', bg: '#eff6ff', icon: 'assignment' },
-    { label: 'Новые', value: newCount, color: '#3b82f6', bg: '#eff6ff', icon: 'fiber_new' },
-    { label: 'В работе', value: inProgress, color: '#f59e0b', bg: '#fffbeb', icon: 'pending_actions' },
-    { label: 'Зачислено', value: enrolled, color: '#10b981', bg: '#ecfdf5', icon: 'task_alt' },
-    { label: 'Всего студентов', value: stuStats?.total ?? '—', color: '#d52b2b', bg: '#fff0f0', icon: 'school' },
+  /**
+   * Расшифровки плиток. Пока статистика не пришла, detail не собираем —
+   * плитка остаётся некликабельной вместо модалки с прочерками.
+   *
+   * ВАЖНО про доступ: и заявки, и студенты считаются на бэкенде В ТОМ ЖЕ
+   * объёме, что видит список (менеджер — только своё, по региону), поэтому
+   * ссылки отсюда всегда ведут в выборку с тем же числом строк.
+   */
+  const statusRows = (statuses: string[]): StatDetailRow[] =>
+    statuses
+      .map((s) => ({
+        status: s,
+        count: (appStats?.byStatus || []).reduce(
+          (sum: number, row: any) => (row.status === s ? sum + (row._count || 0) : sum),
+          0,
+        ),
+      }))
+      .filter((r) => r.count > 0)
+      .map((r) => ({
+        label: STATUS_LABEL[r.status as keyof typeof STATUS_LABEL] || r.status,
+        value: String(r.count),
+        to: `/applications?status=${r.status}`,
+      }));
+
+  const APPLICATIONS_SCOPE =
+    'Считаются только живые заявки: удалённые и убранные в архив не входят — ровно как в списке заявок на вкладке «Все».';
+
+  const statCards: Array<{
+    label: string;
+    value: React.ReactNode;
+    color: string;
+    bg: string;
+    icon: string;
+    detail?: StatDetail;
+  }> = [
+    {
+      label: 'Всего заявок',
+      value: appStats?.total ?? '—',
+      color: '#3b82f6',
+      bg: '#eff6ff',
+      icon: 'assignment',
+      detail: appStats && {
+        meaning: 'Все заявки в работе — на любом этапе воронки, от новой до зачисления.',
+        period: 'Текущее состояние базы, а не за период.',
+        formula: APPLICATIONS_SCOPE,
+        rowsTitle: 'По статусам — нажмите, чтобы открыть список',
+        rows: [
+          ...statusRows(['NEW', 'DOCS_REVIEW', 'DOCS_SUBMITTED', 'PRE_ADMISSION', 'AWAITING_PAYMENT', 'ENROLLED']),
+        ],
+        link: { to: '/applications', label: 'Открыть заявки' },
+        note: appStats.archived
+          ? `Сверх этого числа в архиве лежит ещё ${appStats.archived} — они не участвуют ни в одной плитке.`
+          : undefined,
+      },
+    },
+    {
+      label: 'Новые',
+      value: newCount,
+      color: '#3b82f6',
+      bg: '#eff6ff',
+      icon: 'fiber_new',
+      detail: appStats && {
+        meaning: 'Заявки, которые ещё никто не взял в работу: статус «Новая заявка» не менялся ни разу.',
+        period: 'Текущее состояние базы, а не за период.',
+        formula: APPLICATIONS_SCOPE,
+        link: { to: '/applications?status=NEW', label: 'Открыть новые' },
+      },
+    },
+    {
+      label: 'В работе',
+      value: inProgress,
+      color: '#f59e0b',
+      bg: '#fffbeb',
+      icon: 'pending_actions',
+      detail: appStats && {
+        meaning:
+          'Заявки на промежуточных этапах воронки: их уже взяли, но до зачисления ещё не довели. Это не один статус, а четыре сразу.',
+        period: 'Текущее состояние базы, а не за период.',
+        formula: APPLICATIONS_SCOPE,
+        rowsTitle: 'Какие этапы сюда входят',
+        rows: statusRows(['DOCS_REVIEW', 'DOCS_SUBMITTED', 'PRE_ADMISSION', 'AWAITING_PAYMENT']),
+        note: 'В списке заявок статусы фильтруются по одному — нажмите нужную строку выше, чтобы открыть именно её.',
+      },
+    },
+    {
+      label: 'Зачислено',
+      value: enrolled,
+      color: '#10b981',
+      bg: '#ecfdf5',
+      icon: 'task_alt',
+      detail: appStats && {
+        meaning: 'Заявки, доведённые до конца: студент зачислен в университет.',
+        period: 'Текущее состояние базы, а не за период.',
+        formula: APPLICATIONS_SCOPE,
+        link: { to: '/applications?status=ENROLLED', label: 'Открыть зачисленных' },
+      },
+    },
+    {
+      label: 'Всего студентов',
+      value: stuStats?.total ?? '—',
+      color: '#d52b2b',
+      bg: '#fff0f0',
+      icon: 'school',
+      detail: stuStats && {
+        meaning: 'Карточки студентов в системе — все, кто дошёл до договора и ведётся дальше.',
+        period: 'Текущее состояние базы, а не за период.',
+        formula: 'Удалённые карточки не считаются. Менеджер видит здесь только своих студентов, руководство — всех.',
+        rowsTitle: 'По кабинетам — нажмите, чтобы открыть список',
+        rows: (stuStats.byCabinet || []).map((c: any) => ({
+          label: `Кабинет ${c.cabinet}`,
+          value: String(c._count),
+          to: `/students?cabinet=${c.cabinet}`,
+        })),
+        link: { to: '/students', label: 'Открыть студентов' },
+      },
+    },
   ];
 
   return (
@@ -99,29 +209,15 @@ export default function Dashboard() {
         animate="show"
       >
         {statCards.map((c) => (
-          <motion.div
+          <StatTile
             key={c.label}
-            className="stat-card"
-            variants={fadeUp}
-            whileHover={{ y: -4, transition: { duration: 0.2 } }}
-          >
-            <div className="stat-icon-row">
-              <div>
-                <div className="stat-label">{c.label}</div>
-                <div className="stat-value" style={c.color ? { color: c.color } : undefined}>
-                  {c.value}
-                </div>
-              </div>
-              <motion.div
-                className="stat-icon"
-                style={{ background: c.bg, color: c.color }}
-                whileHover={{ scale: 1.15, rotate: 8 }}
-                transition={{ type: 'spring', stiffness: 300 }}
-              >
-                <Icon name={c.icon} size={24} />
-              </motion.div>
-            </div>
-          </motion.div>
+            label={c.label}
+            value={c.value}
+            color={c.color}
+            bg={c.bg}
+            icon={c.icon}
+            detail={c.detail}
+          />
         ))}
       </motion.div>
 

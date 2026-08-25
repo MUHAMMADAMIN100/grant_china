@@ -13,6 +13,8 @@ import { formatMoney } from '../utils/money';
 import { toPeriodRange } from '../utils/datetime';
 import Pagination from '../components/Pagination';
 import ContractStatusBadge from '../components/ContractStatusBadge';
+import StatTile, { type StatDetail } from '../components/StatTile';
+import { staggerContainer } from '../motion';
 import Icon from '../Icon';
 
 const PAGE_SIZE = 20;
@@ -121,6 +123,104 @@ export default function Contracts() {
     setFilters({ [key]: value, page: '1' });
   };
 
+  /**
+   * Расшифровки плиток. Сводка приходит БЕЗ фильтра периода (contracts.stats
+   * считает по всему реестру), поэтому ссылки ведут в список только со
+   * статусом — даты из текущего фильтра в них не переносятся, иначе число
+   * строк в списке не совпало бы с цифрой на плитке.
+   */
+  const share = (n: number): number | undefined =>
+    stats && stats.total > 0 ? n / stats.total : undefined;
+  const SCOPE_NOTE = isPriv
+    ? 'Считаются договоры всех менеджеров. Удалённые не входят.'
+    : 'Считаются только договоры ваших студентов. Удалённые не входят.';
+
+  const statCards: Array<{
+    label: string;
+    value: number;
+    color: string;
+    bg: string;
+    icon: string;
+    detail?: StatDetail;
+  }> = stats
+    ? [
+        {
+          label: 'Всего',
+          value: stats.total,
+          color: '#3b82f6',
+          bg: '#eff6ff',
+          icon: 'description',
+          detail: {
+            meaning: 'Все договоры в реестре, на любой стадии — от черновика до расторжения.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: SCOPE_NOTE,
+            rowsTitle: 'По статусам — нажмите, чтобы открыть список',
+            rows: [
+              { label: CONTRACT_STATUS_LABEL.DRAFT, value: String(stats.draft), to: '/contracts?status=DRAFT', share: share(stats.draft) },
+              { label: CONTRACT_STATUS_LABEL.SIGNED, value: String(stats.signed), to: '/contracts?status=SIGNED', share: share(stats.signed) },
+              { label: CONTRACT_STATUS_LABEL.COMPLETED, value: String(stats.completed), to: '/contracts?status=COMPLETED', share: share(stats.completed) },
+              { label: CONTRACT_STATUS_LABEL.TERMINATED, value: String(stats.terminated), to: '/contracts?status=TERMINATED', share: share(stats.terminated) },
+            ],
+            link: { to: '/contracts', label: 'Открыть весь реестр' },
+          },
+        },
+        {
+          label: 'Черновики',
+          value: stats.draft,
+          color: '#5b6478',
+          bg: '#f5f7fb',
+          icon: 'edit_note',
+          detail: {
+            meaning:
+              'Договоры, которые готовятся, но ещё не подписаны. В KPI и зарплате менеджера они не участвуют — бонус даёт только подписанный договор.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: SCOPE_NOTE,
+            link: { to: '/contracts?status=DRAFT', label: 'Открыть черновики' },
+          },
+        },
+        {
+          label: 'Подписаны',
+          value: stats.signed,
+          color: '#10b981',
+          bg: '#ecfdf5',
+          icon: 'verified',
+          detail: {
+            meaning:
+              'Действующие договоры. Единственный статус, который даёт менеджеру конверсию и бонус, и по которому идёт график оплат.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: `${SCOPE_NOTE} Дата подписания у такого договора проставлена всегда.`,
+            link: { to: '/contracts?status=SIGNED', label: 'Открыть подписанные' },
+          },
+        },
+        {
+          label: 'Расторгнуты',
+          value: stats.terminated,
+          color: '#ef4444',
+          bg: '#fef2f2',
+          icon: 'cancel',
+          detail: {
+            meaning: 'Договоры, разорванные досрочно. Статус конечный: обратно в «Подписан» договор не возвращается.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: `${SCOPE_NOTE} У каждого расторжения записана причина — она видна в карточке договора.`,
+            link: { to: '/contracts?status=TERMINATED', label: 'Открыть расторгнутые' },
+          },
+        },
+        {
+          label: 'Исполнены',
+          value: stats.completed,
+          color: '#3b82f6',
+          bg: '#eff6ff',
+          icon: 'task_alt',
+          detail: {
+            meaning: 'Договоры, отработанные до конца: обязательства закрыты с обеих сторон. Статус конечный.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: SCOPE_NOTE,
+            link: { to: '/contracts?status=COMPLETED', label: 'Открыть исполненные' },
+          },
+        },
+      ]
+    : [];
+
   return (
     <motion.div className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="card-header">
@@ -128,27 +228,26 @@ export default function Contracts() {
       </div>
       <div className="card-body">
         {stats && (
-          <div className="stats-grid" style={{ marginBottom: 20 }}>
-            {[
-              { label: 'Всего', value: stats.total, color: '#3b82f6', bg: '#eff6ff', icon: 'description' },
-              { label: 'Черновики', value: stats.draft, color: '#5b6478', bg: '#f5f7fb', icon: 'edit_note' },
-              { label: 'Подписаны', value: stats.signed, color: '#10b981', bg: '#ecfdf5', icon: 'verified' },
-              { label: 'Расторгнуты', value: stats.terminated, color: '#ef4444', bg: '#fef2f2', icon: 'cancel' },
-              { label: 'Исполнены', value: stats.completed, color: '#3b82f6', bg: '#eff6ff', icon: 'task_alt' },
-            ].map((c) => (
-              <div key={c.label} className="stat-card">
-                <div className="stat-icon-row">
-                  <div>
-                    <div className="stat-label">{c.label}</div>
-                    <div className="stat-value" style={{ color: c.color, fontSize: 26 }}>{c.value}</div>
-                  </div>
-                  <div className="stat-icon" style={{ background: c.bg, color: c.color }}>
-                    <Icon name={c.icon} size={22} />
-                  </div>
-                </div>
-              </div>
+          <motion.div
+            className="stats-grid"
+            style={{ marginBottom: 20 }}
+            variants={staggerContainer}
+            initial="hidden"
+            animate="show"
+          >
+            {statCards.map((c) => (
+              <StatTile
+                key={c.label}
+                label={c.label}
+                value={c.value}
+                color={c.color}
+                bg={c.bg}
+                icon={c.icon}
+                valueFontSize={26}
+                detail={c.detail}
+              />
             ))}
-          </div>
+          </motion.div>
         )}
 
         <div className="filters">

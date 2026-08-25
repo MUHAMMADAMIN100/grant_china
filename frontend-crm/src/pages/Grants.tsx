@@ -22,8 +22,9 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import Pagination from '../components/Pagination';
+import StatTile, { type StatDetail } from '../components/StatTile';
 import Icon from '../Icon';
-import { fadeUp, staggerContainer } from '../motion';
+import { staggerContainer } from '../motion';
 
 const PAGE_SIZE = 20;
 
@@ -183,13 +184,115 @@ export default function Grants() {
     }
   };
 
-  const statCards = stats
+  /**
+   * Расшифровки плиток.
+   *
+   * ЛОВУШКА, из-за которой ссылки здесь выглядят многословно: список грантов
+   * по умолчанию показывает ТОЛЬКО многолетние (scope=multi, реестр «двойных»
+   * из ТЗ 4), а сводка считает все подряд. Ссылка «Всего в реестре» без
+   * `scope=all` открыла бы список, где строк заметно меньше, чем цифра на
+   * плитке, — и первое же сравнение подорвало бы доверие к обеим цифрам.
+   */
+  const GRANT_SCOPE_NOTE = isAdmin
+    ? 'Считаются гранты всех студентов компании. Удалённые не входят.'
+    : 'Считаются гранты только ваших студентов. Удалённые не входят.';
+
+  const statCards: Array<{
+    label: string;
+    value: number;
+    color: string;
+    bg: string;
+    icon: string;
+    detail?: StatDetail;
+  }> = stats
     ? [
-        { label: 'Всего в реестре', value: stats.total, color: '#3b82f6', bg: '#eff6ff', icon: 'workspace_premium' },
-        { label: 'Двойных (2+ года)', value: stats.multi, color: '#8b5cf6', bg: '#f5f3ff', icon: 'auto_awesome' },
-        { label: 'Действующих', value: stats.activeThisYear, color: '#10b981', bg: '#ecfdf5', icon: 'verified' },
-        { label: 'Продлевать ≤ 60 дней', value: stats.dueSoon60, color: '#f59e0b', bg: '#fffbeb', icon: 'event_upcoming' },
-        { label: 'Без менеджера', value: stats.withoutManager, color: '#d52b2b', bg: '#fff0f0', icon: 'person_off' },
+        {
+          label: 'Всего в реестре',
+          value: stats.total,
+          color: '#3b82f6',
+          bg: '#eff6ff',
+          icon: 'workspace_premium',
+          detail: {
+            meaning:
+              'Все гранты в системе — и многолетние, и разовые на один год, в любом статусе.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: GRANT_SCOPE_NOTE,
+            rowsTitle: 'Из чего складывается',
+            rows: [
+              {
+                label: 'Многолетних (2+ года)',
+                value: String(stats.multi),
+                to: '/grants?scope=multi',
+                share: stats.total > 0 ? stats.multi / stats.total : undefined,
+              },
+              {
+                label: 'Разовых (на 1 год)',
+                value: String(Math.max(0, stats.total - stats.multi)),
+                share: stats.total > 0 ? Math.max(0, stats.total - stats.multi) / stats.total : undefined,
+              },
+            ],
+            link: { to: '/grants?scope=all', label: 'Открыть все гранты' },
+            note:
+              'Список грантов по умолчанию показывает только многолетние — ссылка выше специально открывает его со снятым ограничением.',
+          },
+        },
+        {
+          label: 'Двойных (2+ года)',
+          value: stats.multi,
+          color: '#8b5cf6',
+          bg: '#f5f3ff',
+          icon: 'auto_awesome',
+          detail: {
+            meaning:
+              'Гранты, рассчитанные больше чем на один учебный год. Именно их нужно продлевать каждый год, поэтому реестр по умолчанию открывается на них.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: `${GRANT_SCOPE_NOTE} Условие — срок гранта больше одного года, статус любой.`,
+            link: { to: '/grants?scope=multi', label: 'Открыть двойные' },
+          },
+        },
+        {
+          label: 'Действующих',
+          value: stats.activeThisYear,
+          color: '#10b981',
+          bg: '#ecfdf5',
+          icon: 'verified',
+          detail: {
+            meaning: 'Гранты в статусе «Действующий» — те, по которым студент учится прямо сейчас.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: `${GRANT_SCOPE_NOTE} Приостановленные, завершённые и прекращённые сюда не входят. Считаются и многолетние, и разовые.`,
+            link: { to: '/grants?scope=all&status=ACTIVE', label: 'Открыть действующие' },
+          },
+        },
+        {
+          label: 'Продлевать ≤ 60 дней',
+          value: stats.dueSoon60,
+          color: '#f59e0b',
+          bg: '#fffbeb',
+          icon: 'event_upcoming',
+          detail: {
+            meaning:
+              'Действующие гранты, у которых следующий учебный год начинается в ближайшие 60 дней. Главный рабочий список раздела: по ним нужно успеть с продлением.',
+            period: 'Срез на сегодня — окно 60 дней отсчитывается от текущей даты.',
+            formula: `${GRANT_SCOPE_NOTE} Условия: статус «Действующий» и дата старта следующего года заполнена и не позже, чем через 60 дней.`,
+            link: { to: '/grants?scope=all&status=ACTIVE&due=60', label: 'Открыть к продлению' },
+            note: 'Сюда попадают и уже просроченные продления — дата старта в прошлом тоже «не позже, чем через 60 дней».',
+          },
+        },
+        {
+          label: 'Без менеджера',
+          value: stats.withoutManager,
+          color: '#d52b2b',
+          bg: '#fff0f0',
+          icon: 'person_off',
+          detail: {
+            meaning:
+              'Действующие гранты, у студентов которых не назначен ни таджикский, ни китайский менеджер. За такой грант сейчас никто не отвечает — продление может просто некому будет сделать.',
+            period: 'Текущее состояние реестра, а не за период.',
+            formula: `${GRANT_SCOPE_NOTE} Условия: статус «Действующий» и у карточки студента оба поля ответственного пустые.`,
+            note:
+              'Отдельного фильтра «без менеджера» в списке нет — ответственного назначают в карточке студента, там же это и видно.',
+          },
+        },
       ]
     : [];
 
@@ -198,17 +301,15 @@ export default function Grants() {
       {stats && (
         <motion.div className="stats-grid" variants={staggerContainer} initial="hidden" animate="show">
           {statCards.map((c) => (
-            <motion.div key={c.label} className="stat-card" variants={fadeUp}>
-              <div className="stat-icon-row">
-                <div>
-                  <div className="stat-label">{c.label}</div>
-                  <div className="stat-value" style={{ color: c.color }}>{c.value}</div>
-                </div>
-                <div className="stat-icon" style={{ background: c.bg, color: c.color }}>
-                  <Icon name={c.icon} size={24} />
-                </div>
-              </div>
-            </motion.div>
+            <StatTile
+              key={c.label}
+              label={c.label}
+              value={c.value}
+              color={c.color}
+              bg={c.bg}
+              icon={c.icon}
+              detail={c.detail}
+            />
           ))}
         </motion.div>
       )}
