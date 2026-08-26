@@ -54,8 +54,17 @@ export class UsersController {
 
   @Post('me/telegram/link')
   async telegramLink(@CurrentUser() current: { sub: string }) {
-    const url = await this.staffBot.buildLinkUrl(current.sub);
-    return { url };
+    const link = await this.staffBot.buildLink(current.sub);
+    // `url` оставлен ради фронта, задеплоенного отдельно от бэкенда: CRM
+    // на Vercel и API на Railway выкатываются разными пайплайнами, и между
+    // ними бывает несколько минут рассинхрона. Старая сборка читает `url` и
+    // продолжает работать, новая берёт appUrl/webUrl.
+    return {
+      url: link?.webUrl ?? null,
+      appUrl: link?.appUrl ?? null,
+      webUrl: link?.webUrl ?? null,
+      botUsername: link?.botUsername ?? null,
+    };
   }
 
   @Post('me/telegram/unlink')

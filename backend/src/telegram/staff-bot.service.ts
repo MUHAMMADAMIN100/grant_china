@@ -22,7 +22,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * проблема; при масштабировании надо переходить на webhook.
  *
  * ПРИВЯЗКА. Сотрудник жмёт в CRM «Подключить Telegram» → получает ссылку
- * `t.me/<bot>?start=<код>` → нажимает «Старт» → бот по коду находит запись и
+ * `tg://resolve?domain=<bot>&start=<код>` (см. buildLink — домен t.me в
+ * Таджикистане заблокирован) → нажимает «Старт» → бот по коду находит запись и
  * записывает chatId. Код одноразовый в том смысле, что при отвязке
  * выпускается новый: иначе старая ссылка, once отправленная в общий чат,
  * навсегда осталась бы годной для перехвата чужих уведомлений.
@@ -138,11 +139,31 @@ export class StaffBotService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Ссылка для привязки. Код выпускается заново при каждом запросе — старая
+   * Ссылки для привязки. Код выпускается заново при каждом запросе — старая
    * ссылка, случайно отправленная не туда, перестаёт работать.
    * null — бот выключен (нет токена) либо не удалось узнать его имя.
+   *
+   * Ссылок ТРИ, и это не дублирование ради удобства.
+   *
+   * Домен `t.me` у таджикских провайдеров не резолвится вообще: запрос к нему
+   * возвращает NXDOMAIN даже через публичный DNS 8.8.8.8, при том что сам
+   * `telegram.org` резолвится нормально. Кнопка «Подключить Telegram» вела
+   * ровно туда и упиралась в «Не удаётся получить доступ к сайту» — привязать
+   * уведомления было нельзя в принципе, из офиса в Душанбе.
+   *
+   * Поэтому:
+   *  - `appUrl` (`tg://`) — основной путь. Это не сайт, а схема установленного
+   *    приложения: DNS не участвует, блокировка домена не мешает.
+   *  - `webUrl` — запасной, на `telegram.me`. Это официальный алиас t.me
+   *    (тот же адрес 149.154.167.99), и он у провайдера резолвится.
+   *  - `botUsername` — чтобы можно было найти бота поиском внутри Telegram,
+   *    если не сработало ни то ни другое.
    */
-  async buildLinkUrl(userId: string): Promise<string | null> {
+  async buildLink(userId: string): Promise<{
+    appUrl: string;
+    webUrl: string;
+    botUsername: string;
+  } | null> {
     if (!this.bot || !this.botUsername) return null;
     const code = randomBytes(16).toString('base64url');
     await this.prisma.telegramLink.upsert({
@@ -150,7 +171,11 @@ export class StaffBotService implements OnModuleInit, OnModuleDestroy {
       create: { userId, linkCode: code },
       update: { linkCode: code },
     });
-    return `https://t.me/${this.botUsername}?start=${code}`;
+    return {
+      appUrl: `tg://resolve?domain=${this.botUsername}&start=${code}`,
+      webUrl: `https://telegram.me/${this.botUsername}?start=${code}`,
+      botUsername: this.botUsername,
+    };
   }
 
   /** Состояние привязки для профиля в CRM. */

@@ -19,7 +19,11 @@ export default function Footer() {
               Китая на бакалавриат, магистратуру и языковые курсы — без посредников и скрытых комиссий.
             </p>
             <div className="footer-socials">
-              <a href="https://t.me/grant_china_tj" target="_blank" rel="noreferrer" aria-label="Telegram" className="footer-social">
+              {/* telegram.me, а не t.me: домен t.me у таджикских провайдеров не
+                  резолвится (NXDOMAIN даже через 8.8.8.8), и ссылка вела в
+                  «Не удаётся получить доступ к сайту» у части посетителей.
+                  telegram.me — официальный алиас на тот же адрес. */}
+              <a href="https://telegram.me/grant_china_tj" target="_blank" rel="noreferrer" aria-label="Telegram" className="footer-social">
                 <Icon name="send" size={20} />
               </a>
               <a href="https://wa.me/992777121567" target="_blank" rel="noreferrer" aria-label="WhatsApp" className="footer-social">

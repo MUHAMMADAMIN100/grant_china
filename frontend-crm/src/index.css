@@ -3050,3 +3050,20 @@ select.input-error {
   font-size: 12px; font-weight: 600; letter-spacing: .3px;
   color: var(--text-soft); text-transform: uppercase;
 }
+
+/* Запасные пути привязки Telegram (components/TelegramLinkModal.tsx).
+   Домен t.me у таджикских провайдеров не резолвится, поэтому рядом с
+   основной кнопкой всегда видны ссылка через telegram.me и подсказка. */
+.tg-fallback {
+  margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+.tg-fallback-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--text-soft);
+  margin-bottom: 10px;
+}
+.tg-fallback-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.tg-fallback-row .btn { flex: 1 1 auto; justify-content: center; }
+.tg-fallback-hint { font-size: 12.5px; line-height: 1.55; color: var(--text-light); }
