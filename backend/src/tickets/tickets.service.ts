@@ -58,6 +58,15 @@ export interface TicketListFilters {
   status?: TicketStatus;
   destinationCity?: string;
   studentId?: string;
+  /**
+   * Ответственный за студента — таджикский ЛИБО китайский менеджер.
+   *
+   * Считаем по обоим полям, а не по одному: после передачи студента в
+   * китайский офис (ChinaTransferModal) за перелёт отвечает уже принимающая
+   * сторона, и фильтр «по менеджеру» обязан находить билеты в обеих ролях.
+   * Ровно та же формула, что в grants.service.ts.
+   */
+  managerId?: string;
   /** Диапазон по дате вылета — «на этой неделе» / «в этом месяце» / кастом. */
   from?: Date;
   to?: Date;
@@ -183,7 +192,18 @@ export class TicketsService {
       }
       and.push({ OR: or });
     }
-    and.push({ student: this.studentScopeWhere(user) });
+    // Условия по студенту складываются в ОДИН ключ `student` вместе со
+    // scope-условием: Prisma не допускает двух разных условий на одно
+    // relation-поле объекта — отдельный `and.push({ student: {...} })` рядом
+    // с scope молча перетёр бы проверку доступа. Для того studentScopeWhere и
+    // принимает extra (та же схема, что в grants.service.ts).
+    const studentExtra: Prisma.StudentWhereInput[] = [];
+    if (filters.managerId) {
+      studentExtra.push({
+        OR: [{ managerId: filters.managerId }, { chinaManagerId: filters.managerId }],
+      });
+    }
+    and.push({ student: this.studentScopeWhere(user, studentExtra) });
 
     const where: Prisma.TicketWhereInput = { deletedAt: null, AND: and };
 

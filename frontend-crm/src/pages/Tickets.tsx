@@ -16,7 +16,9 @@ import {
   type TicketStats,
   type TicketStatus,
 } from '../api/tickets';
+import type { User } from '../api/types';
 import { isPrivileged } from '../api/types';
+import { listUsers } from '../api/users';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -92,6 +94,10 @@ export default function Tickets() {
       search: '',
       city: '',
       status: '',
+      // Ответственный за студента. Пусто — все. Виден только руководству:
+      // список сотрудников отдаёт GET /users с @Roles(FOUNDER, ADMIN), а
+      // менеджеру фильтр и не нужен — он видит только своих студентов.
+      manager: '',
       // '' — все даты; 'week' | 'month' — пресеты из ТЗ; 'custom' — свои даты.
       range: '',
       from: '',
@@ -104,6 +110,7 @@ export default function Tickets() {
   const search = filters.search;
   const city = filters.city;
   const status = filters.status as TicketStatus | '';
+  const manager = filters.manager;
   const range = filters.range as '' | 'week' | 'month' | 'custom';
   const from = filters.from;
   const to = filters.to;
@@ -113,6 +120,7 @@ export default function Tickets() {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<TicketStats | null>(null);
   const [cities, setCities] = useState<ChinaCity[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -148,9 +156,12 @@ export default function Tickets() {
       search: search || undefined,
       city: city || undefined,
       status: status || undefined,
+      // Отправляем только руководству: у менеджера этого фильтра нет в
+      // интерфейсе, и подставлять ему в запрос пустое значение незачем.
+      managerId: isAdmin ? manager || undefined : undefined,
       ...periodRange,
     }),
-    [search, city, status, periodRange],
+    [search, city, status, manager, isAdmin, periodRange],
   );
 
   // Счётчик поколений запросов списка — тот же приём, что в Students.tsx и
@@ -203,6 +214,13 @@ export default function Tickets() {
     loadStats();
     listChinaCities().then(setCities).catch(() => setCities([]));
   }, []);
+
+  // Список сотрудников — только руководству: GET /users закрыт @Roles(FOUNDER,
+  // ADMIN), и у менеджера этот запрос вернул бы 403.
+  useEffect(() => {
+    if (!isAdmin) return;
+    listUsers().then(setUsers).catch(() => setUsers([]));
+  }, [isAdmin]);
 
   // Схлопываем поток ticket:updated в одну перезагрузку — тот же приём, что в
   // Applications.tsx и Grants.tsx.
@@ -394,9 +412,14 @@ export default function Tickets() {
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const inDays = (n: number): Date => new Date(Date.now() + n * 86400000);
 
-  const TICKET_SCOPE_NOTE = isAdmin
-    ? 'Считаются билеты всех студентов компании. Удалённые не входят.'
-    : 'Считаются билеты только ваших студентов. Удалённые не входят.';
+  const TICKET_SCOPE_NOTE =
+    (isAdmin
+      ? 'Считаются билеты всех студентов компании. Удалённые не входят.'
+      : 'Считаются билеты только ваших студентов. Удалённые не входят.') +
+    // Оговорка появилась вместе с фильтром по менеджеру: выбрав одного
+    // сотрудника, человек видит короткую таблицу под неизменившейся сводкой
+    // и вправе решить, что одна из двух цифр врёт.
+    ' Фильтры под таблицей на сводку не влияют — она всегда по всему разделу.';
   /**
    * Оговорка не для красоты. Сводка считает «ближайшие вылеты» БЕЗ отменённых
    * и строго от текущего момента, а фильтр списка умеет только диапазон дат и
@@ -570,6 +593,18 @@ export default function Tickets() {
               onChange={(e) => onFilterChange('search', e.target.value)}
               title="Телефон можно вводить в любом виде: +992 90 123-45-67, 992901234567 или 901234567"
             />
+            {isAdmin && (
+              <select
+                value={manager}
+                onChange={(e) => onFilterChange('manager', e.target.value)}
+                title="Ответственный за студента — таджикский или китайский менеджер"
+              >
+                <option value="">Все менеджеры</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>{u.fullName}</option>
+                ))}
+              </select>
+            )}
             <select value={city} onChange={(e) => onFilterChange('city', e.target.value)}>
               <option value="">Все города</option>
               {cities.map((c) => (

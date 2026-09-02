@@ -63,6 +63,8 @@ export interface TicketFilters {
   /** Точное совпадение по городу назначения (выбор из справочника). */
   city?: string;
   studentId?: string;
+  /** Ответственный за студента — таджикский либо китайский менеджер, любой из двух. */
+  managerId?: string;
   /** Диапазон по дате вылета — ISO-строки. */
   from?: string;
   to?: string;

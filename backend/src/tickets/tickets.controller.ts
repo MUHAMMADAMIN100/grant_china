@@ -98,6 +98,7 @@ export class TicketsController {
     @Query('status') status?: TicketStatus,
     @Query('city') city?: string,
     @Query('studentId') studentId?: string,
+    @Query('managerId') managerId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('search') search?: string,
@@ -109,6 +110,11 @@ export class TicketsController {
         status,
         destinationCity: city || undefined,
         studentId: studentId || undefined,
+        // Без @Roles намеренно: параметр только СУЖАЕТ выборку внутри того,
+        // что человеку и так видно (studentScopeWhere остаётся на месте).
+        // Менеджер, подставив чужой id, получит пересечение «мои студенты И
+        // студенты того менеджера» — то есть пусто либо своих же переданных.
+        managerId: managerId || undefined,
         from: parseDateParam(from),
         to: parseDateParam(to),
         search: search || undefined,
