@@ -3,6 +3,9 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { ActivityService } from '../activity/activity.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { STUDENT_RESTRICTED_DOC_TYPES } from '../common/access';
 import { MANAGED_DOCUMENT_TYPES } from '../common/documents';
 
@@ -60,6 +63,11 @@ export class StudentAuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
     private mail: MailService,
+    // 26.08.2026 — отметка о визе из кабинета: журнал, уведомление
+    // менеджеру, realtime в CRM.
+    private activity: ActivityService,
+    private notifications: NotificationsService,
+    private realtime: RealtimeGateway,
   ) {}
 
   /**
@@ -158,5 +166,105 @@ export class StudentAuthService {
       safe.documents = sanitizeStudentDocuments(safe.documents);
     }
     return safe;
+  }
+
+  // ------------------------------------------------------------------
+  // 26.08.2026 — отметка о визе от студента (на подтверждение менеджеру)
+  // ------------------------------------------------------------------
+
+  private async loadForVisaClaim(studentId: string) {
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, deletedAt: null },
+      select: {
+        id: true,
+        fullName: true,
+        managerId: true,
+        chinaManagerId: true,
+        visaReceived: true,
+        visaClaimReceived: true,
+        visaClaimedAt: true,
+        visaClaimReviewedAt: true,
+      },
+    });
+    if (!student) throw new UnauthorizedException('Студент не найден');
+    return student;
+  }
+
+  /**
+   * Студент отмечает «визу получил» / «визы ещё нет». Флаг visaReceived НЕ
+   * меняется — отметка уходит менеджеру на подтверждение (решение
+   * заказчика). Повторная подача той же отметки поверх ожидающей — не
+   * ошибка ввода, а лишний клик: отвечаем понятным 400, а не дублируем
+   * уведомление менеджеру.
+   */
+  async claimVisa(studentId: string, received: boolean) {
+    const student = await this.loadForVisaClaim(studentId);
+    const pending = !!student.visaClaimedAt && !student.visaClaimReviewedAt;
+    if (pending && student.visaClaimReceived === received) {
+      throw new BadRequestException('Эта отметка уже отправлена и ждёт проверки менеджера');
+    }
+    if (!pending && student.visaReceived === received) {
+      throw new BadRequestException(
+        received ? 'В системе уже отмечено, что виза получена' : 'В системе и так отмечено, что визы ещё нет',
+      );
+    }
+    const updated = await this.prisma.student.update({
+      where: { id: studentId },
+      data: {
+        visaClaimReceived: received,
+        visaClaimedAt: new Date(),
+        visaClaimReviewedAt: null,
+        visaClaimApproved: null,
+        visaClaimNote: null,
+      },
+      select: { id: true, managerId: true, chinaManagerId: true },
+    });
+    const label = received ? 'визу получил' : 'визы ещё нет';
+    this.activity
+      .log({
+        actorId: null,
+        actorName: student.fullName,
+        actorRole: 'STUDENT',
+        action: 'VISA_CLAIM',
+        studentId,
+        studentName: student.fullName,
+        details: `Студент отметил: «${label}» — ждёт подтверждения менеджера`,
+      })
+      .catch(() => undefined);
+    this.notifications
+      .notifyForStudent(updated, {
+        type: 'VISA_CLAIM',
+        title: 'Студент отметил визу',
+        message: `${student.fullName}: «${label}». Ждёт подтверждения.`,
+        payload: { studentId },
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId }, { studentId });
+    return { ok: true };
+  }
+
+  /** Отозвать ожидающую отметку. Менеджер уведомления об отзыве не получает — просто перестаёт видеть запрос. */
+  async withdrawVisaClaim(studentId: string) {
+    const student = await this.loadForVisaClaim(studentId);
+    const pending = !!student.visaClaimedAt && !student.visaClaimReviewedAt;
+    if (!pending) throw new BadRequestException('Нет отметки, ожидающей проверки');
+    const updated = await this.prisma.student.update({
+      where: { id: studentId },
+      data: { visaClaimReceived: null, visaClaimedAt: null },
+      select: { id: true, managerId: true, chinaManagerId: true },
+    });
+    this.activity
+      .log({
+        actorId: null,
+        actorName: student.fullName,
+        actorRole: 'STUDENT',
+        action: 'VISA_CLAIM',
+        studentId,
+        studentName: student.fullName,
+        details: 'Студент отозвал отметку о визе',
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId }, { studentId });
+    return { ok: true };
   }
 }

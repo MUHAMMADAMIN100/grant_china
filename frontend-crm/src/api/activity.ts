@@ -91,6 +91,15 @@ export type ActivityAction =
   | 'TICKET_CREATE'
   | 'TICKET_UPDATE'
   | 'TICKET_DELETE'
+  // 26.08.2026 — билет и отметка о визе от студента из кабинета.
+  | 'TICKET_STUDENT_SUBMIT'
+  | 'TICKET_STUDENT_UPDATE'
+  | 'TICKET_STUDENT_WITHDRAW'
+  | 'TICKET_APPROVE'
+  | 'TICKET_REJECT'
+  | 'VISA_CLAIM'
+  | 'VISA_CLAIM_APPROVE'
+  | 'VISA_CLAIM_REJECT'
   // ТЗ 6.1 (волна 8) — база знаний AI-помощника.
   | 'KNOWLEDGE_CREATE'
   | 'KNOWLEDGE_UPDATE'
@@ -185,6 +194,14 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   TICKET_CREATE: 'Добавлен билет',
   TICKET_UPDATE: 'Изменён билет',
   TICKET_DELETE: 'Удалён билет',
+  TICKET_STUDENT_SUBMIT: 'Студент добавил билет',
+  TICKET_STUDENT_UPDATE: 'Студент изменил билет',
+  TICKET_STUDENT_WITHDRAW: 'Студент отозвал билет',
+  TICKET_APPROVE: 'Билет студента подтверждён',
+  TICKET_REJECT: 'Билет студента отклонён',
+  VISA_CLAIM: 'Студент отметил визу',
+  VISA_CLAIM_APPROVE: 'Отметка о визе подтверждена',
+  VISA_CLAIM_REJECT: 'Отметка о визе отклонена',
   KNOWLEDGE_CREATE: 'Создана статья базы знаний',
   KNOWLEDGE_UPDATE: 'Изменена статья базы знаний',
   KNOWLEDGE_DELETE: 'Удалена статья базы знаний',
@@ -220,7 +237,20 @@ export const ACTIVITY_GROUPS: { label: string; actions: ActivityAction[] }[] = [
   { label: 'Консультации', actions: ['CONSULTATION_CREATE', 'CONSULTATION_UPDATE', 'CONSULTATION_DELETE', 'CONSULTATION_CONVERT'] },
   { label: 'Гранты', actions: ['GRANT_CREATE', 'GRANT_UPDATE', 'GRANT_YEAR_ADVANCE', 'GRANT_CLOSE'] },
   { label: 'Договоры', actions: ['CONTRACT_CREATE', 'CONTRACT_SIGN', 'CONTRACT_TERMINATE', 'CONTRACT_UPDATE'] },
-  { label: 'Билеты', actions: ['TICKET_CREATE', 'TICKET_UPDATE', 'TICKET_DELETE'] },
+  {
+    label: 'Билеты',
+    actions: [
+      'TICKET_CREATE',
+      'TICKET_UPDATE',
+      'TICKET_DELETE',
+      'TICKET_STUDENT_SUBMIT',
+      'TICKET_STUDENT_UPDATE',
+      'TICKET_STUDENT_WITHDRAW',
+      'TICKET_APPROVE',
+      'TICKET_REJECT',
+    ],
+  },
+  { label: 'Виза', actions: ['VISA_CLAIM', 'VISA_CLAIM_APPROVE', 'VISA_CLAIM_REJECT'] },
   { label: 'Комментарии', actions: ['COMMENT_CREATE', 'COMMENT_UPDATE', 'COMMENT_DELETE'] },
   { label: 'Звонки и переписка', actions: ['CALL_LOGGED', 'CONVERSATION_LINK', 'MESSAGE_SENT'] },
   {

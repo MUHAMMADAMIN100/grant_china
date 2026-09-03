@@ -21,6 +21,7 @@ import { Role, TicketStatus } from '@prisma/client';
 import { TicketsService, TicketFileInput } from './tickets.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { RejectTicketDto } from './dto/review-ticket.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -99,6 +100,7 @@ export class TicketsController {
     @Query('city') city?: string,
     @Query('studentId') studentId?: string,
     @Query('managerId') managerId?: string,
+    @Query('review') review?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('search') search?: string,
@@ -115,6 +117,9 @@ export class TicketsController {
         // Менеджер, подставив чужой id, получит пересечение «мои студенты И
         // студенты того менеджера» — то есть пусто либо своих же переданных.
         managerId: managerId || undefined,
+        // 26.08.2026 — стадия проверки билетов от студентов. Любое другое
+        // значение = «по умолчанию» (только живые), а не ошибка.
+        review: review === 'pending' || review === 'all' ? review : undefined,
         from: parseDateParam(from),
         to: parseDateParam(to),
         search: search || undefined,
@@ -128,6 +133,15 @@ export class TicketsController {
   @Get('stats')
   stats(@CurrentUser() user: any) {
     return this.tickets.stats(user);
+  }
+
+  /**
+   * 26.08.2026 — счётчик вкладки «На подтверждении». ВЫШЕ `:id` — иначе
+   * 'pending' ушёл бы туда как значение параметра.
+   */
+  @Get('pending/count')
+  pendingCount(@CurrentUser() user: any) {
+    return this.tickets.pendingCount(user);
   }
 
   /**
@@ -158,6 +172,19 @@ export class TicketsController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateTicketDto, @CurrentUser() user: any) {
     return this.tickets.update(id, dto, user);
+  }
+
+  // 26.08.2026 — решение по билету, поданному студентом. Без @Roles: по
+  // решению заказчика подтверждает менеджер студента, а доступ к билету
+  // и так проверяется в сервисе по владению студентом.
+  @Post(':id/approve')
+  approve(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.tickets.approve(id, user);
+  }
+
+  @Post(':id/reject')
+  reject(@Param('id') id: string, @Body() dto: RejectTicketDto, @CurrentUser() user: any) {
+    return this.tickets.reject(id, dto.reason, user);
   }
 
   // ТЗ п.2: «Администратор: ... возможность удаления». Менеджер редактирует,

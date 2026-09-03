@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 import { TasksModule } from '../tasks/tasks.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 // PrismaService/ActivityService/RealtimeGateway — глобальные модули
 // (@Global() в их собственных модулях), импортировать их здесь не нужно.
@@ -23,7 +24,9 @@ import { TasksModule } from '../tasks/tasks.module';
  * Прямой доступ к prisma.task из сервиса запрещён (как в GrantsModule).
  */
 @Module({
-  imports: [TasksModule],
+  // NotificationsModule — 26.08.2026: билет, поданный студентом из кабинета,
+  // должен дойти до менеджера колокольчиком и в Telegram (решение заказчика).
+  imports: [TasksModule, NotificationsModule],
   controllers: [TicketsController],
   providers: [TicketsService],
   exports: [TicketsService],

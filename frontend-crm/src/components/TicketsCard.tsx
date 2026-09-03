@@ -3,9 +3,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   TICKET_STATUS_BADGE,
   TICKET_STATUS_LABEL,
+  approveTicket,
   deleteTicket,
   deleteTicketDocument,
+  isFromStudent,
   listTickets,
+  rejectTicket,
   uploadTicketDocument,
   type Ticket,
 } from '../api/tickets';
@@ -17,6 +20,7 @@ import { downloadProtectedFile } from '../utils/fileUrl';
 import { formatDateTimeRu } from '../utils/datetime';
 import { removeById, runOptimistic } from '../utils/optimistic';
 import TicketFormModal from './TicketFormModal';
+import PaymentReasonPrompt from './PaymentReasonPrompt';
 import Icon from '../Icon';
 
 type Props = {
@@ -42,6 +46,7 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [modal, setModal] = useState<{ kind: 'create' } | { kind: 'edit'; ticket: Ticket } | null>(null);
+  const [rejecting, setRejecting] = useState<Ticket | null>(null);
   const uploadForRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,7 +58,9 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
    */
   const load = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
-    listTickets({ studentId, pageSize: 20 })
+    // review: 'all' — в карточке нужна вся история, включая билеты студента
+    // на проверке и отклонённые: здесь их и подтверждают (решение заказчика).
+    listTickets({ studentId, pageSize: 20, review: 'all' })
       .then((res) => setTickets(res.items))
       .catch(() => setTickets([]))
       .finally(() => setLoading(false));
@@ -97,6 +104,40 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
       onError: (message) => toast(message, 'error'),
     });
     if (done) toast('Билет удалён', 'success');
+  };
+
+  /** 26.08.2026 — решение по билету, поданному студентом. */
+  const onApprove = async (t: Ticket) => {
+    const ok = await confirm({
+      title: 'Подтвердить билет',
+      message: `Рейс ${t.flightNumber} → ${t.destinationCity}, вылет ${formatDateTimeRu(t.departureAt)}. Билет попадёт в общий список и напоминания.`,
+      confirmText: 'Подтвердить',
+    });
+    if (!ok) return;
+    setBusyId(t.id);
+    try {
+      await approveTicket(t.id);
+      toast('Билет подтверждён', 'success');
+      load({ silent: true });
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Не удалось подтвердить билет', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const onReject = async (t: Ticket, reason: string) => {
+    setRejecting(null);
+    setBusyId(t.id);
+    try {
+      await rejectTicket(t.id, reason);
+      toast('Билет отклонён — студент увидит причину в кабинете', 'success');
+      load({ silent: true });
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Не удалось отклонить билет', 'error');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const onDownload = async (t: Ticket) => {
@@ -190,8 +231,32 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
                     {t.destinationCity} · рейс {t.flightNumber}
                     {t.airline && <span className="sub-item-muted"> · {t.airline}</span>}
                   </div>
-                  <span className={`badge ${TICKET_STATUS_BADGE[t.status]}`}>{TICKET_STATUS_LABEL[t.status]}</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {t.reviewStatus === 'PENDING' && (
+                      <span className="badge badge-warning"><Icon name="schedule" size={13} /> На проверке</span>
+                    )}
+                    {t.reviewStatus === 'REJECTED' && (
+                      <span className="badge badge-danger"><Icon name="cancel" size={13} /> Отклонён</span>
+                    )}
+                    {isFromStudent(t) && t.reviewStatus !== 'PENDING' && t.reviewStatus !== 'REJECTED' && (
+                      <span className="badge badge-student" title="Данные внёс студент в личном кабинете">
+                        <Icon name="person" size={13} /> от студента
+                      </span>
+                    )}
+                    <span className={`badge ${TICKET_STATUS_BADGE[t.status]}`}>{TICKET_STATUS_LABEL[t.status]}</span>
+                  </div>
                 </div>
+
+                {t.reviewStatus === 'PENDING' && (
+                  <div className="sub-item-note" style={{ background: 'var(--warning-soft)', color: '#92400e' }}>
+                    Студент добавил этот билет в личном кабинете
+                    {t.submittedByStudentAt ? ` ${formatDateTimeRu(t.submittedByStudentAt)}` : ''}. Проверьте данные по
+                    файлу и примите или отклоните — до этого билет не виден в общем списке.
+                  </div>
+                )}
+                {t.reviewStatus === 'REJECTED' && t.reviewNote && (
+                  <div className="sub-item-note">Причина отклонения: {t.reviewNote}</div>
+                )}
 
                 <div className="sub-item-figures">
                   <div>
@@ -207,6 +272,18 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
                 {t.comment && <div className="sub-item-note">{t.comment}</div>}
 
                 <div className="sub-item-actions">
+                  {t.reviewStatus === 'PENDING' && canEdit && (
+                    <>
+                      <button className="btn btn-sm btn-primary" onClick={() => onApprove(t)} disabled={busy}>
+                        <Icon name="check" size={15} style={{ marginRight: 4 }} />
+                        Принять
+                      </button>
+                      <button className="btn btn-sm btn-danger" onClick={() => setRejecting(t)} disabled={busy}>
+                        <Icon name="close" size={15} style={{ marginRight: 4 }} />
+                        Отклонить
+                      </button>
+                    </>
+                  )}
                   {doc ? (
                     <>
                       <button className="btn btn-sm btn-secondary" onClick={() => onDownload(t)} disabled={busy}>
@@ -270,6 +347,17 @@ export default function TicketsCard({ studentId, studentName, canEdit }: Props) 
           прикреплённый файл рождаются на бэкенде. Но тихая — модалка к этому
           моменту закрыта, и карточке гаснуть незачем. */}
       <AnimatePresence>
+        {rejecting && (
+          <PaymentReasonPrompt
+            key="reject"
+            title="Отклонить билет"
+            message="Студент увидит причину в личном кабинете и сможет подать билет заново."
+            confirmText="Отклонить"
+            danger
+            onCancel={() => setRejecting(null)}
+            onConfirm={(reason) => onReject(rejecting, reason)}
+          />
+        )}
         {modal?.kind === 'create' && (
           <TicketFormModal
             key="create"

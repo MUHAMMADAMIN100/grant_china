@@ -8,6 +8,10 @@ import Icon from '../Icon';
 
 function notificationHref(n: Notification): string | null {
   const p = n.payload || {};
+  // 26.08.2026 — билет от студента ждёт решения: ведём прямо в очередь, а
+  // не в карточку студента (проверка идёт во вкладке «На подтверждении»).
+  // Отзыв очереди уже не касается — там обычная карточка по studentId.
+  if (n.type === 'TICKET_STUDENT_SUBMIT' || n.type === 'TICKET_STUDENT_UPDATE') return '/tickets?tab=pending';
   if (p.applicationId) return `/applications/${p.applicationId}`;
   if (p.studentId) return `/students/${p.studentId}`;
   if (p.taskId) return '/tasks';

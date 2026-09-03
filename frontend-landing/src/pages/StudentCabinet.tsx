@@ -15,6 +15,8 @@ import { connectStudentRealtime, useStudentRealtime, getSocket } from '../realti
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import EnrollmentProgress from '../components/EnrollmentProgress';
 import ProgramsSection from '../components/ProgramsSection';
+import CabinetTickets from '../components/CabinetTickets';
+import VisaClaimControls from '../components/VisaClaimControls';
 import Icon from '../Icon';
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -464,13 +466,22 @@ export default function StudentCabinet() {
                       ? me.visaReceivedAt
                         ? `Отмечено ${new Date(me.visaReceivedAt).toLocaleDateString('ru-RU')}`
                         : 'Подтверждено вашим менеджером'
-                      : 'Менеджер отметит здесь, как только виза будет готова'}
+                      : 'Получили визу? Отметьте ниже — менеджер подтвердит'}
                   </div>
                 </div>
               </div>
+              {/* 26.08.2026 — студент сам сообщает о визе, менеджер подтверждает.
+                  Индикатор выше остаётся истиной из CRM и меняется только после
+                  его решения. */}
+              <VisaClaimControls me={me} onToast={showToast} onChanged={() => load()} />
             </div>
           </div>
         </motion.section>
+
+        {/* 26.08.2026 — билет, который студент добавляет сам (на подтверждение
+            менеджеру). Между менеджерами и документами: это тоже «что от меня
+            нужно», а не справочная информация. */}
+        <CabinetTickets onToast={showToast} />
 
         {/* Менеджеры */}
         <motion.section

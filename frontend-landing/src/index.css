@@ -1684,3 +1684,91 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 @media (max-width: 480px) {
   .uc-dialog-actions .btn { width: 100%; min-width: 0; }
 }
+
+/* ==========================================================================
+   26.08.2026 — «Мой билет» и отметка о визе в личном кабинете
+   ========================================================================== */
+
+.stu-ticket-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.stu-ticket {
+  margin-top: 14px; padding: 16px; border-radius: 12px;
+  background: white; border: 1.5px solid var(--border);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.stu-ticket.is-pending { border-color: #f59e0b; box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12); }
+.stu-ticket.is-cancelled { opacity: 0.7; }
+.stu-ticket-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.stu-ticket-title { display: flex; align-items: center; gap: 10px; }
+.stu-ticket-title .material-symbols-rounded { color: var(--primary); }
+.stu-ticket-route { font-weight: 700; font-size: 15px; }
+.stu-ticket-sub { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+.stu-ticket-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.stu-ticket-badge.pending { background: #fffbeb; color: #b45309; }
+.stu-ticket-badge.approved { background: #ecfdf5; color: #047857; }
+.stu-ticket-badge.rejected { background: #fef2f2; color: #b91c1c; }
+.stu-ticket-badge.manager { background: #eff6ff; color: #1d4ed8; }
+.stu-ticket-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;
+  font-size: 13px;
+}
+.stu-ticket-grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stu-ticket-grid span { color: var(--text-soft); font-size: 12px; }
+.stu-ticket-grid b { font-weight: 600; overflow-wrap: anywhere; }
+.stu-ticket-grid b .material-symbols-rounded { vertical-align: -3px; color: var(--primary); }
+.stu-ticket-muted { color: var(--text-soft); font-weight: 400; font-size: 12px; }
+.stu-ticket-comment { font-size: 13px; color: var(--text); background: var(--bg-soft); padding: 8px 10px; border-radius: 8px; }
+.stu-ticket-reject {
+  display: flex; gap: 8px; align-items: flex-start;
+  background: #fef2f2; color: #991b1b; padding: 10px 12px; border-radius: 8px;
+  font-size: 13px; line-height: 1.45;
+}
+.stu-ticket-reject .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }
+.stu-ticket-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.stu-ticket-actions .btn { display: inline-flex; align-items: center; gap: 4px; }
+.stu-ticket-history { margin-top: 18px; }
+.stu-ticket-history-title { font-size: 13px; font-weight: 600; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 8px; }
+
+.stu-ticket-form {
+  margin-top: 14px; padding: 16px; border-radius: 12px;
+  background: var(--bg-soft); border: 1px solid var(--border);
+}
+.stu-ticket-form-title { font-weight: 700; font-size: 15px; margin-bottom: 12px; }
+.stu-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.stu-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.stu-field > span { color: var(--text-soft); font-size: 12px; font-weight: 600; }
+.stu-field-wide { grid-column: 1 / -1; }
+.stu-field input, .stu-field select, .stu-field textarea {
+  font: inherit; font-size: 14px; padding: 9px 11px;
+  border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--text);
+  width: 100%;
+}
+.stu-field input:focus, .stu-field select:focus, .stu-field textarea:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(213, 43, 43, 0.12);
+}
+.stu-field textarea { resize: vertical; min-height: 56px; }
+.stu-radio-row { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 0; }
+.stu-radio-row label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+.stu-radio-row input { width: auto; }
+
+.stu-visa-claim {
+  margin-top: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+  font-size: 13px; line-height: 1.45;
+}
+.stu-visa-claim.is-pending {
+  flex-direction: row; gap: 10px;
+  background: #fffbeb; color: #92400e; padding: 10px 12px; border-radius: 10px;
+  border-left: 3px solid #f59e0b;
+}
+.stu-visa-claim.is-pending .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }
+.stu-visa-claim .btn { display: inline-flex; align-items: center; gap: 4px; }
+.stu-visa-claim-sub { font-size: 12px; color: var(--text-soft); }
+.stu-visa-claim-rejected {
+  display: flex; gap: 8px; align-items: flex-start;
+  background: #fef2f2; color: #991b1b; padding: 8px 10px; border-radius: 8px;
+}
+.stu-visa-claim-rejected .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }

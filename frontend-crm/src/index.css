@@ -3067,3 +3067,21 @@ select.input-error {
 .tg-fallback-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .tg-fallback-row .btn { flex: 1 1 auto; justify-content: center; }
 .tg-fallback-hint { font-size: 12.5px; line-height: 1.55; color: var(--text-light); }
+
+/* ==========================================================================
+   26.08.2026 — билеты и отметка о визе от студентов из кабинета
+   ========================================================================== */
+
+/* Пометка «данные внёс студент» рядом со статусом билета. */
+.badge-student { background: #f5f3ff; color: #6d28d9; gap: 4px; }
+
+/* Блок отметки о визе в карточке студента (StudentDetail). */
+.visa-claim {
+  margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+  background: var(--warning-soft); border: 1px solid rgba(245, 158, 11, 0.35);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.visa-claim.muted { background: var(--bg); border-color: var(--border); color: var(--text-soft); }
+.visa-claim-text { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; line-height: 1.45; }
+.visa-claim-text .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }
+.visa-claim-actions { display: flex; gap: 6px; flex-wrap: wrap; }

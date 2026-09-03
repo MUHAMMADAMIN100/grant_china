@@ -21,6 +21,7 @@ import { Direction, StudentStatus } from '@prisma/client';
 import { StudentsService } from './students.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
+import { RejectVisaClaimDto } from './dto/visa-claim-review.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -126,6 +127,18 @@ export class StudentsController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateStudentDto, @CurrentUser() user: any) {
     return this.students.update(id, dto, user);
+  }
+
+  // 26.08.2026 — решение по отметке о визе, поданной студентом из кабинета.
+  // Права те же, что у переключателя визы (ensureCanEdit в сервисе).
+  @Post(':id/visa-claim/approve')
+  approveVisaClaim(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.students.approveVisaClaim(id, user);
+  }
+
+  @Post(':id/visa-claim/reject')
+  rejectVisaClaim(@Param('id') id: string, @Body() dto: RejectVisaClaimDto, @CurrentUser() user: any) {
+    return this.students.rejectVisaClaim(id, dto.reason, user);
   }
 
   @Patch(':id/manager')

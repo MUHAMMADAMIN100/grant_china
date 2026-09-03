@@ -40,6 +40,12 @@ export interface TicketDocument {
   createdAt: string;
 }
 
+/**
+ * 26.08.2026 — стадия проверки билета, поданного студентом из кабинета.
+ * null у билетов, заведённых сотрудником: они проверки не проходят.
+ */
+export type TicketReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 export interface Ticket {
   id: string;
   studentId: string;
@@ -54,8 +60,22 @@ export interface Ticket {
   documents: TicketDocument[];
   createdById: string | null;
   createdBy: { id: string; fullName: string } | null;
+  /** Момент подачи студентом из кабинета. null — билет завёл сотрудник. */
+  submittedByStudentAt?: string | null;
+  reviewStatus?: TicketReviewStatus | null;
+  reviewedAt?: string | null;
+  reviewedBy?: { id: string; fullName: string } | null;
+  /** Причина отклонения. */
+  reviewNote?: string | null;
+  /** Сотрудник правил билет после подачи — пометка «от студента» снята. */
+  staffEditedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Данные внёс студент, и сотрудник их ещё не трогал — показать пометку. */
+export function isFromStudent(t: Ticket): boolean {
+  return !!t.submittedByStudentAt && !t.staffEditedAt;
 }
 
 export interface TicketFilters {
@@ -65,6 +85,12 @@ export interface TicketFilters {
   studentId?: string;
   /** Ответственный за студента — таджикский либо китайский менеджер, любой из двух. */
   managerId?: string;
+  /**
+   * Стадия проверки: не задано — только живые билеты (заведены сотрудником
+   * или подтверждены); 'pending' — очередь на подтверждение; 'all' — всё,
+   * включая отклонённые (карточка студента).
+   */
+  review?: 'pending' | 'all';
   /** Диапазон по дате вылета — ISO-строки. */
   from?: string;
   to?: string;
@@ -96,6 +122,22 @@ export interface TicketStats {
 
 export async function ticketStats() {
   const { data } = await api.get<TicketStats>('/tickets/stats');
+  return data;
+}
+
+/** Сколько билетов от студентов ждут решения — счётчик вкладки. */
+export async function pendingTicketsCount() {
+  const { data } = await api.get<{ count: number }>('/tickets/pending/count');
+  return data.count;
+}
+
+export async function approveTicket(id: string) {
+  const { data } = await api.post<Ticket>(`/tickets/${id}/approve`);
+  return data;
+}
+
+export async function rejectTicket(id: string, reason: string) {
+  const { data } = await api.post<Ticket>(`/tickets/${id}/reject`, { reason });
   return data;
 }
 

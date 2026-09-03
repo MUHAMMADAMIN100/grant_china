@@ -33,6 +33,7 @@ import { STUDENT_RESTRICTED_DOC_TYPES } from '../common/access';
 import { assertNotManagedDocument, assertUploadableDocumentType } from '../common/documents';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { StudentForgotPasswordDto, StudentLoginDto } from './dto/student-login.dto';
+import { StudentVisaClaimDto } from './dto/visa-claim.dto';
 import { clearStudentCookie, setStudentCookie } from '../auth/cookie-helpers';
 
 const uploadStorage = diskStorage({
@@ -130,6 +131,24 @@ export class StudentAuthController {
   @Get('me')
   me(@CurrentUser() user: any) {
     return this.auth.me(user.id);
+  }
+
+  /**
+   * 26.08.2026 — отметка о визе от студента. Идёт менеджеру на подтверждение,
+   * сам статус визы не меняет (решение заказчика). Троттлинг — как у фото:
+   * живому человеку хватит, а спамить менеджера уведомлениями циклом не выйдет.
+   */
+  @UseGuards(StudentJwtGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('visa-claim')
+  claimVisa(@CurrentUser() user: any, @Body() dto: StudentVisaClaimDto) {
+    return this.auth.claimVisa(user.id, dto.received);
+  }
+
+  @UseGuards(StudentJwtGuard)
+  @Delete('visa-claim')
+  withdrawVisaClaim(@CurrentUser() user: any) {
+    return this.auth.withdrawVisaClaim(user.id);
   }
 
   @UseGuards(StudentJwtGuard)

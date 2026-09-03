@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Region, Role, TicketStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, Region, Role, TicketReviewStatus, TicketStatus } from '@prisma/client';
 import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
@@ -10,8 +10,10 @@ import { normalizeCity } from '../common/china-cities';
 import { phoneContainsConditions } from '../common/phone';
 import { formatLocalDateTime } from '../scheduler/time';
 import { TasksService } from '../tasks/tasks.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { StudentTicketDto, StudentTicketUpdateDto } from './dto/student-ticket.dto';
 
 /**
  * ТЗ v3 р4 — регион менеджера. Необязательный: часть внутренних вызовов
@@ -42,9 +44,25 @@ function flightTaskOriginKey(ticketId: string, departureAt: Date): string {
   return `flight:${ticketId}:${departureAt.getTime()}`;
 }
 
+/**
+ * 26.08.2026 — билеты, которые для CRM «существуют»: заведены сотрудником
+ * (reviewStatus IS NULL) либо поданы студентом и ПОДТВЕРЖДЕНЫ. Билет на
+ * проверке и отклонённый в общий список, сводку и напоминания не попадают —
+ * решение заказчика: слова студента не работают, пока их не проверили.
+ *
+ * Экспортируется ради джобы напоминаний (flight-reminder.job.ts): у неё свой
+ * where, и без общей константы условие в двух местах разъехалось бы —
+ * менеджер получил бы задачу «подготовить студента к вылету» по рейсу,
+ * которого в его списке нет.
+ */
+export const LIVE_REVIEW_WHERE: Prisma.TicketWhereInput = {
+  OR: [{ reviewStatus: null }, { reviewStatus: TicketReviewStatus.APPROVED }],
+};
+
 const TICKET_INCLUDE = {
   student: { select: { id: true, fullName: true, phones: true, managerId: true, chinaManagerId: true } },
   createdBy: { select: { id: true, fullName: true } },
+  reviewedBy: { select: { id: true, fullName: true } },
   documents: {
     where: { deletedAt: null },
     select: { id: true, filename: true, originalName: true, mimeType: true, size: true, url: true, createdAt: true },
@@ -67,6 +85,13 @@ export interface TicketListFilters {
    * Ровно та же формула, что в grants.service.ts.
    */
   managerId?: string;
+  /**
+   * 26.08.2026 — какие билеты по стадии проверки показывать.
+   *  - undefined: только «живые» (LIVE_REVIEW_WHERE) — общий список раздела;
+   *  - 'pending': только ожидающие подтверждения — вкладка «На подтверждении»;
+   *  - 'all': всё, включая отклонённые — карточка студента, где нужна вся история.
+   */
+  review?: 'pending' | 'all';
   /** Диапазон по дате вылета — «на этой неделе» / «в этом месяце» / кастом. */
   from?: Date;
   to?: Date;
@@ -102,6 +127,9 @@ export class TicketsService {
     // меняет. Прямой доступ к prisma.task запрещён архитектурой — только через
     // TasksService (тот же приём, что в grants.service.ts).
     private tasks: TasksService,
+    // 26.08.2026 — билет от студента должен дойти до менеджера колокольчиком
+    // и в Telegram. Сотрудник о своих же действиях не уведомляется.
+    private notifications: NotificationsService,
   ) {}
 
   private parseDate(raw: string, message: string): Date {
@@ -147,6 +175,9 @@ export class TicketsService {
 
   async findAll(filters: TicketListFilters, user: CurrentUser) {
     const and: Prisma.TicketWhereInput[] = [];
+    // 26.08.2026 — стадия проверки. По умолчанию непроверенное скрыто.
+    if (filters.review === 'pending') and.push({ reviewStatus: TicketReviewStatus.PENDING });
+    else if (filters.review !== 'all') and.push(LIVE_REVIEW_WHERE);
     if (filters.status) and.push({ status: filters.status });
     if (filters.studentId) and.push({ studentId: filters.studentId });
     if (filters.destinationCity) {
@@ -221,7 +252,9 @@ export class TicketsService {
         // периода из ТЗ 4.2 и колонкой «через N дн.»: разворачивать порядок в
         // зависимости от выбранного фильтра значило бы менять поведение списка
         // под пользователем без его ведома.
-        orderBy: { departureAt: 'desc' },
+        // Очередь на подтверждение — в порядке подачи: кто раньше прислал,
+        // того раньше и проверят. Остальным спискам — «свежее сверху».
+        orderBy: filters.review === 'pending' ? { submittedByStudentAt: 'asc' } : { departureAt: 'desc' },
         skip,
         take: pageSize,
         include: TICKET_INCLUDE,
@@ -231,9 +264,19 @@ export class TicketsService {
     return { items, total, page, pageSize };
   }
 
+  /** Счётчик вкладки «На подтверждении» — в объёме видимости пользователя. */
+  async pendingCount(user: CurrentUser) {
+    const count = await this.prisma.ticket.count({
+      where: { deletedAt: null, reviewStatus: TicketReviewStatus.PENDING, student: this.studentScopeWhere(user) },
+    });
+    return { count };
+  }
+
   /** Сводка над таблицей: сколько вылетов впереди и сколько билетов ещё не выкуплено. */
   async stats(user: CurrentUser) {
-    const base: Prisma.TicketWhereInput = { deletedAt: null, student: this.studentScopeWhere(user) };
+    // LIVE_REVIEW_WHERE и здесь: «Вылет ≤ 7 дней» не должен считать рейс,
+    // которого в таблице под сводкой нет.
+    const base: Prisma.TicketWhereInput = { deletedAt: null, ...LIVE_REVIEW_WHERE, student: this.studentScopeWhere(user) };
     const now = new Date();
     const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -398,6 +441,14 @@ export class TicketsService {
       data.smsSentAt = null;
     }
 
+    // 26.08.2026 — сотрудник тронул билет, поданный студентом. С этого момента
+    // пометка «данные внёс студент» в списке снимается (проверенные данные —
+    // уже не слова студента), а студенту правка закрывается: иначе он мог бы
+    // затереть исправление менеджера (решение заказчика).
+    if (existing.submittedByStudentAt && !existing.staffEditedAt) {
+      data.staffEditedAt = new Date();
+    }
+
     // ВОЗВРАТ ИЗ ОТМЕНЫ = ТОЖЕ НОВЫЙ ЦИКЛ. При отмене мы гасим задачу о вылете
     // (см. ниже), но флаг taskCreatedAt остаётся заполненным. Если менеджер
     // отменил билет по ошибке и вернул статус обратно, джоба такой билет уже
@@ -537,6 +588,431 @@ export class TicketsService {
       { id: doc.ticket.id, studentId: doc.ticket.studentId },
       { studentId: doc.ticket.studentId },
     );
+    return { ok: true };
+  }
+  // ------------------------------------------------------------------
+  // 26.08.2026 — проверка билетов, поданных студентом (сторона CRM)
+  // ------------------------------------------------------------------
+
+  /** Билет должен ждать проверки — иначе принять/отклонить нечего. */
+  private assertPending(ticket: TicketRow): void {
+    if (ticket.reviewStatus !== TicketReviewStatus.PENDING) {
+      throw new BadRequestException(
+        ticket.reviewStatus === TicketReviewStatus.APPROVED
+          ? 'Этот билет уже подтверждён'
+          : ticket.reviewStatus === TicketReviewStatus.REJECTED
+            ? 'Этот билет уже отклонён'
+            : 'Этот билет завёл сотрудник — подтверждать нечего',
+      );
+    }
+  }
+
+  /**
+   * Принять билет студента. После этого запись ничем не отличается от
+   * заведённой сотрудником: попадает в общий список, сводку, напоминания.
+   * Уведомление в CRM не шлём — сотрудник и есть автор действия; студент
+   * узнаёт из кабинета по realtime-событию.
+   */
+  async approve(id: string, user: CurrentUser) {
+    const existing = await this.loadForMutation(id, user);
+    this.assertPending(existing);
+    await this.prisma.ticket.update({
+      where: { id },
+      data: {
+        reviewStatus: TicketReviewStatus.APPROVED,
+        reviewedAt: new Date(),
+        reviewedById: user.id,
+        reviewNote: null,
+      },
+    });
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'TICKET_APPROVE',
+        studentId: existing.studentId,
+        studentName: existing.student.fullName,
+        details: `Подтверждён билет студента ${existing.flightNumber} → ${existing.destinationCity}, вылет ${formatLocalDateTime(existing.departureAt, true)}`,
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(
+      existing.student,
+      'ticket:updated',
+      { id, studentId: existing.studentId },
+      { studentId: existing.studentId },
+    );
+    return this.refetch(id);
+  }
+
+  /** Отклонить с причиной. Студент видит причину в кабинете и может подать заново. */
+  async reject(id: string, reason: string, user: CurrentUser) {
+    const existing = await this.loadForMutation(id, user);
+    this.assertPending(existing);
+    const note = reason.trim();
+    await this.prisma.ticket.update({
+      where: { id },
+      data: {
+        reviewStatus: TicketReviewStatus.REJECTED,
+        reviewedAt: new Date(),
+        reviewedById: user.id,
+        reviewNote: note,
+      },
+    });
+    this.activity
+      .log({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'TICKET_REJECT',
+        studentId: existing.studentId,
+        studentName: existing.student.fullName,
+        details: `Отклонён билет студента ${existing.flightNumber} → ${existing.destinationCity}: ${note}`,
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(
+      existing.student,
+      'ticket:updated',
+      { id, studentId: existing.studentId },
+      { studentId: existing.studentId },
+    );
+    return this.refetch(id);
+  }
+
+  // ------------------------------------------------------------------
+  // 26.08.2026 — сторона СТУДЕНТА (личный кабинет, /student-auth/tickets)
+  // ------------------------------------------------------------------
+
+  /**
+   * Что студент видит о своём билете. Без url файла: файлы билетов входят в
+   * STUDENT_RESTRICTED_DOC_TYPES (common/access.ts), /uploads их студенту
+   * не отдаёт — а ссылка, которая ведёт в 403, хуже её отсутствия. Имя и
+   * размер показываем: студент видит, что файл прикреплён и какой.
+   */
+  private static readonly STUDENT_TICKET_SELECT = {
+    id: true,
+    destinationCity: true,
+    departureAt: true,
+    arrivalAt: true,
+    flightNumber: true,
+    airline: true,
+    status: true,
+    comment: true,
+    submittedByStudentAt: true,
+    reviewStatus: true,
+    reviewedAt: true,
+    reviewNote: true,
+    staffEditedAt: true,
+    createdAt: true,
+    updatedAt: true,
+    documents: {
+      where: { deletedAt: null },
+      select: { id: true, originalName: true, size: true, createdAt: true },
+      orderBy: { createdAt: 'desc' as const },
+    },
+  } satisfies Prisma.TicketSelect;
+
+  private async loadOwnStudent(studentId: string) {
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, deletedAt: null },
+      select: { id: true, fullName: true, managerId: true, chinaManagerId: true },
+    });
+    if (!student) throw new NotFoundException('Студент не найден');
+    return student;
+  }
+
+  /**
+   * Свой билет, который ещё МОЖНО править: на проверке и не тронут
+   * сотрудником. Одна проверка на редактирование, отзыв и файлы — чтобы три
+   * места не разошлись в том, когда студент теряет право на правку.
+   * 404 на чужой id: не быть оракулом существования билета.
+   */
+  private async loadOwnEditable(studentId: string, id: string): Promise<TicketRow> {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id, studentId, deletedAt: null },
+      include: TICKET_INCLUDE,
+    });
+    if (!ticket) throw new NotFoundException('Билет не найден');
+    if (ticket.reviewStatus !== TicketReviewStatus.PENDING) {
+      throw new ForbiddenException(
+        ticket.reviewStatus === TicketReviewStatus.APPROVED
+          ? 'Билет уже подтверждён менеджером — изменения теперь только через него'
+          : ticket.reviewStatus === TicketReviewStatus.REJECTED
+            ? 'Этот билет отклонён. Подайте новый'
+            : 'Этот билет завёл менеджер — изменения только через него',
+      );
+    }
+    if (ticket.staffEditedAt) {
+      throw new ForbiddenException('Менеджер уже правил этот билет — дальнейшие изменения только через него');
+    }
+    return ticket;
+  }
+
+  /** Все свои билеты, включая ожидающие и отклонённые — студенту нужна вся история. */
+  async listForStudent(studentId: string) {
+    const items = await this.prisma.ticket.findMany({
+      where: { studentId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: TicketsService.STUDENT_TICKET_SELECT,
+    });
+    // Решение заказчика: один ожидающий билет за раз. Фронту нужен готовый
+    // ответ «можно ли подать ещё», а не вычисление по списку.
+    const pending = items.find((t) => t.reviewStatus === TicketReviewStatus.PENDING) ?? null;
+    return { items, pendingId: pending?.id ?? null };
+  }
+
+  private studentTicketSummary(t: { flightNumber: string; destinationCity: string; departureAt: Date }): string {
+    return `рейс ${t.flightNumber} → ${t.destinationCity}, вылет ${formatLocalDateTime(t.departureAt, true)}`;
+  }
+
+  /** Подача билета из кабинета: сразу на проверку, в общий список не попадает. */
+  async createByStudent(studentId: string, dto: StudentTicketDto, file: TicketFileInput | undefined) {
+    const student = await this.loadOwnStudent(studentId);
+
+    // Один ожидающий за раз — защита от дублей «нажал дважды». Второй билет
+    // подаётся после решения менеджера по первому.
+    const pendingExists = await this.prisma.ticket.count({
+      where: { studentId, deletedAt: null, reviewStatus: TicketReviewStatus.PENDING },
+    });
+    if (pendingExists > 0) {
+      throw new ConflictException('У вас уже есть билет на проверке — дождитесь решения менеджера или измените его');
+    }
+
+    const departureAt = this.parseDate(dto.departureAt, 'Некорректная дата вылета');
+    const arrivalAt = dto.arrivalAt ? this.parseDate(dto.arrivalAt, 'Некорректная дата прилёта') : null;
+    if (arrivalAt && arrivalAt.getTime() < departureAt.getTime()) {
+      throw new BadRequestException('Дата прилёта не может быть раньше даты вылета');
+    }
+    const city = normalizeCity(dto.destinationCity);
+    const flight = dto.flightNumber.trim();
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.ticket.create({
+        data: {
+          studentId,
+          destinationCity: city,
+          departureAt,
+          arrivalAt,
+          flightNumber: flight,
+          airline: dto.airline?.trim() || null,
+          status: dto.status ?? 'PURCHASED',
+          comment: dto.comment?.trim() || null,
+          // createdById пуст намеренно: это не сотрудник. Кто подал — видно
+          // по submittedByStudentAt.
+          createdById: null,
+          submittedByStudentAt: new Date(),
+          reviewStatus: TicketReviewStatus.PENDING,
+        },
+        select: { id: true },
+      });
+      if (file) {
+        await tx.document.create({
+          data: {
+            studentId,
+            ticketId: ticket.id,
+            type: TICKET_DOCUMENT_TYPE,
+            filename: file.filename,
+            originalName: file.originalName,
+            mimeType: file.mimeType,
+            size: file.size,
+            url: file.url,
+          },
+        });
+      }
+      return ticket;
+    });
+
+    const summary = this.studentTicketSummary({ flightNumber: flight, destinationCity: city, departureAt });
+    this.activity
+      .log({
+        actorId: null,
+        actorName: student.fullName,
+        actorRole: 'STUDENT',
+        action: 'TICKET_STUDENT_SUBMIT',
+        studentId,
+        studentName: student.fullName,
+        details: `Студент добавил билет: ${summary}${file ? ' (с файлом)' : ''}`,
+      })
+      .catch(() => undefined);
+    // notifyForStudent — менеджеры студента + Основатель/Администратор,
+    // колокольчик и Telegram (решение заказчика: все четыре канала).
+    this.notifications
+      .notifyForStudent(student, {
+        type: 'TICKET_STUDENT_SUBMIT',
+        title: 'Студент добавил билет',
+        message: `${student.fullName}: ${summary}. Ждёт подтверждения.`,
+        payload: { studentId, ticketId: created.id },
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(student, 'ticket:updated', { id: created.id, studentId }, { studentId });
+
+    return this.prisma.ticket.findUnique({ where: { id: created.id }, select: TicketsService.STUDENT_TICKET_SELECT });
+  }
+
+  async updateByStudent(studentId: string, id: string, dto: StudentTicketUpdateDto) {
+    const existing = await this.loadOwnEditable(studentId, id);
+    const data: Prisma.TicketUpdateInput = {};
+    const changes: string[] = [];
+
+    if (dto.destinationCity !== undefined) {
+      const city = normalizeCity(dto.destinationCity);
+      if (city !== existing.destinationCity) changes.push(`Город: ${existing.destinationCity} → ${city}`);
+      data.destinationCity = city;
+    }
+    if (dto.flightNumber !== undefined) {
+      const flight = dto.flightNumber.trim();
+      if (flight !== existing.flightNumber) changes.push(`Рейс: ${existing.flightNumber} → ${flight}`);
+      data.flightNumber = flight;
+    }
+    // В отличие от правки сотрудником, здесь в журнал и уведомление идёт
+    // ЛЮБОЕ изменённое поле, включая авиакомпанию, прилёт и комментарий:
+    // менеджер проверяет данные студента целиком, и правка «мелочи» после
+    // того, как он уже смотрел заявку, — ровно то, о чём его надо предупредить.
+    if (dto.airline !== undefined) {
+      const airline = dto.airline?.trim() || null;
+      if (airline !== existing.airline) changes.push(`Авиакомпания: ${existing.airline ?? '—'} → ${airline ?? '—'}`);
+      data.airline = airline;
+    }
+    if (dto.status !== undefined) {
+      if (dto.status !== existing.status) changes.push(`Статус: ${existing.status} → ${dto.status}`);
+      data.status = dto.status;
+    }
+    if (dto.comment !== undefined) {
+      const comment = dto.comment?.trim() || null;
+      if (comment !== existing.comment) changes.push(comment ? `Комментарий: ${comment}` : 'Комментарий удалён');
+      data.comment = comment;
+    }
+
+    let nextArrivalAt = existing.arrivalAt;
+    if (dto.arrivalAt !== undefined) {
+      nextArrivalAt = dto.arrivalAt ? this.parseDate(dto.arrivalAt, 'Некорректная дата прилёта') : null;
+      if ((nextArrivalAt?.getTime() ?? null) !== (existing.arrivalAt?.getTime() ?? null)) {
+        changes.push(
+          `Прилёт: ${existing.arrivalAt ? formatLocalDateTime(existing.arrivalAt, true) : '—'} → ${nextArrivalAt ? formatLocalDateTime(nextArrivalAt, true) : '—'}`,
+        );
+      }
+      data.arrivalAt = nextArrivalAt;
+    }
+    let nextDepartureAt = existing.departureAt;
+    if (dto.departureAt !== undefined) {
+      nextDepartureAt = this.parseDate(dto.departureAt, 'Некорректная дата вылета');
+      if (nextDepartureAt.getTime() !== existing.departureAt.getTime()) {
+        changes.push(
+          `Вылет: ${formatLocalDateTime(existing.departureAt, true)} → ${formatLocalDateTime(nextDepartureAt, true)}`,
+        );
+      }
+      data.departureAt = nextDepartureAt;
+    }
+    if (nextArrivalAt && nextArrivalAt.getTime() < nextDepartureAt.getTime()) {
+      throw new BadRequestException('Дата прилёта не может быть раньше даты вылета');
+    }
+
+    await this.prisma.ticket.update({ where: { id }, data });
+
+    if (changes.length) {
+      const details = changes.join('; ');
+      this.activity
+        .log({
+          actorId: null,
+          actorName: existing.student.fullName,
+          actorRole: 'STUDENT',
+          action: 'TICKET_STUDENT_UPDATE',
+          studentId,
+          studentName: existing.student.fullName,
+          details: `Студент изменил билет ${existing.flightNumber}: ${details}`,
+        })
+        .catch(() => undefined);
+      // Менеджеру важно знать, что данные поменялись ПОСЛЕ того, как он мог их
+      // уже смотреть — иначе он подтвердит не то, что видел.
+      this.notifications
+        .notifyForStudent(existing.student, {
+          type: 'TICKET_STUDENT_UPDATE',
+          title: 'Студент изменил билет на проверке',
+          message: `${existing.student.fullName}: ${details}`,
+          payload: { studentId, ticketId: id },
+        })
+        .catch(() => undefined);
+    }
+    this.realtime.emitForStudent(existing.student, 'ticket:updated', { id, studentId }, { studentId });
+
+    return this.prisma.ticket.findUnique({ where: { id }, select: TicketsService.STUDENT_TICKET_SELECT });
+  }
+
+  /** Отзыв заявки — soft-delete, как всё в проекте. Менеджер больше её не видит. */
+  async withdrawByStudent(studentId: string, id: string) {
+    const existing = await this.loadOwnEditable(studentId, id);
+    await this.prisma.ticket.update({ where: { id }, data: { deletedAt: new Date() } });
+    const summary = this.studentTicketSummary(existing);
+    this.activity
+      .log({
+        actorId: null,
+        actorName: existing.student.fullName,
+        actorRole: 'STUDENT',
+        action: 'TICKET_STUDENT_WITHDRAW',
+        studentId,
+        studentName: existing.student.fullName,
+        details: `Студент отозвал билет: ${summary}`,
+      })
+      .catch(() => undefined);
+    this.notifications
+      .notifyForStudent(existing.student, {
+        type: 'TICKET_STUDENT_WITHDRAW',
+        title: 'Студент отозвал билет',
+        message: `${existing.student.fullName}: ${summary} — проверять больше не нужно.`,
+        payload: { studentId },
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(existing.student, 'ticket:updated', { id, studentId }, { studentId });
+    return { ok: true };
+  }
+
+  /**
+   * Файл к своему билету на проверке. Один файл на билет: новый ЗАМЕНЯЕТ
+   * старый (старый — soft-delete), чтобы менеджер не выбирал между двумя
+   * квитанциями, какая настоящая.
+   */
+  async addDocumentByStudent(studentId: string, id: string, file: TicketFileInput | undefined) {
+    if (!file) throw new BadRequestException('Файл не передан');
+    const existing = await this.loadOwnEditable(studentId, id);
+    const doc = await this.prisma.$transaction(async (tx) => {
+      await tx.document.updateMany({
+        where: { ticketId: id, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      return tx.document.create({
+        data: {
+          studentId,
+          ticketId: id,
+          type: TICKET_DOCUMENT_TYPE,
+          filename: file.filename,
+          originalName: file.originalName,
+          mimeType: file.mimeType,
+          size: file.size,
+          url: file.url,
+        },
+        select: { id: true, originalName: true, size: true, createdAt: true },
+      });
+    });
+    this.activity
+      .log({
+        actorId: null,
+        actorName: existing.student.fullName,
+        actorRole: 'STUDENT',
+        action: 'TICKET_STUDENT_UPDATE',
+        studentId,
+        studentName: existing.student.fullName,
+        details: `Студент прикрепил файл к билету ${existing.flightNumber}: ${file.originalName}`,
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(existing.student, 'ticket:updated', { id, studentId }, { studentId });
+    return doc;
+  }
+
+  async removeDocumentByStudent(studentId: string, id: string, docId: string) {
+    const existing = await this.loadOwnEditable(studentId, id);
+    const doc = await this.prisma.document.findFirst({ where: { id: docId, ticketId: id, deletedAt: null } });
+    if (!doc) throw new NotFoundException('Файл билета не найден');
+    await this.prisma.document.update({ where: { id: docId }, data: { deletedAt: new Date() } });
+    this.realtime.emitForStudent(existing.student, 'ticket:updated', { id, studentId }, { studentId });
     return { ok: true };
   }
 }

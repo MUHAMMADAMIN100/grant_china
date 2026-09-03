@@ -138,6 +138,8 @@ model User {
   // разделу 5 выше): в проекте есть prisma.user.findFirst({ where }) без
   // select, и любой новый скаляр разъехался бы по коду сам собой.
   createdTickets        Ticket[]             @relation("TicketCreatedBy")
+  // 26.08.2026 — кто принял/отклонил билет, поданный студентом из кабинета.
+  reviewedTickets       Ticket[]             @relation("TicketReviewedBy")
   createdArticles       KnowledgeArticle[]   @relation("KnowledgeArticleCreatedBy")
   updatedArticles       KnowledgeArticle[]   @relation("KnowledgeArticleUpdatedBy")
   aiMessages            AiChatMessage[]      @relation("AiChatMessageUser")
@@ -409,6 +411,36 @@ model Student {
   /// Для обоих сценариев выше её достаточно; точную дату штампа менеджер
   /// при необходимости пишет в комментарий карточки.
   visaReceivedAt  DateTime?
+
+  // ── 26.08.2026 — отметка о визе ОТ СТУДЕНТА, на подтверждение менеджеру. ──
+  //
+  // Студент в кабинете нажимает «Я получил визу» (или «визы ещё нет»), но
+  // сам флаг visaReceived от этого НЕ меняется — решение заказчика: слова
+  // студента идут на проверку, а истину в CRM ставит сотрудник. Поэтому
+  // заявка живёт в отдельных полях, а не переключает visaReceived напрямую.
+  //
+  // Все поля необязательные: деплой идёт через `prisma db push
+  // --accept-data-loss`, NOT NULL без дефолта уронил бы 204 студентов.
+  //
+  // Жизненный цикл: подача ставит visaClaimReceived + visaClaimedAt и
+  // обнуляет три поля решения; менеджер выставляет visaClaimReviewedAt,
+  // visaClaimApproved и (при отказе) visaClaimNote. «Ожидает проверки» ⟺
+  // visaClaimedAt IS NOT NULL AND visaClaimReviewedAt IS NULL. Поля решения
+  // не стираются при подтверждении: студент в кабинете видит итог до
+  // следующей своей заявки.
+  //
+  // Скаляры Student намеренно — как и сам visaReceived, они ДОЛЖНЫ уезжать
+  // студенту в /student-auth/me: там он видит «ожидает» / «отклонено: почему».
+  /// Что заявил студент: true — «визу получил», false — «визы ещё нет».
+  visaClaimReceived   Boolean?
+  /// Когда студент подал отметку. null — заявок не было.
+  visaClaimedAt       DateTime?
+  /// Когда менеджер вынес решение. null при незакрытой заявке.
+  visaClaimReviewedAt DateTime?
+  /// Итог решения: true — подтверждено (visaReceived приведён к заявке), false — отклонено.
+  visaClaimApproved   Boolean?
+  /// Причина отклонения — видна студенту в кабинете.
+  visaClaimNote       String?
   managerId       String?
   manager         User?         @relation("StudentManager", fields: [managerId], references: [id], onDelete: SetNull)
   chinaManagerId  String?
@@ -1839,6 +1871,16 @@ enum TicketStatus {
   CANCELLED // Отменён
 }
 
+// 26.08.2026 — стадия проверки билета, поданного студентом (Ticket.reviewStatus).
+// Новый тип, а не значения в TicketStatus: статус рейса («выкуплен»,
+// «отменён») и стадия проверки данных — независимые оси, у подтверждённого
+// билета есть и то и другое. Новый enum для db push безопасен — CREATE TYPE.
+enum TicketReviewStatus {
+  PENDING // ждёт проверки сотрудником
+  APPROVED // принят — билет стал обычным
+  REJECTED // отклонён с причиной
+}
+
 // ТЗ «Билеты», п.3. ОТДЕЛЬНАЯ модель, а не поля в Student:
 //  1) у студента бывает НЕСКОЛЬКО перелётов (вылет, стыковка, обратный,
 //     перелёт на второй год обучения) — плоские поля вместили бы один;
@@ -1897,6 +1939,34 @@ model Ticket {
   // остаётся (та же семантика, что у Payment.createdBy).
   createdById String?
   createdBy   User?   @relation("TicketCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // ── 26.08.2026 — билет, поданный СТУДЕНТОМ из личного кабинета. ──
+  //
+  // Решение заказчика: данные студента не попадают в рабочий список, пока их
+  // не проверил сотрудник. Поэтому у билета есть стадия проверки, а не
+  // отдельная таблица «заявок на билет»: после подтверждения это тот же
+  // самый билет со всей историей, файлами и напоминаниями — без копирования
+  // записи и без двух источников истины про один рейс.
+  //
+  // Инвариант видимости (см. tickets.service.ts LIVE_REVIEW_WHERE):
+  // в общий список, сводку и джобу напоминаний попадают ТОЛЬКО билеты с
+  // reviewStatus IS NULL (завёл сотрудник) либо APPROVED. PENDING/REJECTED
+  // видны во вкладке «На подтверждении» и в карточке студента.
+  //
+  // Все поля необязательные — по той же причине, что у визы выше.
+  /// Момент подачи из кабинета. null — билет завёл сотрудник в CRM.
+  submittedByStudentAt DateTime?
+  /// Стадия проверки. null у билетов сотрудника — они проверки не проходят.
+  reviewStatus TicketReviewStatus?
+  reviewedAt   DateTime?
+  reviewedById String?
+  reviewedBy   User?   @relation("TicketReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  /// Причина отклонения — студент видит её в кабинете и может подать заново.
+  reviewNote   String?
+  /// Сотрудник правил подтверждённый билет. С этого момента пометка «данные
+  /// внёс студент» снимается, а студенту поля закрыты — чтобы он не затёр
+  /// проверенное (решение заказчика).
+  staffEditedAt DateTime?
 
   // ── Автоматизация напоминаний (решение заказчика, сверх ТЗ). ──
   // Флаги идемпотентности планировщика — тот же приём, что

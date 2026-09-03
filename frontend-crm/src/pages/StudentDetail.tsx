@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, returnStudentFromChina, transferStudentToChina, updateStudent, uploadPhoto } from '../api/students';
+import { approveVisaClaim, assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, rejectVisaClaim, returnStudentFromChina, transferStudentToChina, updateStudent, uploadPhoto } from '../api/students';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL, isFounder, isPrivileged } from '../api/types';
@@ -18,6 +18,7 @@ import BackButton from '../components/BackButton';
 import GrantCard from '../components/GrantCard';
 import ContractCard from '../components/ContractCard';
 import TicketsCard from '../components/TicketsCard';
+import PaymentReasonPrompt from '../components/PaymentReasonPrompt';
 import CallsCard from '../components/CallsCard';
 import CommentsFeed from '../components/CommentsFeed';
 import Icon from '../Icon';
@@ -233,6 +234,9 @@ export default function StudentDetail() {
   // и «идёт сохранение» у него своё: блокировать всю карточку ради одного
   // клика незачем, а два клика подряд по «Да»/«Нет» дали бы гонку запросов.
   const [visaSaving, setVisaSaving] = useState(false);
+  // 26.08.2026 — отметка о визе от студента: решение менеджера.
+  const [visaClaimBusy, setVisaClaimBusy] = useState(false);
+  const [visaClaimRejecting, setVisaClaimRejecting] = useState(false);
   // ТЗ «Разделение воронок» — модалка выбора получателя открывается кнопкой
   // «Передать в Китай»; сама передача (как и возврат) идёт оптимистично,
   // см. onTransferToChina/onReturnFromChina ниже.
@@ -447,6 +451,41 @@ export default function StudentDetail() {
     // а защита от гонки двух PATCH при быстрых кликах «Да»/«Нет» подряд.
     setVisaSaving(false);
     if (saved) toast(next ? 'Отмечено: виза получена' : 'Отметка о визе снята', 'success');
+  };
+
+  /**
+   * 26.08.2026 — подтвердить/отклонить отметку о визе от студента. Ответ
+   * сервера — полная карточка (STUDENT_SELECT): кладём её целиком, как после
+   * PATCH. Оптимистично не делаем: и флаг, и поля заявки, и дата решения
+   * рождаются на сервере, предсказывать их нечем.
+   */
+  const onVisaClaimApprove = async () => {
+    if (!id || visaClaimBusy) return;
+    setVisaClaimBusy(true);
+    try {
+      const s = await approveVisaClaim(id);
+      setStudent(s);
+      toast('Отметка студента подтверждена', 'success');
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Не удалось подтвердить отметку', 'error');
+    } finally {
+      setVisaClaimBusy(false);
+    }
+  };
+
+  const onVisaClaimReject = async (reason: string) => {
+    setVisaClaimRejecting(false);
+    if (!id || visaClaimBusy) return;
+    setVisaClaimBusy(true);
+    try {
+      const s = await rejectVisaClaim(id, reason);
+      setStudent(s);
+      toast('Отметка отклонена — студент увидит причину в кабинете', 'success');
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Не удалось отклонить отметку', 'error');
+    } finally {
+      setVisaClaimBusy(false);
+    }
   };
 
   /**
@@ -939,6 +978,54 @@ export default function StudentDetail() {
                   saving={visaSaving}
                   onChange={onVisaChange}
                 />
+                {/* 26.08.2026 — отметка от студента из кабинета. Показана, пока
+                    ждёт решения; подтверждение переключает визу ровно так, как
+                    если бы менеджер нажал «Да»/«Нет» сам. */}
+                {student.visaClaimedAt && !student.visaClaimReviewedAt && student.visaClaimReceived !== null && (
+                  <div className="visa-claim">
+                    <div className="visa-claim-text">
+                      <Icon name="person" size={16} />
+                      <span>
+                        Студент отметил в кабинете: <b>{student.visaClaimReceived ? 'визу получил' : 'визы ещё нет'}</b>
+                        {' · '}
+                        {new Date(student.visaClaimedAt).toLocaleDateString('ru-RU')}
+                      </span>
+                    </div>
+                    {canEdit && (
+                      <div className="visa-claim-actions">
+                        <button className="btn btn-sm btn-primary" onClick={onVisaClaimApprove} disabled={visaClaimBusy}>
+                          <Icon name="check" size={15} style={{ marginRight: 4 }} />
+                          Подтвердить
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => setVisaClaimRejecting(true)} disabled={visaClaimBusy}>
+                          <Icon name="close" size={15} style={{ marginRight: 4 }} />
+                          Отклонить
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {student.visaClaimReviewedAt && student.visaClaimApproved === false && student.visaClaimNote && (
+                  <div className="visa-claim muted">
+                    <div className="visa-claim-text">
+                      <Icon name="block" size={16} />
+                      <span>
+                        Отметка студента «{student.visaClaimReceived ? 'визу получил' : 'визы ещё нет'}» отклонена
+                        {' '}{new Date(student.visaClaimReviewedAt).toLocaleDateString('ru-RU')}: {student.visaClaimNote}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {visaClaimRejecting && (
+                  <PaymentReasonPrompt
+                    title="Отклонить отметку о визе"
+                    message="Студент увидит причину в личном кабинете и сможет отметить снова."
+                    confirmText="Отклонить"
+                    danger
+                    onCancel={() => setVisaClaimRejecting(false)}
+                    onConfirm={onVisaClaimReject}
+                  />
+                )}
               </div>
             </div>
           </div>

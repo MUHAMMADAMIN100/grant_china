@@ -7,8 +7,10 @@ import {
   TICKET_STATUS_OPTIONS,
   deleteTicket,
   deleteTicketDocument,
+  isFromStudent,
   listChinaCities,
   listTickets,
+  pendingTicketsCount,
   ticketStats,
   uploadTicketDocument,
   type ChinaCity,
@@ -30,6 +32,7 @@ import { removeById, runOptimistic } from '../utils/optimistic';
 import TicketFormModal from '../components/TicketFormModal';
 import Pagination from '../components/Pagination';
 import StatTile, { type StatDetail } from '../components/StatTile';
+import PendingTicketsTable from '../components/PendingTicketsTable';
 import Icon from '../Icon';
 import { staggerContainer } from '../motion';
 
@@ -98,6 +101,10 @@ export default function Tickets() {
       // список сотрудников отдаёт GET /users с @Roles(FOUNDER, ADMIN), а
       // менеджеру фильтр и не нужен — он видит только своих студентов.
       manager: '',
+      // 26.08.2026 — 'all' | 'pending': общий список либо очередь билетов,
+      // поданных студентами из кабинета. В URL, чтобы ссылка из колокольчика
+      // открывала сразу очередь.
+      tab: 'all',
       // '' — все даты; 'week' | 'month' — пресеты из ТЗ; 'custom' — свои даты.
       range: '',
       from: '',
@@ -111,6 +118,7 @@ export default function Tickets() {
   const city = filters.city;
   const status = filters.status as TicketStatus | '';
   const manager = filters.manager;
+  const tab = filters.tab === 'pending' ? 'pending' : 'all';
   const range = filters.range as '' | 'week' | 'month' | 'custom';
   const from = filters.from;
   const to = filters.to;
@@ -121,6 +129,7 @@ export default function Tickets() {
   const [stats, setStats] = useState<TicketStats | null>(null);
   const [cities, setCities] = useState<ChinaCity[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -202,6 +211,10 @@ export default function Tickets() {
 
   const loadStats = () => {
     ticketStats().then(setStats).catch(() => setStats(null));
+    // Счётчик вкладки живёт рядом со сводкой: обе цифры меняются от одних и
+    // тех же событий (подача, решение, отзыв), и обновлять их одним махом
+    // проще, чем помнить два набора триггеров.
+    pendingTicketsCount().then(setPendingCount).catch(() => setPendingCount(0));
   };
 
   useEffect(() => {
@@ -558,6 +571,21 @@ export default function Tickets() {
       <motion.div className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
         <div className="card-header">
           <h2 className="card-title">Билеты</h2>
+          {/* 26.08.2026 — очередь билетов от студентов. Тот же переключатель,
+              что «На одобрении» в Финансах: одна привычка на два раздела. */}
+          <div className="scope-switch">
+            <button className={`scope-btn${tab === 'all' ? ' active' : ''}`} onClick={() => setFilters({ tab: 'all' })}>
+              <Icon name="flight" size={16} />
+              Все билеты
+            </button>
+            <button
+              className={`scope-btn${tab === 'pending' ? ' active' : ''}`}
+              onClick={() => setFilters({ tab: 'pending' })}
+            >
+              <Icon name="pending_actions" size={16} />
+              На подтверждении{pendingCount > 0 ? ` (${pendingCount})` : ''}
+            </button>
+          </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isAdmin && (
               <button className="btn btn-secondary" onClick={onExport} disabled={exporting || loading}>
@@ -579,6 +607,15 @@ export default function Tickets() {
         </div>
 
         <div className="card-body">
+          {tab === 'pending' ? (
+            <PendingTicketsTable
+              onChanged={() => {
+                loadStats();
+                load({ silent: true });
+              }}
+            />
+          ) : (
+          <>
           <div className="filters">
             {/* ТЗ v3 раздел 1. tickets.service.findAll ищет по четырём полям:
                 flightNumber, airline, student.fullName и student.phoneSearch
@@ -698,6 +735,13 @@ export default function Tickets() {
                           </td>
                           <td data-label="Статус">
                             <span className={`badge ${TICKET_STATUS_BADGE[t.status]}`}>{TICKET_STATUS_LABEL[t.status]}</span>
+                            {/* Данные внёс студент, сотрудник их не правил — источник
+                                виден в строке, чтобы при расхождении было ясно, кому верить. */}
+                            {isFromStudent(t) && (
+                              <span className="badge badge-student" title="Данные внёс студент в личном кабинете, менеджер подтвердил">
+                                <Icon name="person" size={13} /> от студента
+                              </span>
+                            )}
                           </td>
                           <td data-label="Действия">
                             <div className="row-actions">
@@ -770,6 +814,8 @@ export default function Tickets() {
 
           {!loading && (
             <Pagination page={page} total={total} pageSize={PAGE_SIZE} onChange={(p) => setFilter('page', String(p))} />
+          )}
+          </>
           )}
         </div>
       </motion.div>

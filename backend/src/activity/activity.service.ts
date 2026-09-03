@@ -114,6 +114,17 @@ export type ActivityAction =
   | 'TICKET_CREATE'
   | 'TICKET_UPDATE'
   | 'TICKET_DELETE'
+  // 26.08.2026 — билет и отметка о визе ОТ СТУДЕНТА из личного кабинета.
+  // actorId у студенческих событий null (это не User), actorName — ФИО
+  // студента, actorRole — 'STUDENT'. studentId есть всегда.
+  | 'TICKET_STUDENT_SUBMIT'
+  | 'TICKET_STUDENT_UPDATE'
+  | 'TICKET_STUDENT_WITHDRAW'
+  | 'TICKET_APPROVE'
+  | 'TICKET_REJECT'
+  | 'VISA_CLAIM'
+  | 'VISA_CLAIM_APPROVE'
+  | 'VISA_CLAIM_REJECT'
   // ТЗ 6.1 (волна 8) — база знаний (knowledge.service.ts). studentId: null —
   // это внутренний регламент, а не событие карточки студента.
   | 'KNOWLEDGE_CREATE'

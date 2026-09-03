@@ -78,6 +78,17 @@ export async function updateStudent(id: string, payload: Partial<Student>) {
   return data;
 }
 
+/** 26.08.2026 — решение по отметке о визе, поданной студентом из кабинета. */
+export async function approveVisaClaim(id: string) {
+  const { data } = await api.post<Student>(`/students/${id}/visa-claim/approve`);
+  return data;
+}
+
+export async function rejectVisaClaim(id: string, reason: string) {
+  const { data } = await api.post<Student>(`/students/${id}/visa-claim/reject`, { reason });
+  return data;
+}
+
 export async function assignStudentManager(
   id: string,
   patch: { managerId?: string | null; chinaManagerId?: string | null },

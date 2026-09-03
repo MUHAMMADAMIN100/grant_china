@@ -6,11 +6,20 @@ import { StudentAuthController } from './student-auth.controller';
 import { StudentAuthService } from './student-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailModule } from '../mail/mail.module';
+import { TicketsModule } from '../tickets/tickets.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { StudentTicketsController } from './student-tickets.controller';
 
 @Module({
   imports: [
     PassportModule,
     MailModule,
+    // 26.08.2026 — билеты и отметка о визе из кабинета. TicketsModule даёт
+    // TicketsService (логика билета одна, кто бы его ни подал),
+    // NotificationsModule — уведомление менеджеру об отметке визы.
+    // Обратной зависимости нет: TicketsModule про student-auth не знает.
+    TicketsModule,
+    NotificationsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -26,7 +35,7 @@ import { MailModule } from '../mail/mail.module';
       }),
     }),
   ],
-  controllers: [StudentAuthController],
+  controllers: [StudentAuthController, StudentTicketsController],
   providers: [StudentAuthService, PrismaService],
 })
 export class StudentAuthModule {}

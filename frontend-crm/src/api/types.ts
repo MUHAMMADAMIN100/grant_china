@@ -292,6 +292,16 @@ export interface Student {
   /** Момент отметки о визе; проставляется сервером. null — визы ещё нет. */
   visaReceivedAt?: string | null;
   /**
+   * 26.08.2026 — отметка о визе ОТ СТУДЕНТА, ждущая решения менеджера.
+   * Ожидает ⟺ visaClaimedAt задан и visaClaimReviewedAt пуст. Приходит
+   * только в карточке (STUDENT_SELECT), в списке этих полей нет.
+   */
+  visaClaimReceived?: boolean | null;
+  visaClaimedAt?: string | null;
+  visaClaimReviewedAt?: string | null;
+  visaClaimApproved?: boolean | null;
+  visaClaimNote?: string | null;
+  /**
    * ТЗ «Разделение воронок» (backend e143a7d) — момент передачи студента в
    * китайский офис. null/undefined — студент ещё ведётся Таджикистаном.
    * По этому же полю сервер решает доступ китайского менеджера к карточке

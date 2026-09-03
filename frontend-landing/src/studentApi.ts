@@ -114,6 +114,16 @@ export type StudentMe = {
   visaReceived: boolean;
   /** Когда визу отметили полученной. null — визы ещё нет. */
   visaReceivedAt: string | null;
+  /**
+   * 26.08.2026 — отметка о визе, которую студент подал сам. Ожидает решения,
+   * если visaClaimedAt задан, а visaClaimReviewedAt пуст. После решения:
+   * visaClaimApproved true/false и (при отказе) visaClaimNote.
+   */
+  visaClaimReceived?: boolean | null;
+  visaClaimedAt?: string | null;
+  visaClaimReviewedAt?: string | null;
+  visaClaimApproved?: boolean | null;
+  visaClaimNote?: string | null;
   documents: StudentDoc[];
   manager: { id: string; fullName: string; email: string } | null;
   chinaManager: { id: string; fullName: string; email: string } | null;
@@ -210,5 +220,106 @@ export async function listStudentPrograms(filters: {
 
 export async function getStudentProgramFilters() {
   const { data } = await client.get<{ cities: string[]; majors: string[] }>('/student-auth/programs/filters');
+  return data;
+}
+
+// ============================================================================
+// 26.08.2026 — билет и отметка о визе из личного кабинета.
+// Контракт зеркалит backend/src/student-auth/student-tickets.controller.ts
+// и StudentAuthService.claimVisa(). Бэкенд не отдаёт url файла: файлы
+// билетов студенту через /uploads недоступны, поэтому в StudentTicketDoc его нет.
+// ============================================================================
+
+export type StudentTicketStatus = 'BOOKED' | 'PURCHASED' | 'CHANGED' | 'CANCELLED';
+export type StudentTicketReview = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface StudentTicketDoc {
+  id: string;
+  originalName: string;
+  size: number;
+  createdAt: string;
+}
+
+export interface StudentTicket {
+  id: string;
+  destinationCity: string;
+  departureAt: string;
+  arrivalAt: string | null;
+  flightNumber: string;
+  airline: string | null;
+  status: StudentTicketStatus;
+  comment: string | null;
+  submittedByStudentAt: string | null;
+  /** null — билет завёл менеджер, он не проходит проверку. */
+  reviewStatus: StudentTicketReview | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  staffEditedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  documents: StudentTicketDoc[];
+}
+
+export interface StudentTicketPayload {
+  destinationCity: string;
+  /** ISO — new Date(datetime-local).toISOString(). */
+  departureAt: string;
+  arrivalAt?: string;
+  flightNumber: string;
+  airline?: string;
+  status?: 'BOOKED' | 'PURCHASED';
+  comment?: string;
+}
+
+export async function listMyTickets() {
+  const { data } = await client.get<{ items: StudentTicket[]; pendingId: string | null }>('/student-auth/tickets');
+  return data;
+}
+
+export async function listTicketCities() {
+  const { data } = await client.get<{ items: { value: string; latin: string }[] }>('/student-auth/tickets/cities');
+  return data.items;
+}
+
+export async function submitMyTicket(payload: StudentTicketPayload, file?: File | null) {
+  const fd = new FormData();
+  Object.entries(payload).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') fd.append(k, String(v));
+  });
+  if (file) fd.append('file', file);
+  const { data } = await client.post<StudentTicket>('/student-auth/tickets', fd);
+  return data;
+}
+
+export async function updateMyTicket(id: string, payload: Partial<StudentTicketPayload> & { arrivalAt?: string }) {
+  const { data } = await client.patch<StudentTicket>(`/student-auth/tickets/${id}`, payload);
+  return data;
+}
+
+export async function withdrawMyTicket(id: string) {
+  const { data } = await client.delete<{ ok: true }>(`/student-auth/tickets/${id}`);
+  return data;
+}
+
+export async function attachMyTicketFile(id: string, file: File) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const { data } = await client.post<StudentTicketDoc>(`/student-auth/tickets/${id}/documents`, fd);
+  return data;
+}
+
+export async function removeMyTicketFile(id: string, docId: string) {
+  const { data } = await client.delete<{ ok: true }>(`/student-auth/tickets/${id}/documents/${docId}`);
+  return data;
+}
+
+/** Отметка «визу получил» / «визы ещё нет» — уходит менеджеру на подтверждение. */
+export async function claimVisa(received: boolean) {
+  const { data } = await client.post<{ ok: true }>('/student-auth/visa-claim', { received });
+  return data;
+}
+
+export async function withdrawVisaClaim() {
+  const { data } = await client.delete<{ ok: true }>('/student-auth/visa-claim');
   return data;
 }

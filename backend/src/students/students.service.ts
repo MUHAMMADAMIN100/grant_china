@@ -45,6 +45,13 @@ const STUDENT_SELECT = {
   // в каждый ответ по заявкам смысла нет.
   visaReceived: true,
   visaReceivedAt: true,
+  // 26.08.2026 — отметка о визе от студента, ждущая решения менеджера.
+  // Только в карточке: решение принимают здесь, списку она не нужна.
+  visaClaimReceived: true,
+  visaClaimedAt: true,
+  visaClaimReviewedAt: true,
+  visaClaimApproved: true,
+  visaClaimNote: true,
   // MANAGED_DOCUMENT_TYPES — чеки платежей (payments/) и файлы билетов
   // (tickets/): это Document, но принадлежат своим разделам, а не чек-листу
   // документов студента. Они показываются внутри карточки платежа и карточки
@@ -1105,5 +1112,108 @@ export class StudentsService implements OnModuleInit {
       this.prisma.student.groupBy({ by: ['direction'], _count: true, where }),
     ]);
     return { total, byCabinet, byDirection };
+  }
+
+  // ------------------------------------------------------------------
+  // 26.08.2026 — отметка о визе от студента: решение менеджера
+  // ------------------------------------------------------------------
+
+  private async loadForVisaClaim(id: string, user: CurrentUser) {
+    const student = await this.prisma.student.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        fullName: true,
+        managerId: true,
+        chinaManagerId: true,
+        transferredToChinaAt: true,
+        visaReceived: true,
+        visaClaimReceived: true,
+        visaClaimedAt: true,
+        visaClaimReviewedAt: true,
+      },
+    });
+    if (!student) throw new NotFoundException('Студент не найден');
+    // Те же права, что у переключателя визы в карточке: Основатель,
+    // Администратор и назначенный менеджер студента.
+    this.ensureCanEdit(student, user);
+    if (!student.visaClaimedAt || student.visaClaimReviewedAt || student.visaClaimReceived === null) {
+      throw new BadRequestException('У студента нет отметки о визе, ожидающей подтверждения');
+    }
+    return student;
+  }
+
+  /**
+   * Подтвердить отметку студента: visaReceived приводится к тому, что он
+   * заявил, — ровно так, как если бы менеджер переключил визу сам (та же
+   * дата отметки, та же запись в журнале). Уведомляем менеджеров студента и
+   * руководство, как и при ручном переключении (notifyForStudent).
+   */
+  async approveVisaClaim(id: string, user: CurrentUser) {
+    const student = await this.loadForVisaClaim(id, user);
+    const next = student.visaClaimReceived as boolean;
+    const changed = next !== student.visaReceived;
+    const updated = await this.prisma.student.update({
+      where: { id },
+      data: {
+        visaReceived: next,
+        ...(changed ? { visaReceivedAt: next ? new Date() : null } : {}),
+        visaClaimReviewedAt: new Date(),
+        visaClaimApproved: true,
+        visaClaimNote: null,
+      },
+      select: STUDENT_SELECT,
+    });
+    const visaLabel = (v: boolean) => (v ? 'Да' : 'Нет');
+    const details = changed
+      ? `Подтверждена отметка студента. Виза получена: ${visaLabel(student.visaReceived)} → ${visaLabel(next)}`
+      : `Подтверждена отметка студента. Виза получена: ${visaLabel(next)} (без изменений)`;
+    this.activity
+      ?.log?.({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'VISA_CLAIM_APPROVE',
+        studentId: id,
+        studentName: student.fullName,
+        details,
+      })
+      .catch(() => undefined);
+    if (changed) {
+      this.notifications
+        ?.notifyForStudent?.(updated, {
+          type: 'VISA_CLAIM_APPROVE',
+          title: 'Статус визы обновлён',
+          message: `${student.fullName}: ${details}`,
+          payload: { studentId: id },
+        })
+        .catch(() => undefined);
+    }
+    // student:updated уходит и в комнату студента: кабинет перечитает /me и
+    // покажет «подтверждено» вместо «ожидает».
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId: id }, { studentId: id });
+    return updated;
+  }
+
+  /** Отклонить с причиной — студент увидит её в кабинете. Флаг визы не трогаем. */
+  async rejectVisaClaim(id: string, reason: string, user: CurrentUser) {
+    const student = await this.loadForVisaClaim(id, user);
+    const note = reason.trim();
+    const updated = await this.prisma.student.update({
+      where: { id },
+      data: { visaClaimReviewedAt: new Date(), visaClaimApproved: false, visaClaimNote: note },
+      select: STUDENT_SELECT,
+    });
+    this.activity
+      ?.log?.({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'VISA_CLAIM_REJECT',
+        studentId: id,
+        studentName: student.fullName,
+        details: `Отклонена отметка студента «${student.visaClaimReceived ? 'визу получил' : 'визы ещё нет'}»: ${note}`,
+      })
+      .catch(() => undefined);
+    this.realtime.emitForStudent(updated, 'student:updated', { studentId: id }, { studentId: id });
+    return updated;
   }
 }

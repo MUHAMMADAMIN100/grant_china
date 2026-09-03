@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Role, TicketStatus } from '@prisma/client';
+import { LIVE_REVIEW_WHERE } from '../../tickets/tickets.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { SmsService } from '../../sms/sms.service';
@@ -99,6 +100,11 @@ export class FlightReminderJob implements ScheduledJob {
         deletedAt: null,
         taskCreatedAt: null,
         status: { not: TicketStatus.CANCELLED },
+        // 26.08.2026 — билет, поданный студентом и ещё не подтверждённый
+        // (или отклонённый), для CRM не существует: ни задачи менеджеру, ни
+        // SMS студенту по непроверенному рейсу. Условие общее с
+        // tickets.service.ts — иначе список и джоба разойдутся.
+        ...LIVE_REVIEW_WHERE,
         departureAt: { gte: lowerBound, lte: upperBound },
         // Отчисленный/архивный студент никуда не летит.
         student: { is: { deletedAt: null, status: { in: ['ACTIVE', 'PAUSED'] } } },
@@ -246,6 +252,7 @@ export class FlightReminderJob implements ScheduledJob {
         deletedAt: null,
         smsSentAt: null,
         status: { not: TicketStatus.CANCELLED },
+        ...LIVE_REVIEW_WHERE,
         departureAt: { gte: lowerBound, lte: upperBound },
         student: { is: { deletedAt: null, status: { in: ['ACTIVE', 'PAUSED'] } } },
       },
