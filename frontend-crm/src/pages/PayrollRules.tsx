@@ -12,7 +12,8 @@ import {
   PAYMENT_STAGE_LABEL,
   canManageFinance,
 } from '../api/types';
-import type { BonusRuleSimulateResult } from '../api/types';
+import type { BonusRuleSimulateItem, BonusRuleSimulateResult } from '../api/types';
+import SimulationDetailModal from '../components/SimulationDetailModal';
 import {
   activateRuleSet,
   archiveRuleSet,
@@ -163,6 +164,8 @@ export default function PayrollRules() {
   const simDefaults = useMemo(() => ({ simPeriod: currentMonthKey() }), []);
   const [simFilters, setSimFilter] = useUrlFilter(simDefaults);
   const [simResult, setSimResult] = useState<BonusRuleSimulateResult | null>(null);
+  // 03.09.2026 — строка симулятора раскрывается в расшифровку «было/стало».
+  const [simDetail, setSimDetail] = useState<BonusRuleSimulateItem | null>(null);
   const [simLoading, setSimLoading] = useState(false);
 
   // Счётчик поколений: loadSets() дёргается после активации/архивации, и
@@ -416,8 +419,16 @@ export default function PayrollRules() {
                       <thead><tr><th>Сотрудник</th><th>Было (v{simResult.ruleSetVersion})</th><th>Стало</th><th>Разница</th></tr></thead>
                       <tbody>
                         {simResult.items.map((it) => (
-                          <tr key={it.userId} style={{ cursor: 'default' }}>
-                            <td>{it.fullName}</td>
+                          <tr
+                            key={it.userId}
+                            className="row-clickable"
+                            onClick={() => setSimDetail(it)}
+                            title="Открыть расшифровку: оклад, бонусы по правилам, метрики месяца"
+                          >
+                            <td>
+                              {it.fullName}
+                              <Icon name="open_in_full" size={14} style={{ marginLeft: 6, color: 'var(--text-light)', verticalAlign: '-2px' }} />
+                            </td>
                             <td data-label="Было">{formatMoney(it.before)}</td>
                             <td data-label="Стало">{formatMoney(it.after)}</td>
                             <td data-label="Разница">
@@ -438,6 +449,16 @@ export default function PayrollRules() {
       </motion.div>
 
       <AnimatePresence>
+        {simDetail && simResult && (
+          <SimulationDetailModal
+            key={`sim-${simDetail.userId}`}
+            item={simDetail}
+            period={simResult.period}
+            draftVersion={simResult.ruleSetVersion}
+            currentVersion={simResult.currentRuleSetVersion ?? null}
+            onClose={() => setSimDetail(null)}
+          />
+        )}
         {setModal && (
           <RuleSetFormModal key="set" mode={setModal} onClose={() => setSetModal(null)} onSaved={selectAfterSave} />
         )}

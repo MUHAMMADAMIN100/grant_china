@@ -3085,3 +3085,10 @@ select.input-error {
 .visa-claim-text { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; line-height: 1.45; }
 .visa-claim-text .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }
 .visa-claim-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 03.09.2026 — кликабельная строка таблицы (симулятор формул бонусов). */
+.table tr.row-clickable { cursor: pointer; transition: background .12s; }
+.table tr.row-clickable:hover { background: var(--primary-soft); }
+.sim-detail-card { max-width: 720px; text-align: left; max-height: 90vh; overflow-y: auto; }
+.sim-compare td:first-child { color: var(--text-soft); }
+.sim-total-row td { border-top: 2px solid var(--border); }

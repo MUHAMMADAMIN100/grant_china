@@ -1037,20 +1037,49 @@ export class PayslipsService {
     });
     const currentRuleSet = await this.rules.activeSetFor(range.from);
 
-    const items: Array<{ userId: string; fullName: string; before: string; after: string; diff: string }> = [];
+    // 03.09.2026 — к итогам добавлена построчная расшифровка обеих сторон
+    // (оклад, бонусы, премия KPI, строки «правило → база → сумма») и метрики
+    // сотрудника за период. Одна цифра «800,00» без объяснения, откуда она,
+    // не даёт проверить формулу — а симулятор именно для проверки и нужен.
+    // Метрики одни на обе стороны: правила меняют не факты месяца, а цену.
+    const detail = (c: Awaited<ReturnType<typeof this.buildCalculation>>) => ({
+      baseAmount: this.money(c.effectiveBase),
+      bonusAmount: this.money(c.bonusAmount),
+      kpiBonusAmount: this.money(c.kpiBonusAmount),
+      total: this.money(this.evaluateTotal(c.baseAmount, c.bonusAmount, c.kpiBonusAmount, new Prisma.Decimal(0)).total),
+      breakdown: c.breakdown,
+    });
+    const items: Array<{
+      userId: string;
+      fullName: string;
+      before: string;
+      after: string;
+      diff: string;
+      beforeDetail: ReturnType<typeof detail>;
+      afterDetail: ReturnType<typeof detail>;
+      metrics: ReturnType<typeof this.metricsToApi>;
+    }> = [];
     for (const u of users) {
       const before = await this.buildCalculation(u, range, currentRuleSet as RuleSetWithRules | null);
       const after = await this.buildCalculation(u, range, ruleSet);
-      const beforeTotal = this.evaluateTotal(before.baseAmount, before.bonusAmount, before.kpiBonusAmount, new Prisma.Decimal(0)).total;
-      const afterTotal = this.evaluateTotal(after.baseAmount, after.bonusAmount, after.kpiBonusAmount, new Prisma.Decimal(0)).total;
+      const beforeDetail = detail(before);
+      const afterDetail = detail(after);
       items.push({
         userId: u.id,
         fullName: u.fullName,
-        before: this.money(beforeTotal),
-        after: this.money(afterTotal),
-        diff: this.money(afterTotal.minus(beforeTotal)),
+        before: beforeDetail.total,
+        after: afterDetail.total,
+        diff: this.money(new Prisma.Decimal(afterDetail.total).minus(beforeDetail.total)),
+        beforeDetail,
+        afterDetail,
+        metrics: this.metricsToApi(after.metrics),
       });
     }
-    return { period: range.key, ruleSetVersion: ruleSet.version, items };
+    return {
+      period: range.key,
+      ruleSetVersion: ruleSet.version,
+      currentRuleSetVersion: currentRuleSet?.version ?? null,
+      items,
+    };
   }
 }

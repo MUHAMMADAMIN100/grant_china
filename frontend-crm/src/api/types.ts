@@ -1340,16 +1340,46 @@ export interface PayrollSummary {
   fundPaid: string;
 }
 
+/** Одна сторона симуляции — оклад, бонусы, премия и построчная расшифровка. */
+export interface BonusRuleSimulateSide {
+  baseAmount: string;
+  bonusAmount: string;
+  kpiBonusAmount: string;
+  total: string;
+  breakdown: BonusLine[];
+}
+
+export interface BonusRuleSimulateMetrics {
+  leadsProcessed: number;
+  consultationsHeld: number;
+  contractsSigned: number;
+  contractsAmount: string;
+  enrolledCount: number;
+  relocatedCount: number;
+  lostCount: number;
+  conversionRate: string | null;
+  timelinessRate: string | null;
+  deliveryRate: string | null;
+  documentTypesAdded: number;
+}
+
 export interface BonusRuleSimulateItem {
   userId: string;
   fullName: string;
   before: string;
   after: string;
   diff: string;
+  /** 03.09.2026 — расшифровка «было» (по действующему набору) и «стало» (по этому черновику). */
+  beforeDetail: BonusRuleSimulateSide;
+  afterDetail: BonusRuleSimulateSide;
+  /** Факты месяца — общие для обеих сторон, правила меняют только цену. */
+  metrics: BonusRuleSimulateMetrics;
 }
 
 export interface BonusRuleSimulateResult {
   period: string;
   ruleSetVersion: number;
+  /** Версия действующего набора, по которому посчитано «было». null — активного нет. */
+  currentRuleSetVersion: number | null;
   items: BonusRuleSimulateItem[];
 }
