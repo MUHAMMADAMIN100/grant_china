@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { BonusLine, BonusRuleSimulateItem } from '../api/types';
 import { formatMoney, formatPercent } from '../utils/money';
+import { LineItemsRow, LineLabel, hasItems } from './BonusLineItems';
 import Icon from '../Icon';
 
 type Props = {
@@ -45,6 +46,15 @@ export default function SimulationDetailModal({ item, period, draftVersion, curr
   const after = item.afterDetail;
   const diff = num(item.diff);
   const m = item.metrics;
+  // Раскрытые правила — по подписи (строки двух наборов слиты по ней же).
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // Правила двух наборов сливаем по подписи: у черновика могут быть новые
   // правила, у действующего — удалённые, и обе стороны должны быть видны.
@@ -159,6 +169,11 @@ export default function SimulationDetailModal({ item, period, draftVersion, curr
         </div>
 
         <div className="payments-block-title">По правилам</div>
+        {lines.some((l) => hasItems((l.after ?? l.before) as BonusLine)) && (
+          <div className="receipt-dropzone-hint" style={{ marginBottom: 8 }}>
+            Нажмите на правило — раскроется список студентов, из которых сложилась база.
+          </div>
+        )}
         {lines.length === 0 ? (
           <div className="empty" style={{ padding: 12 }}>
             {nothingAtAll
@@ -176,13 +191,18 @@ export default function SimulationDetailModal({ item, period, draftVersion, curr
                   const b = l.before ? num(l.before.amount) : 0;
                   const a = l.after ? num(l.after.amount) : 0;
                   const d = a - b;
-                  return (
+                  // Факты одни на обе стороны (правила меняют цену, не события) —
+                  // список берём с той стороны, где строка есть.
+                  const src = (l.after ?? l.before) as BonusLine;
+                  const expanded = open.has(l.label);
+                  return [
                     <tr key={l.label} style={{ cursor: 'default' }}>
                       <td>
-                        {l.label}
-                        {(l.after ?? l.before)?.bucket === 'kpi' && (
-                          <span className="badge badge-info" style={{ marginLeft: 6 }}>KPI</span>
-                        )}
+                        <LineLabel line={src} expanded={expanded} onToggle={() => toggle(l.label)}>
+                          {src.bucket === 'kpi' && (
+                            <span className="badge badge-info" style={{ marginLeft: 6 }}>KPI</span>
+                          )}
+                        </LineLabel>
                       </td>
                       <td data-label="База" style={{ color: 'var(--text-soft)' }}>{(l.after ?? l.before)?.base}</td>
                       <td data-label="Было">{l.before ? formatMoney(l.before.amount) : <span style={{ color: 'var(--text-light)' }}>правила не было</span>}</td>
@@ -194,8 +214,9 @@ export default function SimulationDetailModal({ item, period, draftVersion, curr
                           </span>
                         )}
                       </td>
-                    </tr>
-                  );
+                    </tr>,
+                    expanded && hasItems(src) ? <LineItemsRow key={`${l.label}-items`} line={src} colSpan={4} /> : null,
+                  ];
                 })}
               </tbody>
             </table>

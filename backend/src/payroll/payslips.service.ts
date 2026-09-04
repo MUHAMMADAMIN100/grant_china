@@ -7,7 +7,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { KpiService, ManagerPeriodMetrics } from './kpi.service';
 import { CompensationService } from './compensation.service';
 import { RulesService, RuleSetWithRules } from './rules.service';
-import { BonusLine, BonusRuleConfig, calculateBonus, metricValue } from './bonus-engine';
+import { BonusLine, BonusRuleConfig, calculateBonus, metricValue, attachBonusLineItems, BonusLineItem } from './bonus-engine';
 import { periodRangeFromKey, PeriodRange } from './period';
 import { ApprovePayslipDto, PayPayslipDto, RecallPayslipDto, UpdatePayslipDto, VoidPayslipDto } from './dto/payslip.dto';
 
@@ -322,9 +322,22 @@ export class PayslipsService {
         const teamMetrics = needsTeam ? await this.kpi.forTeam(range) : null;
 
         const result = calculateBonus(rules, { baseAmount: effectiveBase, personalMetrics: metrics, teamMetrics, closedStagesByStage });
-        breakdown = result.breakdown;
         bonusAmount = result.bonusAmount;
         kpiBonusAmount = result.kpiBonusAmount;
+        // 03.09.2026 — к каждой строке «N × сумма» привязываем поимённый список
+        // фактов, из которых N сложилось. Списки берём только если хоть одна
+        // строка есть: у сотрудника без начислений тратить шесть запросов не
+        // на что. Список уезжает в Payslip.breakdown вместе со строкой — лист
+        // хранит то, за что начислили, а не пересчёт на день просмотра.
+        breakdown = result.breakdown;
+        if (breakdown.length) {
+          const facts = await this.kpi.factsForManager(user.id, range);
+          const closedLists: Partial<Record<PaymentStage, BonusLineItem[]>> = {};
+          for (const stage of stagesNeeded) {
+            closedLists[stage] = await this.kpi.closedStagesList(user.id, stage, range);
+          }
+          breakdown = attachBonusLineItems(breakdown, rules, facts, closedLists);
+        }
       }
     }
 

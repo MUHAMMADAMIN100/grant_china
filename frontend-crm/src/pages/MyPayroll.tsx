@@ -12,6 +12,7 @@ import Pagination from '../components/Pagination';
 import PayslipStatusBadge from '../components/PayslipStatusBadge';
 import PayslipDetailModal from '../components/PayslipDetailModal';
 import StatTile, { type StatDetail } from '../components/StatTile';
+import { LineItemsRow, LineLabel, hasItems } from '../components/BonusLineItems';
 import Icon from '../Icon';
 import { staggerContainer } from '../motion';
 
@@ -91,6 +92,15 @@ export default function MyPayroll() {
   const [page, setPage] = useState(1);
   const [history, setHistory] = useState<Payslip[]>([]);
   const [detail, setDetail] = useState<Payslip | null>(null);
+  // 03.09.2026 — строка правила в предварительном расчёте раскрывается в список своих студентов.
+  const [openLines, setOpenLines] = useState<Set<string>>(new Set());
+  const toggleLine = (id: string) =>
+    setOpenLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const loadPeriodData = () => {
     setLoading(true);
@@ -349,13 +359,14 @@ export default function MyPayroll() {
                   <table className="table">
                     <thead><tr><th>Правило</th><th>База</th><th>Сумма</th></tr></thead>
                     <tbody>
-                      {preview.breakdown.map((l) => (
+                      {preview.breakdown.map((l) => [
                         <tr key={l.ruleId} style={{ cursor: 'default' }}>
-                          <td>{l.label}</td>
+                          <td><LineLabel line={l} expanded={openLines.has(l.ruleId)} onToggle={() => toggleLine(l.ruleId)} /></td>
                           <td data-label="База">{l.base}</td>
                           <td data-label="Сумма">{formatMoney(l.amount)}</td>
-                        </tr>
-                      ))}
+                        </tr>,
+                        openLines.has(l.ruleId) && hasItems(l) ? <LineItemsRow key={`${l.ruleId}-items`} line={l} colSpan={3} /> : null,
+                      ])}
                     </tbody>
                   </table>
                 </div>

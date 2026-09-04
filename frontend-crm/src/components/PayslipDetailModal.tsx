@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { Payslip } from '../api/types';
+import { LineItemsRow, LineLabel, hasItems } from './BonusLineItems';
 import { formatMoney, formatPercent } from '../utils/money';
 import { formatDateTimeRu } from '../utils/datetime';
 import PayslipStatusBadge from './PayslipStatusBadge';
@@ -20,6 +22,16 @@ type Props = {
 export default function PayslipDetailModal({ payslip, onClose }: Props) {
   const bonusLines = payslip.breakdown.filter((l) => l.bucket === 'bonus');
   const kpiLines = payslip.breakdown.filter((l) => l.bucket === 'kpi');
+  // 03.09.2026 — строка правила раскрывается в список студентов.
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const legacy = payslip.breakdown.length > 0 && !payslip.breakdown.some(hasItems);
 
   return (
     <motion.div className="dialog-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
@@ -86,6 +98,11 @@ export default function PayslipDetailModal({ payslip, onClose }: Props) {
         </div>
 
         <div className="payments-block-title">Бонусная часть</div>
+        {legacy && (
+          <div className="receipt-dropzone-hint" style={{ marginBottom: 8 }}>
+            Лист посчитан до появления поимённой расшифровки — список студентов появится после пересчёта.
+          </div>
+        )}
         {bonusLines.length === 0 ? (
           <div className="empty" style={{ padding: 12 }}>Правил бонуса не применено</div>
         ) : (
@@ -93,13 +110,14 @@ export default function PayslipDetailModal({ payslip, onClose }: Props) {
             <table className="table">
               <thead><tr><th>Правило</th><th>База</th><th>Сумма</th></tr></thead>
               <tbody>
-                {bonusLines.map((l) => (
+                {bonusLines.map((l) => [
                   <tr key={l.ruleId} style={{ cursor: 'default' }}>
-                    <td>{l.label}</td>
+                    <td><LineLabel line={l} expanded={open.has(l.ruleId)} onToggle={() => toggle(l.ruleId)} /></td>
                     <td data-label="База">{l.base}</td>
                     <td data-label="Сумма">{formatMoney(l.amount)}</td>
-                  </tr>
-                ))}
+                  </tr>,
+                  open.has(l.ruleId) && hasItems(l) ? <LineItemsRow key={`${l.ruleId}-items`} line={l} colSpan={3} /> : null,
+                ])}
               </tbody>
             </table>
           </div>

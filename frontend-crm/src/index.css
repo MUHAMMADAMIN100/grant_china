@@ -3092,3 +3092,30 @@ select.input-error {
 .sim-detail-card { max-width: 720px; text-align: left; max-height: 90vh; overflow-y: auto; }
 .sim-compare td:first-child { color: var(--text-soft); }
 .sim-total-row td { border-top: 2px solid var(--border); }
+
+/* 03.09.2026 — расшифровка строки бонуса до студентов (BonusLineItems.tsx). */
+.bonus-line-toggle {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; color: inherit; text-align: left;
+  padding: 0; cursor: pointer;
+}
+.bonus-line-toggle:hover span:first-of-type { color: var(--primary); }
+.bonus-line-toggle .material-symbols-rounded { color: var(--text-light); transition: transform .15s; }
+.bonus-line-toggle.open .material-symbols-rounded { color: var(--primary); }
+.bonus-line-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--bg); color: var(--text-soft); font-size: 11px; font-weight: 700;
+}
+.bonus-line-items-row td { background: var(--bg); padding: 8px 12px 10px 34px !important; }
+.bonus-line-items { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.bonus-line-items li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.bonus-line-item-name { font-weight: 600; }
+.bonus-line-item-note { color: var(--text-soft); }
+.bonus-line-item-date { color: var(--text-light); font-size: 12px; }
+.bonus-line-item-amount { margin-left: auto; font-weight: 600; white-space: nowrap; }
+.bonus-line-empty { color: var(--text-soft); font-size: 12.5px; }
+@media (max-width: 720px) {
+  .bonus-line-items-row td { padding-left: 14px !important; }
+  .bonus-line-item-amount { margin-left: 0; }
+}

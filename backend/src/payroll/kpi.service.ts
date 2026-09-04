@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { PaymentStage, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PeriodRange } from './period';
+import type { BonusLineItem, ManagerPeriodFacts } from './bonus-engine';
+import { REQUIRED_DOCUMENT_TYPES } from '../common/documents';
+import { STAGE_LABEL } from '../payments/payment-rules';
 
 /**
  * Раздел 5 ТЗ (волна 6) — расчёт четырёх метрик KPI менеджеров (ТЗ 5.1).
@@ -515,4 +518,142 @@ export class KpiService {
       FULL OUTER JOIN missed ON missed.manager_id = scoped.manager_id
     `;
   }
+
+  // ------------------------------------------------------------------
+  // 03.09.2026 — факты месяца поимённо (расшифровка «4 × 200» до студентов)
+  // ------------------------------------------------------------------
+
+  /**
+   * Те же выборки, что в computeSingle(), но списком, а не count(): каждый
+   * where здесь ОБЯЗАН дословно совпадать со своим счётчиком выше — иначе
+   * «4 ×» в строке и число имён под ней разойдутся. Только личные метрики:
+   * командные правила (metricScope=TEAM) списков не получают.
+   */
+  async factsForManager(managerId: string, range: PeriodRange): Promise<ManagerPeriodFacts> {
+    const inRange = { gte: range.from, lt: range.to };
+    const [enrollments, relocations, contracts, payments, consultations, documentRows] = await Promise.all([
+      this.prisma.application.findMany({
+        where: { deletedAt: null, enrolledById: managerId, enrolledAt: inRange },
+        select: { studentId: true, fullName: true, enrolledAt: true, student: { select: { fullName: true } } },
+        orderBy: { enrolledAt: 'asc' },
+      }),
+      this.prisma.contract.findMany({
+        where: { deletedAt: null, managerId, relocatedAt: inRange },
+        select: { number: true, relocatedAt: true, student: { select: { id: true, fullName: true } } },
+        orderBy: { relocatedAt: 'asc' },
+      }),
+      this.prisma.contract.findMany({
+        where: { deletedAt: null, managerId, signedAt: inRange },
+        select: { number: true, signedAt: true, amount: true, student: { select: { id: true, fullName: true } } },
+        orderBy: { signedAt: 'asc' },
+      }),
+      this.prisma.payment.findMany({
+        where: { deletedAt: null, status: 'APPROVED', paidAt: inRange, contract: { managerId, deletedAt: null } },
+        select: { stage: true, amount: true, paidAt: true, student: { select: { id: true, fullName: true } } },
+        orderBy: { paidAt: 'asc' },
+      }),
+      this.prisma.consultation.findMany({
+        where: { deletedAt: null, managerId, heldAt: inRange },
+        select: { fullName: true, heldAt: true, studentId: true, student: { select: { fullName: true } } },
+        orderBy: { heldAt: 'asc' },
+      }),
+      this.prisma.$queryRaw<Array<{ studentId: string; fullName: string; type: string; first_at: Date }>>`
+        WITH first_docs AS (
+          SELECT d."studentId", d."type", MIN(d."createdAt") AS first_at
+          FROM "Document" d
+          WHERE d."type" NOT IN ('RECEIPT', 'TICKET')
+          GROUP BY 1, 2
+        )
+        SELECT fd."studentId", s."fullName", fd."type", fd.first_at
+        FROM first_docs fd
+        JOIN "Student" s ON s.id = fd."studentId" AND s."deletedAt" IS NULL AND s."managerId" = ${managerId}
+        WHERE fd.first_at >= ${range.from} AND fd.first_at < ${range.to}
+        ORDER BY fd.first_at ASC
+      `,
+    ]);
+    const docLabel: Record<string, string> = {
+      ...Object.fromEntries(REQUIRED_DOCUMENT_TYPES.map((d) => [d.type, d.label])),
+      OTHER: 'Другое',
+    };
+    const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+    return {
+      enrollments: enrollments.map((e) => ({
+        studentId: e.studentId,
+        studentName: e.student?.fullName ?? e.fullName,
+        date: iso(e.enrolledAt),
+        amount: null,
+        note: null,
+      })),
+      relocations: relocations.map((c) => ({
+        studentId: c.student.id,
+        studentName: c.student.fullName,
+        date: iso(c.relocatedAt),
+        amount: null,
+        note: `договор ${c.number}`,
+      })),
+      contracts: contracts.map((c) => ({
+        studentId: c.student.id,
+        studentName: c.student.fullName,
+        date: iso(c.signedAt),
+        amount: c.amount.toFixed(2),
+        note: `договор ${c.number}`,
+      })),
+      payments: payments.map((p) => ({
+        studentId: p.student.id,
+        studentName: p.student.fullName,
+        date: iso(p.paidAt),
+        amount: p.amount.toFixed(2),
+        note: `этап: ${STAGE_LABEL[p.stage] ?? p.stage}`,
+        stage: p.stage,
+      })),
+      consultations: consultations.map((c) => ({
+        studentId: c.studentId,
+        studentName: c.student?.fullName ?? c.fullName,
+        date: iso(c.heldAt),
+        amount: null,
+        note: null,
+      })),
+      documents: documentRows.map((d) => ({
+        studentId: d.studentId,
+        studentName: d.fullName,
+        date: iso(d.first_at),
+        amount: null,
+        note: docLabel[d.type] ?? d.type,
+      })),
+    };
+  }
+
+  /** Поимённая версия closedStagesCount(): та же CTE, но со студентом и датой закрытия этапа. */
+  async closedStagesList(managerId: string, stage: PaymentStage, range: PeriodRange): Promise<BonusLineItem[]> {
+    const rows = await this.prisma.$queryRaw<Array<{ studentId: string; fullName: string; closed_at: Date }>>`
+      WITH running AS (
+        SELECT p."studentId", p."stage", p."paidAt",
+               SUM(p."amount") OVER (PARTITION BY p."studentId", p."stage" ORDER BY p."paidAt", p."id") AS paid_so_far
+        FROM "Payment" p
+        JOIN "Contract" c ON c.id = p."contractId" AND c."deletedAt" IS NULL AND c."managerId" = ${managerId}
+        WHERE p."deletedAt" IS NULL AND p."status" = 'APPROVED' AND p."kind" = 'SCHEDULE' AND p."stage" = ${stage}::"PaymentStage"
+          AND p."paidAt" < ${range.to}
+      ),
+      closed AS (
+        SELECT r."studentId", r."stage", MIN(r."paidAt") AS closed_at
+        FROM running r
+        JOIN "PaymentSchedule" ps ON ps."studentId" = r."studentId" AND ps."stage" = r."stage" AND ps."deletedAt" IS NULL
+        WHERE r.paid_so_far >= ps."plannedAmount" AND ps."plannedAmount" > 0
+        GROUP BY r."studentId", r."stage"
+      )
+      SELECT closed."studentId", s."fullName", closed.closed_at
+      FROM closed
+      JOIN "Student" s ON s.id = closed."studentId"
+      WHERE closed.closed_at >= ${range.from} AND closed.closed_at < ${range.to}
+      ORDER BY closed.closed_at ASC
+    `;
+    return rows.map((r) => ({
+      studentId: r.studentId,
+      studentName: r.fullName,
+      date: r.closed_at.toISOString(),
+      amount: null,
+      note: `этап: ${STAGE_LABEL[stage] ?? stage}`,
+    }));
+  }
 }
+

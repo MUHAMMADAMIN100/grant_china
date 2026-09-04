@@ -1156,6 +1156,15 @@ export interface BonusRuleSet {
   updatedAt: string;
 }
 
+/** 03.09.2026 — один элемент базы правила: студент/договор/платёж, из которых сложилось «4 × 200». */
+export interface BonusLineItem {
+  studentId: string | null;
+  studentName: string;
+  date: string | null;
+  amount: string | null;
+  note: string | null;
+}
+
 /** Построчная расшифровка бонуса — «правило → база → сумма», см. bonus-engine.ts BonusLine. */
 export interface BonusLine {
   ruleId: string;
@@ -1164,6 +1173,8 @@ export interface BonusLine {
   base: string;
   amount: string;
   bucket: 'bonus' | 'kpi';
+  /** Из кого сложилась база. Нет у порогов KPI и у листов, посчитанных до 03.09.2026. */
+  items?: BonusLineItem[];
 }
 
 export interface PayslipUserRef {

@@ -31,6 +31,23 @@ export interface BonusRuleConfig {
   sortOrder: number;
 }
 
+/**
+ * 03.09.2026 — один элемент базы правила: конкретный студент/договор/платёж,
+ * из которых сложилось «4 × 200». Хранится вместе со строкой в
+ * Payslip.breakdown (Json), поэтому утверждённый лист показывает то, за что
+ * реально начислили, а не пересчёт на сегодня.
+ */
+export interface BonusLineItem {
+  studentId: string | null;
+  studentName: string;
+  /** ISO. Дата факта: зачисления, подписания, платежа, консультации, документа. */
+  date: string | null;
+  /** Сумма факта — для договоров и платежей. null у счётных правил. */
+  amount: string | null;
+  /** Пояснение: номер договора, тип документа, этап оплаты. */
+  note: string | null;
+}
+
 export interface BonusLine {
   ruleId: string;
   kind: BonusRuleKind;
@@ -40,6 +57,69 @@ export interface BonusLine {
   /** Итоговая сумма строки, УЖЕ округлённая до 2 знаков (ROUND_HALF_UP). */
   amount: string;
   bucket: 'bonus' | 'kpi';
+  /**
+   * Из чего сложилась база — построчно. Нет у KPI_THRESHOLD_BONUS (там не
+   * список, а порог) и у старых листов, посчитанных до 03.09.2026.
+   */
+  items?: BonusLineItem[];
+}
+
+/** Факты месяца по менеджеру — списки, чьи размеры РАВНЫ счётчикам ManagerPeriodMetrics. */
+export interface ManagerPeriodFacts {
+  enrollments: BonusLineItem[];
+  relocations: BonusLineItem[];
+  contracts: BonusLineItem[];
+  payments: Array<BonusLineItem & { stage: PaymentStage }>;
+  consultations: BonusLineItem[];
+  documents: BonusLineItem[];
+}
+
+/**
+ * Привязывает к строкам расшифровки списки фактов. Чистая функция: движок
+ * считает деньги по счётчикам, а списки — та же выборка, отданная поимённо
+ * (kpi.service.factsForManager), поэтому «4 ×» в base и 4 элемента в items
+ * не могут разойтись — они из одного where.
+ */
+export function attachBonusLineItems(
+  breakdown: BonusLine[],
+  rules: BonusRuleConfig[],
+  facts: ManagerPeriodFacts,
+  closedStages: Partial<Record<PaymentStage, BonusLineItem[]>>,
+): BonusLine[] {
+  const byId = new Map(rules.map((r) => [r.id, r]));
+  return breakdown.map((line) => {
+    const rule = byId.get(line.ruleId);
+    let items: BonusLineItem[] | undefined;
+    switch (line.kind) {
+      case 'FIXED_PER_ENROLLMENT':
+        items = facts.enrollments;
+        break;
+      case 'FIXED_PER_RELOCATION':
+        items = facts.relocations;
+        break;
+      case 'FIXED_PER_CONTRACT':
+      case 'PERCENT_OF_CONTRACTS':
+        items = facts.contracts;
+        break;
+      case 'PERCENT_OF_PAYMENTS':
+        items = (rule?.stage ? facts.payments.filter((p) => p.stage === rule.stage) : facts.payments).map(
+          ({ stage: _s, ...rest }) => rest,
+        );
+        break;
+      case 'FIXED_PER_STAGE':
+        items = rule?.stage ? (closedStages[rule.stage] ?? []) : [];
+        break;
+      case 'FIXED_PER_CONSULTATION':
+        items = facts.consultations;
+        break;
+      case 'FIXED_PER_DOCUMENT':
+        items = facts.documents;
+        break;
+      default:
+        items = undefined; // KPI_THRESHOLD_BONUS — порог, а не список
+    }
+    return items ? { ...line, items } : line;
+  });
 }
 
 export interface BonusEngineInput {
