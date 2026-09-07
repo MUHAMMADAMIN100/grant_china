@@ -125,6 +125,8 @@ export type ActivityAction =
   | 'VISA_CLAIM'
   | 'VISA_CLAIM_APPROVE'
   | 'VISA_CLAIM_REJECT'
+  // 07.09.2026 — уборка файлов-сирот с диска (только Основатель).
+  | 'STORAGE_PURGE'
   // ТЗ 6.1 (волна 8) — база знаний (knowledge.service.ts). studentId: null —
   // это внутренний регламент, а не событие карточки студента.
   | 'KNOWLEDGE_CREATE'

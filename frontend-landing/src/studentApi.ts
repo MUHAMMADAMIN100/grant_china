@@ -69,6 +69,47 @@ const client = axios.create({
 });
 
 /**
+ * 07.09.2026 — файлы из кабинета уходят НАПРЯМУЮ на бэкенд, минуя прокси
+ * Vercel: прокси обрывает multipart-тела больше ~10 МБ (502), а бэкенд
+ * принимает 20. Cookie на домен Railway не уйдёт, поэтому берём
+ * короткоживущий токен `POST /student-auth/upload-token` и шлём его в
+ * Authorization: Bearer. Если прямой путь недоступен (сеть/CORS/502) —
+ * повторяем через прокси, как раньше. Ответ бэкенда по существу (400,
+ * 507 «диск полон») отдаём как есть. В dev прямой хост не задан.
+ */
+const _envUpload: string | undefined = (import.meta as any).env?.VITE_UPLOAD_API_URL;
+const DIRECT_UPLOAD_BASE: string =
+  _envUpload !== undefined ? _envUpload.trim() : isDev ? '' : 'https://grantchina-production.up.railway.app/api';
+let _uploadToken: { token: string; expiresAt: number } | null = null;
+
+async function uploadToken(): Promise<string> {
+  if (_uploadToken && _uploadToken.expiresAt - Date.now() > 60_000) return _uploadToken.token;
+  const { data } = await client.post<{ token: string; expiresIn: number }>('/student-auth/upload-token');
+  _uploadToken = { token: data.token, expiresAt: Date.now() + data.expiresIn * 1000 };
+  return data.token;
+}
+
+async function postMultipart<T>(path: string, fd: FormData): Promise<T> {
+  const viaProxy = async () => (await client.post<T>(path, fd)).data;
+  if (!DIRECT_UPLOAD_BASE) return viaProxy();
+  try {
+    const token = await uploadToken();
+    const { data } = await axios.post<T>(DIRECT_UPLOAD_BASE + path, fd, {
+      withCredentials: false,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return data;
+  } catch (err) {
+    const e = err as { response?: { status?: number } };
+    const st = e?.response?.status;
+    const channelProblem = !e?.response || st === 401 || st === 413 || st === 502 || st === 503 || st === 504;
+    if (!channelProblem) throw err;
+    _uploadToken = null;
+    return viaProxy();
+  }
+}
+
+/**
  * Проверка «залогинены ли мы». Раньше делалось `!!localStorage.getItem(...)`,
  * теперь — асинхронный пинг GET /student-auth/me. Лёгкий запрос; статус 200
  * = есть валидная cookie, 401/403 = нет. Используется на старте кабинета.
@@ -160,16 +201,14 @@ export async function studentMe() {
 export async function studentUploadPhoto(file: File) {
   const fd = new FormData();
   fd.append('file', file);
-  const { data } = await client.post<{ photoUrl: string }>('/student-auth/photo', fd);
-  return data;
+  return postMultipart<{ photoUrl: string }>('/student-auth/photo', fd);
 }
 
 export async function studentUploadDocument(file: File, type: string) {
   const fd = new FormData();
   fd.append('file', file);
   fd.append('type', type);
-  const { data } = await client.post<StudentDoc>('/student-auth/documents', fd);
-  return data;
+  return postMultipart<StudentDoc>('/student-auth/documents', fd);
 }
 
 export async function studentDeleteDocument(id: string) {
@@ -287,8 +326,7 @@ export async function submitMyTicket(payload: StudentTicketPayload, file?: File 
     if (v !== undefined && v !== null && v !== '') fd.append(k, String(v));
   });
   if (file) fd.append('file', file);
-  const { data } = await client.post<StudentTicket>('/student-auth/tickets', fd);
-  return data;
+  return postMultipart<StudentTicket>('/student-auth/tickets', fd);
 }
 
 export async function updateMyTicket(id: string, payload: Partial<StudentTicketPayload> & { arrivalAt?: string }) {
@@ -304,8 +342,7 @@ export async function withdrawMyTicket(id: string) {
 export async function attachMyTicketFile(id: string, file: File) {
   const fd = new FormData();
   fd.append('file', file);
-  const { data } = await client.post<StudentTicketDoc>(`/student-auth/tickets/${id}/documents`, fd);
-  return data;
+  return postMultipart<StudentTicketDoc>(`/student-auth/tickets/${id}/documents`, fd);
 }
 
 export async function removeMyTicketFile(id: string, docId: string) {

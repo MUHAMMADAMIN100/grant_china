@@ -1,4 +1,5 @@
 import { api } from './client';
+import { postMultipart } from './upload';
 
 // ============================================================================
 // Раздел «Билеты» (волна 8). Контракт зеркалит backend/src/tickets/.
@@ -179,8 +180,8 @@ export async function createTicket(payload: TicketPayload, file?: File | null) {
     if (v !== undefined && v !== null && v !== '') form.append(k, String(v));
   });
   if (file) form.append('file', file);
-  const { data } = await api.post<Ticket>('/tickets', form);
-  return data;
+  // 07.09.2026 — напрямую на бэкенд, см. upload.ts.
+  return postMultipart<Ticket>('/tickets', form);
 }
 
 export interface UpdateTicketPayload {
@@ -208,8 +209,7 @@ export async function deleteTicket(id: string) {
 export async function uploadTicketDocument(id: string, file: File) {
   const form = new FormData();
   form.append('file', file);
-  const { data } = await api.post<TicketDocument>(`/tickets/${id}/documents`, form);
-  return data;
+  return postMultipart<TicketDocument>(`/tickets/${id}/documents`, form);
 }
 
 export async function deleteTicketDocument(docId: string) {

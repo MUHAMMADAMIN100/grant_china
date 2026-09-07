@@ -75,4 +75,18 @@ export class AuthService {
     await this.prisma.user.update({ where: { id: userId }, data: { password: hashed } });
     return { ok: true };
   }
+
+  /**
+   * 07.09.2026 — токен для ПРЯМОЙ загрузки файлов на бэкенд, минуя прокси
+   * Vercel: прокси режет тела больше ~10 МБ, а сервер спокойно принимает 20.
+   * Cookie сессии на домен Railway не уходит (другой домен), поэтому фронт
+   * получает короткоживущий JWT и шлёт его в Authorization: Bearer — обе
+   * стратегии (jwt.strategy.ts, student-jwt.guard.ts) такой заголовок
+   * принимают. Живёт 10 минут: этого хватает на любую загрузку, а утечка
+   * токена из сетевого лога протухает раньше, чем её успеют использовать.
+   */
+  async issueUploadToken(user: { id: string; email: string | null; role: string }) {
+    const token = await this.jwt.signAsync({ sub: user.id, email: user.email, role: user.role, scope: 'upload' }, { expiresIn: '10m' });
+    return { token, expiresIn: 600 };
+  }
 }

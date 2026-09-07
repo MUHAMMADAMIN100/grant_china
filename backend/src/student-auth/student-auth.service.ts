@@ -267,4 +267,12 @@ export class StudentAuthService {
     this.realtime.emitForStudent(updated, 'student:updated', { studentId }, { studentId });
     return { ok: true };
   }
+
+  /** 07.09.2026 — токен прямой загрузки для кабинета, см. AuthService.issueUploadToken. */
+  async issueUploadToken(studentId: string) {
+    const student = await this.prisma.student.findFirst({ where: { id: studentId, deletedAt: null }, select: { id: true, email: true } });
+    if (!student) throw new UnauthorizedException('Студент не найден');
+    const token = await this.jwt.signAsync({ sub: student.id, email: student.email, role: 'STUDENT', scope: 'upload' }, { expiresIn: '10m' });
+    return { token, expiresIn: 600 };
+  }
 }

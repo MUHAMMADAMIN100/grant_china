@@ -127,6 +127,13 @@ export class StudentAuthController {
     return this.auth.forgotPassword(body.email);
   }
 
+  /** 07.09.2026 — токен прямой загрузки файлов (минуя прокси Vercel). */
+  @UseGuards(StudentJwtGuard)
+  @Post('upload-token')
+  uploadToken(@CurrentUser() user: { id: string }) {
+    return this.auth.issueUploadToken(user.id);
+  }
+
   @UseGuards(StudentJwtGuard)
   @Get('me')
   me(@CurrentUser() user: any) {

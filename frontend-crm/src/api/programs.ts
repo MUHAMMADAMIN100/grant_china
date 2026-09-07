@@ -1,4 +1,5 @@
 import { api } from './client';
+import { postMultipart } from './upload';
 import type { Direction } from './types';
 
 export interface Program {
@@ -36,10 +37,8 @@ export async function createProgram(payload: Partial<Program>, file?: File | nul
       fd.append(k, typeof v === 'boolean' ? String(v) : String(v));
     });
     fd.append('file', file);
-    const { data } = await api.post<Program>('/programs', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return data;
+    // 07.09.2026 — напрямую на бэкенд, см. upload.ts.
+    return postMultipart<Program>('/programs', fd);
   }
   const { data } = await api.post<Program>('/programs', payload);
   return data;
@@ -58,10 +57,7 @@ export async function deleteProgram(id: string) {
 export async function uploadProgramImage(id: string, file: File) {
   const fd = new FormData();
   fd.append('file', file);
-  const { data } = await api.post<Program>(`/programs/${id}/image`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return data;
+  return postMultipart<Program>(`/programs/${id}/image`, fd);
 }
 
 const apiRoot = ((import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api').replace(/\/api$/, '');

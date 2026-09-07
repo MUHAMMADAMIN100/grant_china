@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { checkOrigin } from './common/cors';
+import { HttpAdapterHost } from '@nestjs/core';
+import { StorageErrorFilter } from './common/storage-error.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -67,6 +69,9 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // 07.09.2026 — ошибки диска (ENOSPC/EROFS/EACCES…) отдаём как 507 с понятным
+  // текстом вместо «Internal server error» (см. common/storage-error.filter.ts).
+  app.useGlobalFilters(new StorageErrorFilter(app.get(HttpAdapterHost).httpAdapter));
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

@@ -83,6 +83,7 @@ const ACTION_BADGE: Partial<Record<ActivityAction, string>> = {
   VISA_CLAIM: 'badge-info',
   VISA_CLAIM_APPROVE: 'badge-success',
   VISA_CLAIM_REJECT: 'badge-danger',
+  STORAGE_PURGE: 'badge-danger',
   KNOWLEDGE_CREATE: 'badge-success',
   KNOWLEDGE_UPDATE: 'badge-warning',
   KNOWLEDGE_DELETE: 'badge-gray',

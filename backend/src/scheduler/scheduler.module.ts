@@ -9,12 +9,16 @@ import { ApplicationAutoArchiveJob } from './jobs/application-auto-archive.job';
 import { AcademicYearReminderJob } from './jobs/academic-year-reminder.job';
 import { PayrollPeriodCloseJob } from './jobs/payroll-period-close.job';
 import { FlightReminderJob } from './jobs/flight-reminder.job';
+import { StorageCheckJob } from './jobs/storage-check.job';
+import { FilesModule } from '../files/files.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { PayrollModule } from '../payroll/payroll.module';
 
 @Module({
   imports: [
+    // 07.09.2026 — StorageCheckJob берёт пробу записи из FilesModule.StorageService.
+    FilesModule,
     // РОВНО ОДИН РАЗ на всё приложение (см. schedulerPlan проекта
     // архитектора) — два forRoot() дали бы два независимых набора таймеров,
     // то есть двойные прогоны внутри одного процесса.
@@ -37,6 +41,7 @@ import { PayrollModule } from '../payroll/payroll.module';
     AcademicYearReminderJob,
     PayrollPeriodCloseJob,
     FlightReminderJob,
+    StorageCheckJob,
     // Мульти-провайдер: оркестратор (scheduler.service.ts) получает список
     // джоб через DI и не знает о них поимённо. Новые джобы дописываются в
     // КОНЕЦ массива намеренно (риск 1 проекта архитектора): если в одной из
@@ -50,13 +55,15 @@ import { PayrollModule } from '../payroll/payroll.module';
         c: AcademicYearReminderJob,
         d: PayrollPeriodCloseJob,
         e: FlightReminderJob,
-      ) => [a, b, c, d, e],
+        f: StorageCheckJob,
+      ) => [a, b, c, d, e, f],
       inject: [
         FollowUpReminderJob,
         ApplicationAutoArchiveJob,
         AcademicYearReminderJob,
         PayrollPeriodCloseJob,
         FlightReminderJob,
+        StorageCheckJob,
       ],
     },
   ],

@@ -52,6 +52,13 @@ export class CsrfGuard implements CanActivate {
       // same-origin и same-site — свои. none — переход по адресной строке
       // или закладке, тоже не атака.
       if (fetchSite === 'cross-site') {
+        // 07.09.2026 — прямые загрузки файлов: фронт на Vercel шлёт multipart
+        // сразу на хост Railway (минуя прокси, который режет тела >10 МБ), и
+        // для браузера это cross-site. Но Origin из JS подделать нельзя, и если
+        // он в нашем же списке CORS — это наш фронт, а не чужой сайт. Чужая
+        // страница с нашим Origin прийти не может по определению.
+        const origin = req.headers.origin;
+        if (typeof origin === 'string' && origin && CsrfGuard.isOwnOrigin(origin)) return true;
         this.logger.warn(
           `CSRF: заблокирован cross-site ${method} ${req.originalUrl} (Origin: ${req.headers.origin ?? '—'})`,
         );
@@ -63,11 +70,7 @@ export class CsrfGuard implements CanActivate {
     // Sec-Fetch-Site не пришёл — падаем на Origin.
     const origin = req.headers.origin;
     if (typeof origin === 'string' && origin) {
-      let allowed = false;
-      checkOrigin(origin, (_err, ok) => {
-        allowed = ok === true;
-      });
-      if (!allowed) {
+      if (!CsrfGuard.isOwnOrigin(origin)) {
         this.logger.warn(
           `CSRF: заблокирован ${method} ${req.originalUrl} с чужого Origin: ${origin}`,
         );
@@ -77,5 +80,14 @@ export class CsrfGuard implements CanActivate {
 
     // Ни Sec-Fetch-Site, ни Origin — см. блок «ПОЧЕМУ FAIL-OPEN» выше.
     return true;
+  }
+
+  /** Тот же список, что у CORS (common/cors.ts): свои домены + CORS_ORIGINS. */
+  private static isOwnOrigin(origin: string): boolean {
+    let allowed = false;
+    checkOrigin(origin, (_err, ok) => {
+      allowed = ok === true;
+    });
+    return allowed;
   }
 }

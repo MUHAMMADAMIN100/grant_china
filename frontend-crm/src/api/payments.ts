@@ -1,4 +1,5 @@
 import { api } from './client';
+import { postMultipart } from './upload';
 import type {
   Payment,
   PaymentKind,
@@ -125,10 +126,8 @@ export async function createPayment(payload: CreatePaymentPayload) {
   // ровно 'file'. Одинаковое имя означает, что старый и новый клиент работают
   // с одним и тем же сервером без переходного периода.
   for (const f of payload.files ?? []) fd.append('file', f);
-  const { data } = await api.post<Payment>('/payments', fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return data;
+  // 07.09.2026 — файлы уходят напрямую на бэкенд (см. upload.ts): прокси Vercel режет тела >10 МБ.
+  return postMultipart<Payment>('/payments', fd);
 }
 
 export interface UpdatePaymentPayload {
@@ -203,10 +202,7 @@ export async function addPaymentReceipts(id: string, files: File[]) {
   // Имя поля 'file' — то же, что у createPayment, по той же причине
   // совместимости со старым закэшированным бандлом.
   for (const f of files) fd.append('file', f);
-  const { data } = await api.post<Document[]>(`/payments/${id}/receipts`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return data;
+  return postMultipart<Document[]>(`/payments/${id}/receipts`, fd);
 }
 
 export async function removePaymentReceipt(docId: string) {

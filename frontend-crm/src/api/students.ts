@@ -1,4 +1,5 @@
 import { api } from './client';
+import { postMultipart } from './upload';
 import type { Direction, Document, Student, StudentStatus } from './types';
 
 export interface StudentFilters {
@@ -142,20 +143,15 @@ export async function regenerateStudentPassword(id: string) {
 
 export async function uploadPhoto(id: string, file: File) {
   const fd = new FormData(); fd.append('file', file);
-  const { data } = await api.post<Student>(`/students/${id}/photo`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return data;
+  // 07.09.2026 — напрямую на бэкенд, см. upload.ts.
+  return postMultipart<Student>(`/students/${id}/photo`, fd);
 }
 
 export async function uploadDocument(id: string, file: File, type: string = 'OTHER') {
   const fd = new FormData();
   fd.append('file', file);
   fd.append('type', type);
-  const { data } = await api.post<Document>(`/students/${id}/documents`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return data;
+  return postMultipart<Document>(`/students/${id}/documents`, fd);
 }
 
 export async function deleteDocument(docId: string) {

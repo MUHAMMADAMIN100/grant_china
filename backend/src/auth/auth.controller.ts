@@ -44,6 +44,13 @@ export class AuthController {
     return { ok: true };
   }
 
+  /** 07.09.2026 — см. AuthService.issueUploadToken. */
+  @UseGuards(JwtAuthGuard)
+  @Post('upload-token')
+  uploadToken(@CurrentUser() user: { sub: string; email?: string | null; role: string }) {
+    return this.auth.issueUploadToken({ id: user.sub, email: user.email ?? null, role: user.role });
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me')
   me(@CurrentUser() user: { sub: string }) {

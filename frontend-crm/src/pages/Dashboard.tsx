@@ -11,6 +11,7 @@ import { currentMonthKey } from '../utils/datetime';
 import { formatMoney, formatPercent } from '../utils/money';
 import { fadeUp, staggerContainer, listItem } from '../motion';
 import StatTile, { type StatDetail, type StatDetailRow } from '../components/StatTile';
+import StorageCard from '../components/StorageCard';
 
 /**
  * ТЗ 5.2 «интерфейс сотрудника» — компактный виджет своих KPI и предварительного
@@ -227,6 +228,10 @@ export default function Dashboard() {
           Раньше условие было `role === 'EMPLOYEE'`, и администратор не видел
           на дашборде собственную зарплату, хотя лист ему начислялся. */}
       {(me?.role === 'EMPLOYEE' || me?.role === 'ADMIN') && <MyPayrollWidget />}
+
+      {/* 07.09.2026 — «Диск сервера»: можно ли сейчас загружать файлы и сколько
+          места осталось. Уборка сирот — только Основателю. */}
+      {(me?.role === 'FOUNDER' || me?.role === 'ADMIN') && <StorageCard canPurge={me?.role === 'FOUNDER'} />}
 
       <motion.div
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18 }}

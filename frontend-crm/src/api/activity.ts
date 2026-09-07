@@ -100,6 +100,8 @@ export type ActivityAction =
   | 'VISA_CLAIM'
   | 'VISA_CLAIM_APPROVE'
   | 'VISA_CLAIM_REJECT'
+  // 07.09.2026 — уборка файлов-сирот с диска (только Основатель).
+  | 'STORAGE_PURGE'
   // ТЗ 6.1 (волна 8) — база знаний AI-помощника.
   | 'KNOWLEDGE_CREATE'
   | 'KNOWLEDGE_UPDATE'
@@ -202,6 +204,7 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   VISA_CLAIM: 'Студент отметил визу',
   VISA_CLAIM_APPROVE: 'Отметка о визе подтверждена',
   VISA_CLAIM_REJECT: 'Отметка о визе отклонена',
+  STORAGE_PURGE: 'Уборка файлов-сирот с диска',
   KNOWLEDGE_CREATE: 'Создана статья базы знаний',
   KNOWLEDGE_UPDATE: 'Изменена статья базы знаний',
   KNOWLEDGE_DELETE: 'Удалена статья базы знаний',
@@ -251,6 +254,7 @@ export const ACTIVITY_GROUPS: { label: string; actions: ActivityAction[] }[] = [
     ],
   },
   { label: 'Виза', actions: ['VISA_CLAIM', 'VISA_CLAIM_APPROVE', 'VISA_CLAIM_REJECT'] },
+  { label: 'Сервер', actions: ['STORAGE_PURGE'] },
   { label: 'Комментарии', actions: ['COMMENT_CREATE', 'COMMENT_UPDATE', 'COMMENT_DELETE'] },
   { label: 'Звонки и переписка', actions: ['CALL_LOGGED', 'CONVERSATION_LINK', 'MESSAGE_SENT'] },
   {
