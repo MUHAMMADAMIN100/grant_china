@@ -113,3 +113,34 @@ export function formatDateTimeRu(iso: string | null | undefined): string {
     minute: '2-digit',
   });
 }
+
+/**
+ * 08.09.2026 — календарных дней от «сегодня» до даты.
+ *
+ * Раньше в пяти местах (билеты, «На подтверждении», гранты, карточки)
+ * жила копия `Math.ceil((t - Date.now()) / 86400000)` — она считает
+ * 24-часовые отрезки и округляет вверх. Утром 08.09 билет на 09.09 22:25 —
+ * это 37,5 часа → «через 2 дн.», хотя для человека это «завтра». Подпись
+ * стоит рядом с датой, и человек сверяет её с календарём, а не с часами.
+ *
+ * Считаем по календарным датам в локальном времени браузера — в том же,
+ * в котором рядом напечатана сама дата (formatDateTimeRu). Время суток
+ * не влияет: 0 — сегодня, 1 — завтра, отрицательное — дата прошла.
+ * Прошёл ли сам момент (рейс уже улетел сегодня утром) — решает вызывающий
+ * код по точному времени, здесь только календарь.
+ */
+export function calendarDaysUntil(iso: string, now: Date = new Date()): number {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return NaN;
+  const target = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - today) / 86_400_000);
+}
+
+/** Подпись к calendarDaysUntil() для будущих дат: «сегодня», «завтра», «через N дн.». */
+export function daysUntilLabel(left: number): string {
+  if (Number.isNaN(left)) return '—';
+  if (left <= 0) return 'сегодня';
+  if (left === 1) return 'завтра';
+  return `через ${left} дн.`;
+}

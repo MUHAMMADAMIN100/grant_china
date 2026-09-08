@@ -26,7 +26,7 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import { downloadProtectedFile } from '../utils/fileUrl';
-import { formatDateTimeRu, toPeriodRange } from '../utils/datetime';
+import { calendarDaysUntil, daysUntilLabel, formatDateTimeRu, toPeriodRange } from '../utils/datetime';
 import { exportTicketsCsv } from '../utils/ticketsReport';
 import { removeById, runOptimistic } from '../utils/optimistic';
 import TicketFormModal from '../components/TicketFormModal';
@@ -63,8 +63,10 @@ function statsAfterDelete(stats: TicketStats | null, t: Ticket): TicketStats | n
   if (!stats) return stats;
   const now = Date.now();
   const departure = new Date(t.departureAt).getTime();
-  const daysLeft = (departure - now) / 86_400_000;
-  const upcoming = t.status !== 'CANCELLED' && daysLeft >= 0;
+  // 08.09.2026 — окно «≤ 7/30 дней» на бэкенде теперь до КОНЦА седьмого
+  // календарного дня (см. tickets.service.stats), поэтому и здесь календарь.
+  const daysLeft = calendarDaysUntil(t.departureAt);
+  const upcoming = t.status !== 'CANCELLED' && departure >= now;
   const dec = (value: number, hit: boolean) => (hit ? Math.max(0, value - 1) : value);
   return {
     total: Math.max(0, stats.total - 1),
@@ -547,8 +549,8 @@ export default function Tickets() {
       ]
     : [];
 
-  /** Дней до вылета; отрицательное — рейс уже был. */
-  const daysUntil = (iso: string): number => Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+  /** Календарных дней до вылета (см. utils/datetime.calendarDaysUntil); «рейс состоялся» — по точному времени. */
+  const daysUntil = (iso: string): number => calendarDaysUntil(iso);
 
   return (
     <div>
@@ -697,7 +699,7 @@ export default function Tickets() {
                   <tbody>
                     {items.map((t) => {
                       const left = daysUntil(t.departureAt);
-                      const past = left < 0;
+                      const past = new Date(t.departureAt).getTime() < Date.now();
                       const soon = !past && left <= 7 && t.status !== 'CANCELLED';
                       const doc = t.documents[0];
                       const busy = busyId === t.id;
@@ -720,11 +722,7 @@ export default function Tickets() {
                                 color: soon ? 'var(--danger)' : 'var(--text-soft)',
                               }}
                             >
-                              {past
-                                ? 'рейс состоялся'
-                                : left === 0
-                                  ? 'сегодня'
-                                  : `через ${left} дн.`}
+                              {past ? 'рейс состоялся' : daysUntilLabel(left)}
                             </div>
                           </td>
                           <td data-label="Рейс">

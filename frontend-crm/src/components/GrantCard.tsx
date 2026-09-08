@@ -15,6 +15,7 @@ import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { removeById, runOptimistic } from '../utils/optimistic';
+import { calendarDaysUntil, daysUntilLabel } from '../utils/datetime';
 import GrantFormModal from './GrantFormModal';
 import Icon from '../Icon';
 
@@ -26,7 +27,8 @@ type Props = {
 
 const fmtDate = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '—');
 
-const daysUntil = (iso: string): number => Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
+/** 08.09.2026 — календарные дни, а не 24-часовые отрезки (см. utils/datetime). */
+const daysUntil = (iso: string): number => calendarDaysUntil(iso);
 
 /**
  * ТЗ 4 — блок «Грант» в карточке студента: признак пролонгации (totalYears > 1),
@@ -153,7 +155,7 @@ export default function GrantCard({ studentId, canEdit }: Props) {
             <strong>
               {fmtDate(g.nextYearStartsAt)}
               {soon !== null && soon >= 0 && soon <= 60 && (
-                <span className="badge badge-warning" style={{ marginLeft: 6 }}>через {soon} дн.</span>
+                <span className="badge badge-warning" style={{ marginLeft: 6 }}>{daysUntilLabel(soon)}</span>
               )}
             </strong>
           </div>

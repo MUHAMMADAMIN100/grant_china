@@ -16,6 +16,7 @@ import {
 } from '../api/grants';
 import { listUsers } from '../api/users';
 import type { User } from '../api/types';
+import { calendarDaysUntil, daysUntilLabel } from '../utils/datetime';
 import { isPrivileged } from '../api/types';
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
@@ -153,12 +154,8 @@ export default function Grants() {
     setFilters({ [key]: value, page: '1' });
   };
 
-  /** Дней до старта следующего учебного года; null — плановой даты нет. */
-  const daysUntil = (iso: string | null): number | null => {
-    if (!iso) return null;
-    const diff = new Date(iso).getTime() - Date.now();
-    return Math.ceil(diff / (24 * 60 * 60 * 1000));
-  };
+  /** Календарных дней до старта следующего учебного года; null — плановой даты нет. 08.09.2026 — см. utils/datetime. */
+  const daysUntil = (iso: string | null): number | null => (iso ? calendarDaysUntil(iso) : null);
 
   const onAdvance = async (g: StudentGrant, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -444,7 +441,7 @@ export default function Grants() {
                                     color: overdue ? 'var(--danger)' : soon ? 'var(--warning)' : 'var(--text-soft)',
                                   }}
                                 >
-                                  {overdue ? `просрочено на ${Math.abs(left as number)} дн.` : `через ${left} дн.`}
+                                  {overdue ? `просрочено на ${Math.abs(left as number)} дн.` : daysUntilLabel(left as number)}
                                 </div>
                               </div>
                             ) : (

@@ -12,7 +12,7 @@ import {
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import { downloadProtectedFile } from '../utils/fileUrl';
-import { formatDateTimeRu } from '../utils/datetime';
+import { calendarDaysUntil, daysUntilLabel, formatDateTimeRu } from '../utils/datetime';
 import PaymentReasonPrompt from './PaymentReasonPrompt';
 import TicketFormModal from './TicketFormModal';
 import Icon from '../Icon';
@@ -67,7 +67,8 @@ export default function PendingTicketsTable({ onChanged }: Props) {
     },
   });
 
-  const daysUntil = (iso: string): number => Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+  /** 08.09.2026 — календарные дни, а не 24-часовые отрезки (см. utils/datetime). */
+  const daysUntil = (iso: string): number => calendarDaysUntil(iso);
 
   const onApprove = async (t: Ticket) => {
     const ok = await confirm({
@@ -159,7 +160,7 @@ export default function PendingTicketsTable({ onChanged }: Props) {
           <tbody>
             {items.map((t) => {
               const left = daysUntil(t.departureAt);
-              const past = left < 0;
+              const past = new Date(t.departureAt).getTime() < Date.now();
               const doc = t.documents[0];
               const busy = busyId === t.id;
               return (
@@ -176,7 +177,7 @@ export default function PendingTicketsTable({ onChanged }: Props) {
                   <td data-label="Вылет">
                     <div>{formatDateTimeRu(t.departureAt)}</div>
                     <div style={{ fontSize: 12, color: past ? 'var(--danger)' : 'var(--text-soft)' }}>
-                      {past ? 'дата уже прошла' : left === 0 ? 'сегодня' : `через ${left} дн.`}
+                      {past ? 'дата уже прошла' : daysUntilLabel(left)}
                     </div>
                   </td>
                   <td data-label="Рейс">

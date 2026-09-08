@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { StudentTicketDto, StudentTicketUpdateDto } from './dto/student-ticket.dto';
+import { localDayStart } from '../scheduler/time';
 
 /**
  * ТЗ v3 р4 — регион менеджера. Необязательный: часть внутренних вызовов
@@ -116,6 +117,11 @@ export interface TicketListFilters {
  * удаления (запись пропадает из всех списков), но Основатель может
  * восстановить ошибочно удалённый билет.
  */
+/** Конец календарного дня по Душанбе через `days` дней от `now` (последняя миллисекунда). */
+function endOfLocalDayAfter(now: Date, days: number): Date {
+  return new Date(localDayStart(new Date(now.getTime() + (days + 1) * 86_400_000)).getTime() - 1);
+}
+
 @Injectable()
 export class TicketsService {
   constructor(
@@ -278,8 +284,12 @@ export class TicketsService {
     // которого в таблице под сводкой нет.
     const base: Prisma.TicketWhereInput = { deletedAt: null, ...LIVE_REVIEW_WHERE, student: this.studentScopeWhere(user) };
     const now = new Date();
-    const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    // 08.09.2026 — окно до КОНЦА седьмого/тридцатого календарного дня по
+    // Душанбе, а не «ровно 7 × 24 ч от текущей секунды». Подпись в таблице
+    // считает календарные дни («через 7 дн.» у рейса 15.09 23:00 при
+    // сегодняшнем 08.09), и плитка «Вылет ≤ 7 дней» обязана считать его же.
+    const in7 = endOfLocalDayAfter(now, 7);
+    const in30 = endOfLocalDayAfter(now, 30);
     const [total, upcoming7, upcoming30, booked, cancelled] = await Promise.all([
       this.prisma.ticket.count({ where: base }),
       this.prisma.ticket.count({
