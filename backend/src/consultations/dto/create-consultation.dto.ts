@@ -9,7 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { ConsultationKind, Direction } from '@prisma/client';
-import { LEAD_SOURCE_VALUES } from '../../common/lead-source';
+import { IsLeadSourceCode } from '../../common/lead-source';
 
 // Тот же формат, что и у заявок (applications/dto/create-application.dto.ts).
 const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
@@ -37,7 +37,8 @@ export class CreateConsultationDto {
   kind?: ConsultationKind;
 
   @IsOptional()
-  @IsIn(LEAD_SOURCE_VALUES)
+  // 08.09.2026 — плюс свои коды CUSTOM_<hex> (справочник lead-sources/).
+  @IsLeadSourceCode()
   source?: string;
 
   @IsOptional()

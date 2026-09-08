@@ -34,6 +34,7 @@ import { PayrollModule } from './payroll/payroll.module';
 // единое окно диалогов (ТЗ 6.4).
 import { TicketsModule } from './tickets/tickets.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { LeadSourcesModule } from './lead-sources/lead-sources.module';
 import { AiModule } from './ai/ai.module';
 import { MessagingModule } from './messaging/messaging.module';
 
@@ -101,6 +102,8 @@ if (!UPLOADS_PROTECTED) {
     ActivityModule,
     PaymentsModule,
     ConsultationsModule,
+    // 08.09.2026 — свои источники привлечения (глобальный модуль).
+    LeadSourcesModule,
     SchedulerModule,
     GrantsModule,
     CommentsModule,

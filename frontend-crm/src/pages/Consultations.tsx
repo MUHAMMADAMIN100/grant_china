@@ -12,6 +12,8 @@ import {
   leadSourceLabel,
 } from '../api/types';
 import { useAuth } from '../store/auth';
+import LeadSourceSelect from '../components/LeadSourceSelect';
+import { useLeadSources } from '../store/leadSources';
 import { useRealtime } from '../realtime';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import { formatDateTimeRu, toPeriodRange } from '../utils/datetime';
@@ -22,6 +24,7 @@ import ConsultationFormModal from '../components/ConsultationFormModal';
 const PAGE_SIZE = 10;
 
 export default function Consultations() {
+  useLeadSources(); // подписи своих источников под ФИО
   const me = useAuth((s) => s.user);
   const isAdmin = isPrivileged(me?.role);
 
@@ -245,13 +248,7 @@ export default function Consultations() {
               <option key={k} value={k}>{v}</option>
             ))}
           </select>
-          <select value={source} onChange={(e) => onFilterChange('source', e.target.value)} title="Источник привлечения">
-            <option value="">Все источники</option>
-            <option value="NONE">Не указан</option>
-            {LEAD_SOURCES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
+          <LeadSourceSelect variant="filter" value={source} onChange={(v) => onFilterChange('source', v)} title="Источник привлечения" data-testid="cons-source-filter" />
           {isAdmin && (
             <select value={manager} onChange={(e) => onFilterChange('manager', e.target.value)} title="Фильтр по ответственному менеджеру">
               <option value="">Все менеджеры</option>

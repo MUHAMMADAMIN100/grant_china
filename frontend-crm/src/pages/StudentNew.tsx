@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createStudent } from '../api/students';
 import type { Direction } from '../api/types';
-import { LEAD_SOURCES } from '../api/types';
+import LeadSourceSelect from '../components/LeadSourceSelect';
 import { useUI } from '../ui/Dialogs';
 import Icon from '../Icon';
 import { compose, email as emailRule, hasErrors, maxLen, minLen, phoneRule, required, validateAll } from '../utils/validators';
@@ -175,12 +175,7 @@ export default function StudentNew() {
                   — откуда пришёл клиент
                 </span>
               </label>
-              <select value={source} onChange={(e) => setSource(e.target.value)}>
-                <option value="">Не указан</option>
-                {LEAD_SOURCES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
+              <LeadSourceSelect value={source} onChange={setSource} data-testid="student-source-select" />
             </div>
             <div className="form-group">
               <label>

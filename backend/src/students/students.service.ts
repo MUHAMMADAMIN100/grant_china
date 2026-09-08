@@ -16,6 +16,7 @@ import { MANAGED_DOCUMENT_TYPES, REQUIRED_DOCUMENT_TYPES, assertNotManagedDocume
 import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
 import { normalizeSource } from '../common/lead-source';
+import { LeadSourcesService } from '../lead-sources/lead-sources.service';
 import { findRepeatOfId } from '../common/application-repeat';
 
 function generatePassword(length = 8): string {
@@ -114,6 +115,7 @@ export class StudentsService implements OnModuleInit {
     private activity: ActivityService,
     private notifications: NotificationsService,
     private fileResolver: FileResolverService,
+    private leadSources: LeadSourcesService,
   ) {}
 
   onModuleInit() {
@@ -235,6 +237,7 @@ export class StudentsService implements OnModuleInit {
     },
     lead: { source?: string; sourceDetail?: string } = {},
   ) {
+    await this.leadSources.assertUsable(normalizeSource(lead.source)); // 08.09.2026 — свой код должен существовать
     const phone = student.phones[0] || '';
     const phoneNormalized = normalizePhone(phone);
     // «Этот человек уже обращался?» — та же формула, что у заявки с лендинга.

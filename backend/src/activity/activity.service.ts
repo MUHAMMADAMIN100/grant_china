@@ -41,6 +41,9 @@ export type ActivityAction =
   | 'APPLICATION_ARCHIVE'
   | 'APPLICATION_UNARCHIVE'
   | 'APPLICATION_SOURCE_CHANGE'
+  // 08.09.2026 — справочник своих источников привлечения.
+  | 'LEAD_SOURCE_CREATE'
+  | 'LEAD_SOURCE_UPDATE'
   | 'APPLICATION_CLEAR_REPEAT'
   // Раздел 3.2 ТЗ — консультации/собеседования. Пишутся из
   // consultations.service.ts. actorId может быть null (планировщик/системные

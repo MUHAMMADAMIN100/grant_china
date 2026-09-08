@@ -23,6 +23,7 @@ import { formatDateTimeRu, toDatetimeLocalValue } from '../utils/datetime';
 import { compose, hasErrors, maxLen, minLen, phoneRule, required, validateAll } from '../utils/validators';
 import DirectionOptions from '../components/DirectionOptions';
 import PhoneInput from '../components/PhoneInput';
+import LeadSourceSelect from './LeadSourceSelect';
 import Icon from '../Icon';
 import { todayInputValue } from '../utils/datetime';
 
@@ -283,12 +284,7 @@ export default function ConsultationFormModal({ consultation, onClose, onSaved }
         <div className="form-grid-2">
           <div className="form-group">
             <label>Источник привлечения</label>
-            <select value={source} onChange={(e) => setSource(e.target.value)} disabled={busy}>
-              <option value="">Не указан</option>
-              {LEAD_SOURCES.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
+            <LeadSourceSelect value={source} onChange={setSource} disabled={busy} data-testid="cons-source-select" />
           </div>
           <div className="form-group">
             <label>Направление</label>

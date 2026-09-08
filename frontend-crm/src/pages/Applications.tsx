@@ -11,7 +11,10 @@ import {
 } from '../api/applications';
 import { listUsers } from '../api/users';
 import type { Application, ApplicationStatus, ApplicationTab, Direction, User } from '../api/types';
-import { DIRECTION_LABEL, LEAD_SOURCES, STATUS_BADGE, STATUS_LABEL, isPrivileged, leadSourceLabel } from '../api/types';
+import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, isPrivileged, leadSourceLabel } from '../api/types';
+import LeadSourceSelect from '../components/LeadSourceSelect';
+import { useLeadSources } from '../store/leadSources';
+
 import { useAuth } from '../store/auth';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
@@ -46,6 +49,7 @@ const TAB_ICON: Record<ApplicationTab, string> = {
 const EMPTY_COUNTS: ApplicationTabCounts = { all: 0, new: 0, in_work: 0, archive: 0 };
 
 export default function Applications() {
+  useLeadSources(); // подписи своих источников в колонке «Источник»
   const navigate = useNavigate();
   const me = useAuth((s) => s.user);
   const { confirm, toast } = useUI();
@@ -424,13 +428,8 @@ export default function Applications() {
             <option value="">Все направления</option>
             <DirectionOptions />
           </select>
-          <select value={source} onChange={(e) => onFilterChange('source', e.target.value)} title="Фильтр по источнику привлечения">
-            <option value="">Все источники</option>
-            <option value="NONE">Не указан</option>
-            {LEAD_SOURCES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
+          {/* 08.09.2026 — свои источники в фильтре; «Другое…» открывает окно добавления и здесь. */}
+          <LeadSourceSelect variant="filter" value={source} onChange={(v) => onFilterChange('source', v)} title="Фильтр по источнику привлечения" data-testid="apps-source-filter" />
           <input
             type="date"
             value={from}

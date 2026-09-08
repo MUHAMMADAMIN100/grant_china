@@ -2198,3 +2198,23 @@ model ChannelMessage {
   // Лента диалога: WHERE conversationId=? AND deletedAt IS NULL ORDER BY sentAt.
   @@index([conversationId, deletedAt, sentAt])
 }
+
+// 08.09.2026 — свои источники привлечения. Встроенный справочник живёт в
+// common/lead-source.ts (коды WEBSITE, INSTAGRAM, …); эта таблица его
+// дополняет тем, что сотрудники добавили сами через пункт «Другое».
+// В Application.source / Consultation.source хранится `code` вида
+// CUSTOM_<8 hex> — поэтому переименование источника не трогает заявки,
+// а скрытие (hiddenAt) лишь убирает его из выбора, старые записи живут.
+model LeadSourceOption {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  label         String
+  // Нормализованное название (нижний регистр, одиночные пробелы) — защита
+  // от дублей «Ярмарка вузов» / «ярмарка  вузов».
+  labelKey      String    @unique
+  createdById   String?
+  createdByName String?
+  hiddenAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}

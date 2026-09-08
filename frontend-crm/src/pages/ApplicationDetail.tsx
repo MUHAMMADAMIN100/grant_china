@@ -4,8 +4,10 @@ import { assignApplicationManager, clearRepeatApplication, deleteApplication, ge
 import { getStudent, updateStudent, uploadPhoto } from '../api/students';
 import { listContracts } from '../api/contracts';
 import type { Application, ApplicationStatus, Contract, Direction, Student, StudentStatus } from '../api/types';
-import { APPLICATION_STAGES, DIRECTION_LABEL, LEAD_SOURCES, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, canWriteFinance, isPrivileged, leadSourceLabel } from '../api/types';
+import { APPLICATION_STAGES, DIRECTION_LABEL, STAGE_INDEX, STATUS_BADGE, STATUS_LABEL, STATUS_SHORT, STUDENT_STATUS_LABEL, canWriteFinance, isPrivileged, leadSourceLabel } from '../api/types';
 import { useAuth } from '../store/auth';
+import LeadSourceSelect from '../components/LeadSourceSelect';
+import { useLeadSources } from '../store/leadSources';
 import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import DocumentsChecklist from '../components/DocumentsChecklist';
@@ -107,6 +109,8 @@ export default function ApplicationDetail() {
   // закрывается сразу с новым значением, а при отказе сервера возвращается
   // с тем же набранным текстом (см. onSaveSource).
   const [sourceEdit, setSourceEdit] = useState<{ source: string; sourceDetail: string } | null>(null);
+  // Подписи своих источников для бейджа — справочник грузится один раз за сессию.
+  useLeadSources();
 
   const formErrors = form
     ? validateAll(
@@ -592,15 +596,12 @@ export default function ApplicationDetail() {
           <div className="detail-value">
             {sourceEdit ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <select
+                {/* 08.09.2026 — свой справочник: «Другое…» открывает окно добавления. */}
+                <LeadSourceSelect
                   value={sourceEdit.source}
-                  onChange={(e) => setSourceEdit({ ...sourceEdit, source: e.target.value })}
-                >
-                  <option value="">Не указан</option>
-                  {LEAD_SOURCES.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setSourceEdit({ ...sourceEdit, source: v })}
+                  data-testid="app-source-select"
+                />
                 <input
                   value={sourceEdit.sourceDetail}
                   onChange={(e) => setSourceEdit({ ...sourceEdit, sourceDetail: e.target.value })}

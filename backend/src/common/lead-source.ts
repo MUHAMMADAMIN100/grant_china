@@ -1,3 +1,4 @@
+import { Matches } from 'class-validator';
 /**
  * Раздел 3.1 ТЗ — «источник привлечения». Единственный источник истины по
  * значениям справочника: Application.source/Consultation.source в БД — это
@@ -30,6 +31,26 @@ export const LEAD_SOURCES: readonly LeadSourceOption[] = [
 
 export const LEAD_SOURCE_VALUES: readonly string[] = LEAD_SOURCES.map((s) => s.value);
 
+/**
+ * 08.09.2026 — свои источники. Код `CUSTOM_<8 hex>` хранится в
+ * Application.source / Consultation.source так же, как встроенные коды;
+ * название лежит в таблице LeadSourceOption (см. lead-sources/).
+ */
+export const CUSTOM_SOURCE_PREFIX = 'CUSTOM_';
+export const CUSTOM_SOURCE_CODE_RE = /^CUSTOM_[a-f0-9]{8}$/;
+export const isCustomSourceCode = (v: string | null | undefined): boolean => !!v && CUSTOM_SOURCE_CODE_RE.test(v);
+
+/** Любой допустимый код источника — встроенный или свой. Для @Matches в DTO. */
+export const LEAD_SOURCE_CODE_RE = new RegExp(`^(${LEAD_SOURCE_VALUES.join('|')}|CUSTOM_[a-f0-9]{8})$`);
+
+/** Декоратор для DTO вместо прежнего @IsIn(LEAD_SOURCE_VALUES): пропускает и свои коды. */
+export const IsLeadSourceCode = () => Matches(LEAD_SOURCE_CODE_RE, { message: 'Неизвестный источник привлечения' });
+
+/** Ключ для защиты от дублей названий: регистр и лишние пробелы не различаются. */
+export function leadSourceLabelKey(label: string): string {
+  return label.trim().toLowerCase().replace(/\s+/g, ' ').replace(/ё/g, 'е');
+}
+
 export type LeadSource = (typeof LEAD_SOURCES)[number]['value'];
 
 export const LEAD_SOURCE_LABEL: Record<string, string> = Object.fromEntries(
@@ -44,10 +65,12 @@ export const LEAD_SOURCE_LABEL: Record<string, string> = Object.fromEntries(
  * @IsIn(LEAD_SOURCE_VALUES) на границе API, сюда долетают только валидные
  * значения на штатных путях, но сервис не должен доверять этому слепо).
  */
-export function normalizeSource(raw: string | null | undefined): LeadSource | null {
+export function normalizeSource(raw: string | null | undefined): string | null {
   if (raw == null) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
+  // Свой код — как есть (существование проверяет LeadSourcesService.assertUsable).
+  if (CUSTOM_SOURCE_CODE_RE.test(trimmed)) return trimmed;
   const upper = trimmed.toUpperCase();
   return LEAD_SOURCE_VALUES.includes(upper) ? upper : 'OTHER';
 }

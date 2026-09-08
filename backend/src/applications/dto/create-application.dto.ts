@@ -1,6 +1,6 @@
 import { IsEmail, IsEnum, IsIn, IsOptional, IsString, Matches, MinLength, MaxLength } from 'class-validator';
 import { Direction } from '@prisma/client';
-import { LEAD_SOURCE_VALUES } from '../../common/lead-source';
+import { IsLeadSourceCode } from '../../common/lead-source';
 
 // E.164: '+' необязателен, 7–15 цифр всего, разрешаем пробелы/дефисы при вводе.
 const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
@@ -40,7 +40,8 @@ export class CreateApplicationDto {
   // старый закэшированный бандл лендинга не шлёт это поле вовсе, сервис
   // подставляет значение по умолчанию (см. applications.service.create()).
   @IsOptional()
-  @IsIn(LEAD_SOURCE_VALUES)
+  // 08.09.2026 — плюс свои коды CUSTOM_<hex> (справочник lead-sources/).
+  @IsLeadSourceCode()
   source?: string;
 
   // Свободный текст-уточнение (utm, @ник, кампания). Режем длину — поле

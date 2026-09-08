@@ -18,6 +18,7 @@ import { invalidateStudentCache } from '../student-auth/student-jwt.guard';
 import { FileResolverService } from '../files/file-resolver.service';
 import { buildPhoneSearch, normalizePhone, phoneContainsConditions } from '../common/phone';
 import { normalizeSource } from '../common/lead-source';
+import { LeadSourcesService } from '../lead-sources/lead-sources.service';
 import { findRepeatOfId } from '../common/application-repeat';
 import { claimEnrolled, claimFirstTouch } from '../common/lead-touch';
 
@@ -112,6 +113,7 @@ export class ApplicationsService implements OnModuleInit {
     private activity: ActivityService,
     private realtime: RealtimeGateway,
     private fileResolver: FileResolverService,
+    private leadSources: LeadSourcesService,
   ) {}
 
   /**
@@ -274,6 +276,8 @@ export class ApplicationsService implements OnModuleInit {
     // должны наследовать этот дефолт — иначе офисные визиты помечались бы
     // "Сайт". @IsIn(LEAD_SOURCE_VALUES) в DTO уже отсеял мусор до сюда.
     const source = normalizeSource(dto.source) ?? 'WEBSITE';
+    // 08.09.2026 — свой код должен существовать в справочнике, иначе в CRM он показался бы голым CUSTOM_….
+    await this.leadSources.assertUsable(source);
     const sourceDetail = dto.sourceDetail?.trim() || null;
     // ТЗ 3.1 — «повторное обращение»: раньше телефон/email этого человека
     // уже встречались? Раньше самой заявки её ещё нет в БД, поэтому исключать
@@ -593,6 +597,7 @@ export class ApplicationsService implements OnModuleInit {
     // Ручная правка телефона обязана держать phoneNormalized (ключ поиска
     // повторных обращений) в актуальном состоянии — иначе денормализованная
     // колонка тихо разъедется с исходным полем после первого же PATCH.
+    await this.leadSources.assertUsable(dto.source);
     const updateData: Prisma.ApplicationUncheckedUpdateInput = { ...dto };
     if (dto.phone !== undefined) {
       updateData.phoneNormalized = normalizePhone(dto.phone);

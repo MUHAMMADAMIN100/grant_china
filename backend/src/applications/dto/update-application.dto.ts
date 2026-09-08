@@ -1,6 +1,6 @@
 import { IsEmail, IsEnum, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { ApplicationStatus, Direction } from '@prisma/client';
-import { LEAD_SOURCE_VALUES } from '../../common/lead-source';
+import { IsLeadSourceCode } from '../../common/lead-source';
 
 const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
 
@@ -37,7 +37,8 @@ export class UpdateApplicationDto {
   // Раздел 3.1 ТЗ — карточка заявки позволяет проставить/поправить источник
   // вручную (например для 229 исторических заявок с source = null).
   @IsOptional()
-  @IsIn(LEAD_SOURCE_VALUES)
+  // 08.09.2026 — плюс свои коды CUSTOM_<hex> (справочник lead-sources/).
+  @IsLeadSourceCode()
   source?: string;
 
   @IsOptional()

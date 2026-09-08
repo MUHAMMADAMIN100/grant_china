@@ -29,6 +29,8 @@ export type ActivityAction =
   | 'APPLICATION_ARCHIVE'
   | 'APPLICATION_UNARCHIVE'
   | 'APPLICATION_SOURCE_CHANGE'
+  | 'LEAD_SOURCE_CREATE'
+  | 'LEAD_SOURCE_UPDATE'
   | 'APPLICATION_CLEAR_REPEAT'
   // ТЗ 3.2 — консультации/собеседования. Пишутся из consultations.service.ts.
   | 'CONSULTATION_CREATE'
@@ -157,6 +159,8 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   APPLICATION_ARCHIVE: 'Заявка отправлена в архив',
   APPLICATION_UNARCHIVE: 'Заявка возвращена из архива',
   APPLICATION_SOURCE_CHANGE: 'Изменён источник заявки',
+  LEAD_SOURCE_CREATE: 'Добавлен источник привлечения',
+  LEAD_SOURCE_UPDATE: 'Изменён источник привлечения',
   APPLICATION_CLEAR_REPEAT: 'Снята пометка «повторное обращение»',
   CONSULTATION_CREATE: 'Записана консультация',
   CONSULTATION_UPDATE: 'Изменена консультация',
@@ -217,7 +221,7 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
 // используемые (заявки/студенты), затем финансы, задачи, консультации,
 // гранты, комментарии, звонки, кадры.
 export const ACTIVITY_GROUPS: { label: string; actions: ActivityAction[] }[] = [
-  { label: 'Заявки', actions: ['STATUS_CHANGE', 'APPLICATION_ARCHIVE', 'APPLICATION_UNARCHIVE', 'APPLICATION_SOURCE_CHANGE', 'APPLICATION_CLEAR_REPEAT'] },
+  { label: 'Заявки', actions: ['STATUS_CHANGE', 'APPLICATION_ARCHIVE', 'APPLICATION_UNARCHIVE', 'APPLICATION_SOURCE_CHANGE', 'APPLICATION_CLEAR_REPEAT', 'LEAD_SOURCE_CREATE', 'LEAD_SOURCE_UPDATE'] },
   { label: 'Студенты', actions: ['STUDENT_CREATE', 'STUDENT_UPDATE', 'STUDENT_DELETE', 'MANAGER_CHANGE', 'PROGRAM_CHANGE'] },
   { label: 'Документы', actions: ['DOCUMENT_UPLOAD', 'DOCUMENT_DELETE'] },
   {

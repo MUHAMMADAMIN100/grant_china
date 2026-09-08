@@ -36,6 +36,8 @@ const ACTION_BADGE: Partial<Record<ActivityAction, string>> = {
   APPLICATION_ARCHIVE: 'badge-gray',
   APPLICATION_UNARCHIVE: 'badge-info',
   APPLICATION_SOURCE_CHANGE: 'badge-info',
+  LEAD_SOURCE_CREATE: 'badge-success',
+  LEAD_SOURCE_UPDATE: 'badge-warning',
   APPLICATION_CLEAR_REPEAT: 'badge-gray',
   CONSULTATION_CREATE: 'badge-success',
   CONSULTATION_UPDATE: 'badge-warning',

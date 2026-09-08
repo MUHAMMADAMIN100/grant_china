@@ -1,6 +1,6 @@
 import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Direction, StudentStatus } from '@prisma/client';
-import { LEAD_SOURCE_VALUES } from '../../common/lead-source';
+import { IsLeadSourceCode } from '../../common/lead-source';
 
 const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
 
@@ -60,7 +60,8 @@ export class CreateStudentDto {
   // Значение по умолчанию сервер НЕ подставляет: выдуманный факт («Сайт»
   // для человека, пришедшего в офис) хуже честного «не указан».
   @IsOptional()
-  @IsIn(LEAD_SOURCE_VALUES)
+  // 08.09.2026 — плюс свои коды CUSTOM_<hex> (справочник lead-sources/).
+  @IsLeadSourceCode()
   source?: string;
 
   @IsOptional()

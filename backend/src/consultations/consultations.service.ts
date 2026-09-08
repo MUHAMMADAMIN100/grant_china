@@ -16,6 +16,7 @@ import { isPrivileged } from '../common/roles';
 import { canAccessStudentRecord } from '../common/access';
 import { normalizePhone, phoneContainsConditions } from '../common/phone';
 import { normalizeSource } from '../common/lead-source';
+import { LeadSourcesService } from '../lead-sources/lead-sources.service';
 import { findRepeatOfId } from '../common/application-repeat';
 import { claimFirstTouch } from '../common/lead-touch';
 import { CreateConsultationDto } from './dto/create-consultation.dto';
@@ -62,6 +63,7 @@ export class ConsultationsService {
     private tasks: TasksService,
     private activity: ActivityService,
     private realtime: RealtimeGateway,
+    private leadSources: LeadSourcesService,
     private notifications: NotificationsService,
   ) {}
 
@@ -259,6 +261,7 @@ export class ConsultationsService {
     const heldAt = dto.heldAt ? this.parseDate(dto.heldAt, 'Некорректная дата проведения') : new Date();
     const followUpAt = dto.followUpAt ? this.parseDate(dto.followUpAt, 'Некорректная дата повторного звонка') : null;
 
+    await this.leadSources.assertUsable(normalizeSource(dto.source)); // 08.09.2026 — свой код должен существовать
     const consultation = await this.prisma.consultation.create({
       data: {
         fullName: dto.fullName.trim(),
@@ -350,7 +353,10 @@ export class ConsultationsService {
     }
     if (dto.purpose !== undefined) data.purpose = dto.purpose.trim();
     if (dto.kind !== undefined) data.kind = dto.kind;
-    if (dto.source !== undefined) data.source = normalizeSource(dto.source);
+    if (dto.source !== undefined) {
+      data.source = normalizeSource(dto.source);
+      await this.leadSources.assertUsable(data.source);
+    }
     if (dto.sourceDetail !== undefined) data.sourceDetail = dto.sourceDetail?.trim() || null;
     if (dto.direction !== undefined) data.direction = dto.direction;
     if (dto.comment !== undefined) data.comment = dto.comment?.trim() || null;

@@ -8,6 +8,7 @@ import { compose, email as emailRule, hasErrors, maxLen, minLen, passwordRule, r
 import { useRealtime } from '../realtime';
 import { isTempId, removeById, replaceById, runOptimistic, tempId } from '../utils/optimistic';
 import ChangePasswordModal from '../components/ChangePasswordModal';
+import LeadSourcesAdmin from '../components/LeadSourcesAdmin';
 
 // Порядок ролей для выпадающих списков и легенды — от младшей к старшей,
 // одно место, откуда берутся и value, и подпись (ROLE_LABEL), чтобы нигде
@@ -57,6 +58,8 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [pwdTarget, setPwdTarget] = useState<User | null>(null);
+  // 08.09.2026 — вторая вкладка раздела: справочник источников привлечения.
+  const [tab, setTab] = useState<'users' | 'sources'>('users');
 
   const isFounder = me?.role === 'FOUNDER';
   const canEdit = isFounder; // только Основатель может всё менять
@@ -230,11 +233,20 @@ export default function Users() {
 
   return (
     <div className="card">
-      <div className="card-header">
-        <h2 className="card-title">Пользователи системы</h2>
-        {canEdit && !creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Добавить</button>}
+      <div className="card-header" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <h2 className="card-title">{tab === 'users' ? 'Пользователи системы' : 'Источники привлечения'}</h2>
+        <div className="scope-switch" role="tablist">
+          <button className={`scope-btn${tab === 'users' ? ' active' : ''}`} onClick={() => setTab('users')} data-testid="users-tab-users">Сотрудники</button>
+          <button className={`scope-btn${tab === 'sources' ? ' active' : ''}`} onClick={() => setTab('sources')} data-testid="users-tab-sources">Источники привлечения</button>
+        </div>
+        {tab === 'users' && canEdit && !creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Добавить</button>}
       </div>
-      <div className="card-body">
+      {tab === 'sources' && (
+        <div className="card-body">
+          <LeadSourcesAdmin canEdit={isFounder || me?.role === 'ADMIN'} />
+        </div>
+      )}
+      <div className="card-body" hidden={tab === 'sources'}>
         <div className="role-legend">
           {ROLE_OPTIONS.map((r) => (
             <div className="role-legend-item" key={r}>
