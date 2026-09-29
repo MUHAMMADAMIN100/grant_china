@@ -19,6 +19,8 @@ const ACTION_BADGE: Partial<Record<ActivityAction, string>> = {
   STUDENT_UPDATE: 'badge-warning',
   STUDENT_CREATE: 'badge-success',
   STUDENT_DELETE: 'badge-danger',
+  STUDENT_ARCHIVE: 'badge-gray',
+  STUDENT_UNARCHIVE: 'badge-success',
   MANAGER_CHANGE: 'badge-warning',
   PROGRAM_CHANGE: 'badge-info',
   PAYMENT_CREATE: 'badge-info',

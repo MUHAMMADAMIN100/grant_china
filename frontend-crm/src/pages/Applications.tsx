@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   applicationTabCounts,
@@ -11,7 +11,7 @@ import {
 } from '../api/applications';
 import { listUsers } from '../api/users';
 import type { Application, ApplicationStatus, ApplicationTab, Direction, User } from '../api/types';
-import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, isPrivileged, leadSourceLabel } from '../api/types';
+import { DIRECTION_LABEL, STATUS_BADGE, STATUS_LABEL, STUDENT_ARCHIVE_REASON, isPrivileged, leadSourceLabel } from '../api/types';
 import LeadSourceSelect from '../components/LeadSourceSelect';
 import { useLeadSources } from '../store/leadSources';
 
@@ -504,7 +504,13 @@ export default function Applications() {
                           </>
                         )}
                         {a.archivedAt && (
-                          <span className="badge badge-gray" style={{ marginLeft: 6 }}>В архиве</span>
+                          <span
+                            className="badge badge-gray"
+                            style={{ marginLeft: 6 }}
+                            title={a.archiveReason === STUDENT_ARCHIVE_REASON ? 'Заявка ушла в архив вместе со студентом — вернётся вместе с ним из раздела «Архив»' : undefined}
+                          >
+                            {a.archiveReason === STUDENT_ARCHIVE_REASON ? 'В архиве со студентом' : 'В архиве'}
+                          </span>
                         )}
                       </td>
                       <td data-label="Телефон">{a.phone}</td>
@@ -539,7 +545,18 @@ export default function Applications() {
                       <td data-label="Статус"><span className={`badge ${STATUS_BADGE[a.status]}`}>{STATUS_LABEL[a.status]}</span></td>
                       <td data-label="Дата">{new Date(a.createdAt).toLocaleDateString('ru-RU')}</td>
                       <td data-label="Действия" onClick={(e) => e.stopPropagation()}>
-                        {canEditRow(a) && (
+                        {/* 29.09.2026 — заявка архивного студента отдельно не возвращается
+                            (сервер ответит 409): вместо кнопки — ссылка в раздел «Архив». */}
+                        {canEditRow(a) && a.archivedAt && a.archiveReason === STUDENT_ARCHIVE_REASON ? (
+                          <Link
+                            to="/archive"
+                            className="btn btn-sm btn-secondary"
+                            title="Студент в архиве — вернуть его вместе с заявками в разделе «Архив»"
+                            data-testid="app-go-archive"
+                          >
+                            <Icon name="inventory_2" size={14} />
+                          </Link>
+                        ) : canEditRow(a) && (
                           a.archivedAt ? (
                             <button
                               className="btn btn-sm btn-secondary"

@@ -50,6 +50,8 @@ export default function Sidebar() {
     { to: '/applications', icon: 'assignment', label: 'Заявки' },
     { to: '/consultations', icon: 'record_voice_over', label: 'Консультации' },
     { to: '/students', icon: 'school', label: 'Студенты' },
+    // 29.09.2026 — архив студентов: все роли, менеджер видит там только своих.
+    { to: '/archive', icon: 'inventory_2', label: 'Архив' },
     // ТЗ 6.4 — единое окно переписки из мессенджеров, доступно всем ролям
     // (непривязанные диалоги видны всем, как свободные заявки).
     { to: '/conversations', icon: 'forum', label: 'Диалоги', badge: unreadChats },

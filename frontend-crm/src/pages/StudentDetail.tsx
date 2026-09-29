@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { approveVisaClaim, assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, rejectVisaClaim, returnStudentFromChina, transferStudentToChina, updateStudent, uploadPhoto } from '../api/students';
+import { approveVisaClaim, assignStudentManager, deleteStudent, ensureStudentApplication, getStudent, regenerateStudentPassword, rejectVisaClaim, returnStudentFromChina, transferStudentToChina, unarchiveStudents, updateStudent, uploadPhoto, type ArchiveStudentsResult } from '../api/students';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Direction, Student, StudentStatus } from '../api/types';
 import { DIRECTION_LABEL, STUDENT_STATUS_LABEL, isFounder, isPrivileged } from '../api/types';
@@ -10,6 +10,8 @@ import { useRealtime } from '../realtime';
 import DocumentsChecklist from '../components/DocumentsChecklist';
 import ManagerBar from '../components/ManagerBar';
 import ChinaTransferModal from '../components/ChinaTransferModal';
+import ArchiveStudentsModal from '../components/ArchiveStudentsModal';
+import { archiveResultToast } from '../utils/archive';
 import PaymentsSection from '../components/PaymentsSection';
 import ApplicationFormSection from '../components/ApplicationFormSection';
 import ApplicationStatusStepper from '../components/ApplicationStatusStepper';
@@ -241,6 +243,10 @@ export default function StudentDetail() {
   // «Передать в Китай»; сама передача (как и возврат) идёт оптимистично,
   // см. onTransferToChina/onReturnFromChina ниже.
   const [chinaModalOpen, setChinaModalOpen] = useState(false);
+  // 29.09.2026 — архив: окно «В архив» (то же, что у галочек в «Студентах»)
+  // и «идёт возврат» у кнопки «Вернуть из архива».
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -591,6 +597,49 @@ export default function StudentDetail() {
     if (saved) toast('Студент возвращён в таджикский офис', 'success');
   };
 
+  /**
+   * 29.09.2026 — архив. «В архив» открывает то же окно, что галочки в списке
+   * «Студенты», с одним студентом; «Вернуть» — то же действие, что в разделе
+   * «Архив». Не оптимистично: вместе со студентом меняются его заявки, доступ
+   * в кабинет и счётчики — показываем ровно то, что сделал сервер.
+   */
+  const onArchived = (res: ArchiveStudentsResult) => {
+    setArchiveOpen(false);
+    const t = archiveResultToast(res.archived, res.skipped, 'archive');
+    toast(t.message, t.kind);
+    if (res.archived.length) {
+      setEdit(false);
+      setTouched({});
+      reload({ resetForm: true });
+    }
+  };
+
+  const onUnarchive = async () => {
+    if (!id || !student) return;
+    const ok = await confirm({
+      title: 'Вернуть из архива',
+      message: `«${student.fullName}» вернётся в «Студенты» с прежним статусом: снова откроется личный кабинет, вернутся заявки, ушедшие в архив вместе с ним.`,
+      confirmText: 'Вернуть',
+    });
+    if (!ok) return;
+    setArchiveBusy(true);
+    try {
+      const res = await unarchiveStudents([id]);
+      const t = archiveResultToast(res.restored, res.skipped, 'restore');
+      toast(t.message, t.kind);
+      if (res.restored.length) {
+        setEdit(false);
+        setTouched({});
+        await reload({ resetForm: true });
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.message;
+      toast(Array.isArray(msg) ? msg.join(', ') : msg || 'Не удалось вернуть из архива', 'error');
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
   const onRegenerate = async () => {
     if (!id) return;
     const ok = await confirm({
@@ -675,6 +724,9 @@ export default function StudentDetail() {
   // Возврат — необратимое для рядового сотрудника решение, поэтому только
   // Основатель (см. students.service.ts returnFromChina).
   const canReturnFromChina = !loading && !!student!.transferredToChinaAt && isFounder(me?.role);
+  // 29.09.2026 — архив студентов: право то же, что на правку карточки
+  // (руководство любых, менеджер своих) — его и проверяет сервер.
+  const isArchived = !loading && student!.status === 'ARCHIVED';
 
   // COMPLETED — legacy-значение статуса заявки (мигрировано в ENROLLED), но
   // у части старых заявок в БД оно ещё может встречаться "как есть" —
@@ -708,6 +760,12 @@ export default function StudentDetail() {
               Передан в Китай
             </span>
           )}
+          {isArchived && (
+            <span className="badge badge-gray" style={{ gap: 4 }} data-testid="card-archived-badge">
+              <Icon name="inventory_2" size={14} />
+              В архиве
+            </span>
+          )}
         </h2>
         <div style={{ display: 'flex', gap: 8 }}>
           {!loading && canEdit && !edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>Редактировать</button>}
@@ -721,6 +779,12 @@ export default function StudentDetail() {
             <button className="btn btn-secondary btn-sm" onClick={() => { setEdit(false); setTouched({}); setForm(formFromStudent(student!)); }}>Отмена</button>
             <button className="btn btn-primary btn-sm" onClick={onSave}>Сохранить</button>
           </>}
+          {!loading && canEdit && !edit && !isArchived && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setArchiveOpen(true)} data-testid="card-archive">
+              <Icon name="inventory_2" size={16} style={{ marginRight: 4 }} />
+              В архив
+            </button>
+          )}
           {!loading && canEdit && <button className="btn btn-danger btn-sm" onClick={onDeleteStudent}>Удалить</button>}
         </div>
       </div>
@@ -735,6 +799,33 @@ export default function StudentDetail() {
           </>
         ) : (
         <>
+        {/* 29.09.2026 — студент в архиве: кто, когда и почему, и что это значит.
+            Кнопка «Вернуть» — тем же, кто может править карточку (так же
+            проверяет сервер); остальным плашка просто объясняет состояние. */}
+        {isArchived && (
+          <div className="access-bar is-archived" data-testid="archived-banner">
+            <div className="access-bar-info">
+              <Icon name="inventory_2" size={22} />
+              <div>
+                <div className="access-bar-title">Студент в архиве</div>
+                <div className="access-bar-email">
+                  {student.archivedAt ? `С ${new Date(student.archivedAt).toLocaleDateString('ru-RU')}` : 'Дата не записана'}
+                  {student.archivedBy ? ` · ${student.archivedBy.fullName}` : ''}
+                  {student.archiveComment ? ` · «${student.archiveComment}»` : ''}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 2 }}>
+                  Личный кабинет закрыт, напоминания не приходят, заявки в архиве. В списке «Студенты» его нет.
+                </div>
+              </div>
+            </div>
+            {canEdit && (
+              <button className="btn btn-sm btn-primary" onClick={onUnarchive} disabled={archiveBusy} data-testid="card-unarchive">
+                <Icon name="unarchive" size={16} style={{ marginRight: 4 }} />
+                {archiveBusy ? 'Возвращаем…' : 'Вернуть из архива'}
+              </button>
+            )}
+          </div>
+        )}
         <ManagerBar
           manager={student.manager}
           chinaManager={student.chinaManager}
@@ -935,12 +1026,25 @@ export default function StudentDetail() {
                 </div>
                 <div className="form-group">
                   <label>Статус</label>
-                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as StudentStatus })}>
-                    <option value="ACTIVE">Активный</option>
-                    <option value="PAUSED">Приостановлен</option>
-                    <option value="GRADUATED">Выпустился</option>
-                    <option value="ARCHIVED">В архиве</option>
-                  </select>
+                  {/* 29.09.2026 — в архив и из архива — только кнопками «В архив» /
+                      «Вернуть из архива»: там пишутся дата, автор и уходят заявки.
+                      Сервер тот же переход через форму отклоняет. */}
+                  {form.status === 'ARCHIVED' ? (
+                    <div className="detail-value" style={{ padding: '8px 0' }} data-testid="card-status-archived">
+                      В архиве — вернуть можно кнопкой «Вернуть из архива» выше
+                    </div>
+                  ) : (
+                    <>
+                      <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as StudentStatus })} data-testid="card-status-select">
+                        <option value="ACTIVE">Активный</option>
+                        <option value="PAUSED">Приостановлен</option>
+                        <option value="GRADUATED">Выпустился</option>
+                      </select>
+                      <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                        В архив — кнопкой «В архив» в шапке карточки.
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="form-group">
                   <label>Комментарий из анкеты</label>
@@ -1128,6 +1232,14 @@ export default function StudentDetail() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {archiveOpen && student && (
+          <ArchiveStudentsModal
+            key="archive-student"
+            students={[{ id: student.id, fullName: student.fullName }]}
+            onClose={() => setArchiveOpen(false)}
+            onDone={onArchived}
+          />
+        )}
         {chinaModalOpen && student && (
           <ChinaTransferModal
             key="china-transfer"

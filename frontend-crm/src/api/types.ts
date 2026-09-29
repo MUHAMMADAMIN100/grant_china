@@ -312,6 +312,16 @@ export interface Student {
    * передаче (см. ChinaTransferModal / StudentDetail.onTransferToChina).
    */
   transferredToChinaAt?: string | null;
+  /**
+   * 29.09.2026 — архив студентов. Приходят в карточке и в списках (в том
+   * числе в разделе «Архив»). Пустые у студентов, попавших в архив раньше
+   * через выпадающий статус карточки: там не было ни даты, ни автора.
+   */
+  archivedAt?: string | null;
+  archiveComment?: string | null;
+  archivedBy?: { id: string; fullName: string } | null;
+  /** Куда студент вернётся по «Вернуть из архива». Пусто — в «Активный». */
+  statusBeforeArchive?: StudentStatus | null;
   managerId: string | null;
   manager?: ManagerInfo | null;
   chinaManagerId: string | null;
@@ -1394,3 +1404,10 @@ export interface BonusRuleSimulateResult {
   currentRuleSetVersion: number | null;
   items: BonusRuleSimulateItem[];
 }
+
+/**
+ * 29.09.2026 — Application.archiveReason у заявок, ушедших в архив вместе со
+ * студентом (см. backend common/student-archive.ts). Такую заявку отдельно не
+ * вернуть: она возвращается вместе со студентом из раздела «Архив».
+ */
+export const STUDENT_ARCHIVE_REASON = 'STUDENT';

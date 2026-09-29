@@ -27,6 +27,7 @@ const Consultations = lazy(() => import('./pages/Consultations'));
 const Students = lazy(() => import('./pages/Students'));
 const StudentDetail = lazy(() => import('./pages/StudentDetail'));
 const StudentNew = lazy(() => import('./pages/StudentNew'));
+const Archive = lazy(() => import('./pages/Archive'));
 const Users = lazy(() => import('./pages/Users'));
 const Tasks = lazy(() => import('./pages/Tasks'));
 const Programs = lazy(() => import('./pages/Programs'));
@@ -85,6 +86,7 @@ export default function App() {
         <Route path="/students" element={<Students />} />
         <Route path="/students/new" element={<StudentNew />} />
         <Route path="/students/:id" element={<StudentDetail />} />
+        <Route path="/archive" element={<Archive />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/programs" element={<Programs />} />
         {/* Доступна всем ролям — содержимое (очередь на одобрение, кнопки

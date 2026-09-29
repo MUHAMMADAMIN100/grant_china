@@ -19,6 +19,11 @@ export interface StudentFilters {
    * Без фильтра (undefined) условие не применяется.
    */
   grant?: 'multi' | 'any' | 'none';
+  /**
+   * 29.09.2026 — раздел «Архив». true — только студенты в архиве. Без флага
+   * сервер отдаёт всех, КРОМЕ архивных (студент в архиве ушёл из работы).
+   */
+  archived?: boolean;
   /** Серверная пагинация: страница (с 1) + размер. Если не передано —
    *  бэкенд возвращает массив (старый поведение). */
   page?: number;
@@ -76,6 +81,39 @@ export async function createStudent(payload: CreateStudentPayload) {
 
 export async function updateStudent(id: string, payload: Partial<Student>) {
   const { data } = await api.patch<Student>(`/students/${id}`, payload);
+  return data;
+}
+
+/** 29.09.2026 — архив студентов: кто не прошёл и почему (чужой, уже в архиве…). */
+export interface ArchiveSkip {
+  id: string;
+  /** null — студент чужой или не найден: имя сервер не раскрывает. */
+  fullName: string | null;
+  reason: string;
+}
+
+export interface ArchiveStudentsResult {
+  archived: Array<{ id: string; fullName: string; applications: number }>;
+  skipped: ArchiveSkip[];
+}
+
+export interface UnarchiveStudentsResult {
+  restored: Array<{ id: string; fullName: string; status: StudentStatus; applications: number }>;
+  skipped: ArchiveSkip[];
+}
+
+/** «В архив» — пачка галочками из списка или один студент из карточки. */
+export async function archiveStudents(ids: string[], comment?: string) {
+  const { data } = await api.post<ArchiveStudentsResult>('/students/archive', {
+    ids,
+    comment: comment?.trim() || undefined,
+  });
+  return data;
+}
+
+/** «Вернуть из архива» — прежний статус, заявки, ушедшие вместе со студентом, доступ в кабинет. */
+export async function unarchiveStudents(ids: string[]) {
+  const { data } = await api.post<UnarchiveStudentsResult>('/students/unarchive', { ids });
   return data;
 }
 

@@ -9,6 +9,9 @@ export type ActivityAction =
   | 'STUDENT_UPDATE'
   | 'STUDENT_CREATE'
   | 'STUDENT_DELETE'
+  // 29.09.2026 — архив студентов (раздел «Архив»).
+  | 'STUDENT_ARCHIVE'
+  | 'STUDENT_UNARCHIVE'
   // ТЗ «Разделение воронок» — передача студента между офисами и возврат.
   | 'STUDENT_TRANSFER_CN'
   | 'MANAGER_CHANGE'

@@ -5,6 +5,8 @@ export type ActivityAction =
   | 'STUDENT_UPDATE'
   | 'STUDENT_CREATE'
   | 'STUDENT_DELETE'
+  | 'STUDENT_ARCHIVE'
+  | 'STUDENT_UNARCHIVE'
   | 'MANAGER_CHANGE'
   | 'PROGRAM_CHANGE'
   // Финансы (ТЗ 1.1) — значения строго совпадают с TS-union в
@@ -142,6 +144,8 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   STUDENT_UPDATE: 'Изменение студента',
   STUDENT_CREATE: 'Создание студента',
   STUDENT_DELETE: 'Удаление студента',
+  STUDENT_ARCHIVE: 'Студент отправлен в архив',
+  STUDENT_UNARCHIVE: 'Студент возвращён из архива',
   MANAGER_CHANGE: 'Смена менеджера',
   PROGRAM_CHANGE: 'Изменение программы',
   PAYMENT_CREATE: 'Внесён платёж',
@@ -222,7 +226,7 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
 // гранты, комментарии, звонки, кадры.
 export const ACTIVITY_GROUPS: { label: string; actions: ActivityAction[] }[] = [
   { label: 'Заявки', actions: ['STATUS_CHANGE', 'APPLICATION_ARCHIVE', 'APPLICATION_UNARCHIVE', 'APPLICATION_SOURCE_CHANGE', 'APPLICATION_CLEAR_REPEAT', 'LEAD_SOURCE_CREATE', 'LEAD_SOURCE_UPDATE'] },
-  { label: 'Студенты', actions: ['STUDENT_CREATE', 'STUDENT_UPDATE', 'STUDENT_DELETE', 'MANAGER_CHANGE', 'PROGRAM_CHANGE'] },
+  { label: 'Студенты', actions: ['STUDENT_CREATE', 'STUDENT_UPDATE', 'STUDENT_DELETE', 'STUDENT_ARCHIVE', 'STUDENT_UNARCHIVE', 'MANAGER_CHANGE', 'PROGRAM_CHANGE'] },
   { label: 'Документы', actions: ['DOCUMENT_UPLOAD', 'DOCUMENT_DELETE'] },
   {
     label: 'Финансы',

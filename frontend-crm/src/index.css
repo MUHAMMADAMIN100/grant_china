@@ -3119,3 +3119,74 @@ select.input-error {
   .bonus-line-items-row td { padding-left: 14px !important; }
   .bonus-line-item-amount { margin-left: 0; }
 }
+
+/* 29.09.2026 — выбор нескольких строк («Студенты», «Архив») и архив студентов. */
+.table th.select-cell, .table td.select-cell { width: 44px; padding-right: 0; }
+.row-check {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; margin: -4px 0; cursor: pointer; border-radius: 6px;
+}
+.row-check:hover { background: var(--primary-soft); }
+.row-check input { width: 17px; height: 17px; margin: 0; cursor: pointer; accent-color: var(--primary); }
+.table tbody tr.row-selected, .table tbody tr.row-selected:hover { background: var(--primary-soft); }
+.bulk-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 12px;
+  background: var(--primary-soft); border: 1px solid rgba(213, 43, 43, 0.2); border-radius: 10px;
+  /* Липнет под шапкой (64px), пока листаешь длинный список: кнопка действия
+     всегда под рукой. z-index ниже шапки (10), выше строк таблицы. */
+  position: sticky; top: 72px; z-index: 9;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.bulk-bar-count { font-weight: 600; font-size: 14px; }
+.bulk-bar-hint { font-weight: 400; color: var(--text-soft); font-size: 13px; }
+.bulk-bar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.archive-names {
+  margin: 0 0 12px; padding: 8px 12px 8px 28px; max-height: 180px; overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+  text-align: left;
+}
+/* Окно «В архив»: список и поле — по левому краю, как в обычных формах. */
+.archive-modal .form-group { text-align: left; }
+.archive-names li { padding: 2px 0; }
+.archive-names .archive-names-more { list-style: none; margin-left: -16px; color: var(--text-soft); }
+.archive-hint {
+  display: flex; gap: 8px; align-items: flex-start; margin-bottom: 14px;
+  padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border);
+  font-size: 13px; color: var(--text-soft);
+}
+.archive-hint .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }
+.archive-when { white-space: nowrap; }
+.archive-by { font-size: 12px; color: var(--text-soft); white-space: nowrap; }
+.archive-comment {
+  margin-top: 2px; max-width: 240px; font-size: 12px; color: var(--text-soft); font-style: italic;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.archive-name-cell { min-width: 160px; }
+.access-bar.is-archived { background: var(--bg); border-color: var(--border); }
+.access-bar.is-archived .access-bar-title,
+.access-bar.is-archived .access-bar-info .material-symbols-rounded { color: var(--text-soft); }
+.access-bar.is-archived .access-bar-email { word-break: normal; }
+@media (max-width: 720px) {
+  /* Таблица на телефоне — карточки: галочка в правом верхнем углу карточки,
+     а заголовком карточки остаётся ФИО (первая ячейка после галочки). */
+  .table tr { position: relative; }
+  .table td.select-cell {
+    position: absolute; top: 8px; right: 8px; width: auto;
+    padding: 0; margin: 0; font-size: 14px; display: block;
+    border-bottom: none !important;
+  }
+  .table td.select-cell + td {
+    font-size: 16px; padding-bottom: 8px; padding-right: 36px;
+    border-bottom: 1px solid var(--border) !important;
+    margin-bottom: 8px; display: block;
+  }
+  .archive-comment { max-width: none; text-align: right; }
+  .archive-name-cell { min-width: 0; }
+  /* На телефоне сверху две липкие полосы: меню (60px) и заголовок (56px). */
+  .bulk-bar { top: 122px; }
+  /* Кнопки панели — в одну строку поровну: панель липкая, лишняя высота
+     закрывала бы карточки под ней. */
+  .bulk-bar-actions { width: 100%; }
+  .bulk-bar-actions .btn { flex: 1; justify-content: center; }
+}

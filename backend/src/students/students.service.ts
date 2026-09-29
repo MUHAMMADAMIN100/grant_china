@@ -18,6 +18,7 @@ import { FileResolverService } from '../files/file-resolver.service';
 import { normalizeSource } from '../common/lead-source';
 import { LeadSourcesService } from '../lead-sources/lead-sources.service';
 import { findRepeatOfId } from '../common/application-repeat';
+import { STUDENT_ARCHIVE_REASON } from '../common/student-archive';
 
 function generatePassword(length = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -53,6 +54,11 @@ const STUDENT_SELECT = {
   visaClaimReviewedAt: true,
   visaClaimApproved: true,
   visaClaimNote: true,
+  // 29.09.2026 — архив: плашка «В архиве с … · кто · комментарий» в карточке.
+  archivedAt: true,
+  archiveComment: true,
+  statusBeforeArchive: true,
+  archivedBy: { select: { id: true, fullName: true } },
   // MANAGED_DOCUMENT_TYPES — чеки платежей (payments/) и файлы билетов
   // (tickets/): это Document, но принадлежат своим разделам, а не чек-листу
   // документов студента. Они показываются внутри карточки платежа и карточки
@@ -80,6 +86,12 @@ const STUDENT_LIST_SELECT = {
   // каждую карточку. Два скаляра на строку — payload списка это не утяжеляет.
   visaReceived: true,
   visaReceivedAt: true,
+  // 29.09.2026 — раздел «Архив»: когда, кто и с каким комментарием отправил,
+  // и в какой статус вернётся по «Вернуть» (подсказка у кнопки).
+  archivedAt: true,
+  archiveComment: true,
+  statusBeforeArchive: true,
+  archivedBy: { select: { id: true, fullName: true } },
   manager: { select: { id: true, fullName: true } },
   chinaManager: { select: { id: true, fullName: true } },
   applications: {
@@ -96,6 +108,14 @@ const STUDENT_LIST_SELECT = {
 const DOCUMENT_TYPE_LABEL: Record<string, string> = {
   ...Object.fromEntries(REQUIRED_DOCUMENT_TYPES.map((d) => [d.type, d.label])),
   OTHER: 'Другое',
+};
+
+/** Подписи статусов для журнала активности (читают люди, а не разработчики). */
+const STUDENT_STATUS_RU: Record<StudentStatus, string> = {
+  ACTIVE: 'Активный',
+  PAUSED: 'Приостановлен',
+  GRADUATED: 'Выпустился',
+  ARCHIVED: 'В архиве',
 };
 
 /**
@@ -439,6 +459,13 @@ export class StudentsService implements OnModuleInit {
      * не должны внезапно пропасть из списка.
      */
     grant?: 'multi' | 'any' | 'none';
+    /**
+     * 29.09.2026 — раздел «Архив». true — только студенты в архиве, иначе —
+     * все, КРОМЕ архивных: студент в архиве ушёл из работы целиком (решение
+     * владельца) — его нет в «Студентах», в поиске студента для билета и в
+     * отчёте Word. Старый фильтр stage=ARCHIVED по-прежнему значит «только архив».
+     */
+    archived?: boolean;
     /** Серверная пагинация. Если не передано — возвращаем всё (бэк-совместимость). */
     page?: number;
     pageSize?: number;
@@ -547,13 +574,20 @@ export class StudentsService implements OnModuleInit {
     } else if (filters.grant === 'none') {
       and.push({ grants: { none: { deletedAt: null } } });
     }
+    const archivedOnly = filters.archived === true || filters.stage === 'ARCHIVED' || filters.status === 'ARCHIVED';
+    and.push(archivedOnly ? { status: 'ARCHIVED' } : { status: { not: 'ARCHIVED' } });
     if (and.length) where.AND = and;
+    // Архив читают «свежие сверху» — по дате отправки. У попавших туда раньше
+    // через выпадающий статус карточки даты нет — они в конце, по дате создания.
+    const orderBy: Prisma.StudentOrderByWithRelationInput[] = archivedOnly
+      ? [{ archivedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
+      : [{ createdAt: 'desc' }];
 
     // Если пагинация не запрошена — возвращаем массив (старый API).
     if (!filters.page || !filters.pageSize) {
       return this.prisma.student.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         select: STUDENT_SELECT,
       });
     }
@@ -565,7 +599,7 @@ export class StudentsService implements OnModuleInit {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.student.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: pageSize,
         select: STUDENT_LIST_SELECT,
@@ -600,6 +634,20 @@ export class StudentsService implements OnModuleInit {
   async update(id: string, dto: UpdateStudentDto, user: CurrentUser) {
     const existing = await this.findOne(id);
     this.ensureCanEdit(existing, user);
+    // 29.09.2026 — в архив и из архива студент переходит ТОЛЬКО через
+    // archiveMany/unarchiveMany: там пишутся дата, автор, прежний статус и
+    // уходят/возвращаются заявки. Голый status=ARCHIVED из формы карточки
+    // оставил бы студента в архиве без всего этого, а снятие статуса формой —
+    // его заявки в архиве навсегда.
+    if (
+      dto.status !== undefined &&
+      dto.status !== existing.status &&
+      (dto.status === 'ARCHIVED' || existing.status === 'ARCHIVED')
+    ) {
+      throw new BadRequestException(
+        'В архив и из архива студента переводят кнопками «В архив» и «Вернуть из архива» — так сохраняются дата, автор и заявки.',
+      );
+    }
 
     const data: Prisma.StudentUpdateInput = {};
     if (dto.fullName !== undefined) data.fullName = dto.fullName;
@@ -1097,13 +1145,16 @@ export class StudentsService implements OnModuleInit {
     // ТЗ v3 р4: по профильному для его региона полю, той же функцией, что и
     // список. Иначе дашборд показывал бы число, которое не сходится со
     // списком (риск 6 проекта архитектора, только про регион).
+    // 29.09.2026 — архивные студенты ушли из работы и в счётчики не входят,
+    // иначе «Всего студентов» не сходилось бы со списком «Студенты».
     const where: Prisma.StudentWhereInput =
       user && user.role === 'EMPLOYEE'
         ? {
             deletedAt: null,
+            status: { not: 'ARCHIVED' },
             OR: assignedToUserFilter(user) as Prisma.StudentWhereInput[],
           }
-        : { deletedAt: null };
+        : { deletedAt: null, status: { not: 'ARCHIVED' } };
     const [total, byCabinet, byDirection] = await Promise.all([
       this.prisma.student.count({ where }),
       this.prisma.student.groupBy({
@@ -1115,6 +1166,163 @@ export class StudentsService implements OnModuleInit {
       this.prisma.student.groupBy({ by: ['direction'], _count: true, where }),
     ]);
     return { total, byCabinet, byDirection };
+  }
+
+  // ------------------------------------------------------------------
+  // 29.09.2026 — архив студентов: «В архив» / «Вернуть из архива»
+  // ------------------------------------------------------------------
+
+  /**
+   * Отправить в архив одного или нескольких студентов (галочки в списке,
+   * кнопка в карточке). Решения владельца: студент уходит из работы целиком —
+   * пропадает из «Студентов», поиска и счётчиков, личный кабинет закрывается,
+   * напоминания молчат, заявки уходят в архив вместе с ним; комментарий
+   * необязательный; права — как на правку карточки (руководство любых,
+   * менеджер своих).
+   *
+   * Каждый студент — своя транзакция (студент + его заявки): пачка не должна
+   * откатываться целиком из-за одного студента, которого параллельно
+   * заархивировал коллега, но и студент в архиве без своих заявок остаться не
+   * может. Ответ — кто ушёл и кто пропущен с причиной; интерфейс показывает
+   * «Отправлено 8 из 10».
+   */
+  async archiveMany(ids: string[], comment: string | undefined, user: CurrentUser) {
+    const unique = [...new Set(ids)];
+    const note = comment?.trim() || null;
+    const rows = await this.prisma.student.findMany({
+      where: { id: { in: unique }, deletedAt: null },
+      select: { id: true, fullName: true, status: true, managerId: true, chinaManagerId: true, transferredToChinaAt: true },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const archived: Array<{ id: string; fullName: string; applications: number }> = [];
+    const skipped: Array<{ id: string; fullName: string | null; reason: string }> = [];
+
+    for (const id of unique) {
+      const s = byId.get(id);
+      // Чужого и несуществующего не различаем — иначе ответ работал бы как
+      // оракул «такой студент есть, но не ваш» (тот же приём, что в findOne).
+      if (!s || !this.hasAccess(s, user)) {
+        skipped.push({ id, fullName: null, reason: 'Нет доступа или студент не найден' });
+        continue;
+      }
+      if (s.status === 'ARCHIVED') {
+        skipped.push({ id, fullName: s.fullName, reason: 'Уже в архиве' });
+        continue;
+      }
+      const now = new Date();
+      const applications = await this.prisma.$transaction(async (tx) => {
+        // status в WHERE — защита от гонки: коллега мог отправить этого же
+        // студента в архив между чтением выше и этой транзакцией.
+        const res = await tx.student.updateMany({
+          where: { id, deletedAt: null, status: { not: 'ARCHIVED' } },
+          data: {
+            status: 'ARCHIVED',
+            statusBeforeArchive: s.status,
+            archivedAt: now,
+            archivedById: user.id,
+            archiveComment: note,
+          },
+        });
+        if (res.count === 0) return null;
+        const apps = await tx.application.updateMany({
+          where: { studentId: id, deletedAt: null, archivedAt: null },
+          data: { archivedAt: now, archivedById: user.id, archiveReason: STUDENT_ARCHIVE_REASON },
+        });
+        return apps.count;
+      });
+      if (applications === null) {
+        skipped.push({ id, fullName: s.fullName, reason: 'Уже в архиве' });
+        continue;
+      }
+      archived.push({ id, fullName: s.fullName, applications });
+      this.afterArchiveChange(s, applications > 0);
+      this.activity
+        .log({
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'STUDENT_ARCHIVE',
+          studentId: id,
+          studentName: s.fullName,
+          details: `Отправлен в архив${note ? `: ${note}` : ''}${applications ? ` · заявок вместе с ним: ${applications}` : ''}`,
+          payload: { comment: note, applications, statusBefore: s.status },
+        })
+        .catch(() => undefined);
+    }
+    return { archived, skipped };
+  }
+
+  /**
+   * «Вернуть из архива»: прежний статус (statusBeforeArchive, у старых
+   * архивных — «Активный»), заявки, ушедшие ВМЕСТЕ со студентом
+   * (archiveReason = STUDENT), и доступ в личный кабинет. Заявки, лежавшие в
+   * архиве ещё до студента (ручной архив, авто-архив), остаются где были.
+   */
+  async unarchiveMany(ids: string[], user: CurrentUser) {
+    const unique = [...new Set(ids)];
+    const rows = await this.prisma.student.findMany({
+      where: { id: { in: unique }, deletedAt: null },
+      select: { id: true, fullName: true, status: true, statusBeforeArchive: true, managerId: true, chinaManagerId: true, transferredToChinaAt: true },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const restored: Array<{ id: string; fullName: string; status: StudentStatus; applications: number }> = [];
+    const skipped: Array<{ id: string; fullName: string | null; reason: string }> = [];
+
+    for (const id of unique) {
+      const s = byId.get(id);
+      if (!s || !this.hasAccess(s, user)) {
+        skipped.push({ id, fullName: null, reason: 'Нет доступа или студент не найден' });
+        continue;
+      }
+      if (s.status !== 'ARCHIVED') {
+        skipped.push({ id, fullName: s.fullName, reason: 'Не в архиве' });
+        continue;
+      }
+      const status: StudentStatus =
+        s.statusBeforeArchive && s.statusBeforeArchive !== 'ARCHIVED' ? s.statusBeforeArchive : 'ACTIVE';
+      const applications = await this.prisma.$transaction(async (tx) => {
+        const res = await tx.student.updateMany({
+          where: { id, deletedAt: null, status: 'ARCHIVED' },
+          data: { status, statusBeforeArchive: null, archivedAt: null, archivedById: null, archiveComment: null },
+        });
+        if (res.count === 0) return null;
+        const apps = await tx.application.updateMany({
+          where: { studentId: id, deletedAt: null, archiveReason: STUDENT_ARCHIVE_REASON },
+          data: { archivedAt: null, archivedById: null, archiveReason: null },
+        });
+        return apps.count;
+      });
+      if (applications === null) {
+        skipped.push({ id, fullName: s.fullName, reason: 'Не в архиве' });
+        continue;
+      }
+      restored.push({ id, fullName: s.fullName, status, applications });
+      this.afterArchiveChange(s, applications > 0);
+      this.activity
+        .log({
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'STUDENT_UNARCHIVE',
+          studentId: id,
+          studentName: s.fullName,
+          details: `Возвращён из архива · статус «${STUDENT_STATUS_RU[status]}»${applications ? ` · заявок вернулось: ${applications}` : ''}`,
+          payload: { status, applications },
+        })
+        .catch(() => undefined);
+    }
+    return { restored, skipped };
+  }
+
+  /** Общий хвост «В архив» / «Вернуть»: кэши доступа кабинета и файлов, realtime. */
+  private afterArchiveChange(s: { id: string; managerId: string | null; chinaManagerId: string | null }, applicationsChanged: boolean) {
+    // Без сброса кэша StudentJwtGuard архивный студент ещё до 30 секунд ходил
+    // бы в кабинет по старому токену (а возвращённый — не мог бы войти);
+    // приватные файлы кэшируются до 5 минут.
+    invalidateStudentCache(s.id);
+    this.fileResolver.invalidateForStudent(s.id);
+    this.realtime.emitForStudent(s, 'student:updated', { studentId: s.id }, { studentId: s.id });
+    if (applicationsChanged) {
+      this.realtime.emitForStudent(s, 'application:updated', { studentId: s.id }, { studentId: s.id });
+    }
   }
 
   // ------------------------------------------------------------------

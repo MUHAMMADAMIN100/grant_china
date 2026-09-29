@@ -93,6 +93,7 @@ model User {
   managedStudents          Student[]      @relation("StudentManager")
   managedChinaStudents     Student[]      @relation("StudentChinaManager")
   transferredStudents      Student[]      @relation("StudentTransferredBy")
+  archivedStudents         Student[]      @relation("StudentArchivedBy")
   assignedTasks            Task[]         @relation("TaskAssignee")
   createdTasks             Task[]         @relation("TaskCreator")
 
@@ -459,6 +460,16 @@ model Student {
   transferredToChinaAt DateTime?
   transferredById      String?
   transferredBy        User?     @relation("StudentTransferredBy", fields: [transferredById], references: [id], onDelete: SetNull)
+  // 29.09.2026 — архив студентов (раздел «Архив» в меню). Архив — НЕ удаление:
+  // status = ARCHIVED плюс кто, когда и с каким комментарием отправил.
+  // statusBeforeArchive — куда вернуть по «Вернуть из архива» (Активный,
+  // Приостановлен…). Все поля необязательные: у студентов, попавших в архив
+  // раньше через выпадающий статус карточки, их нет — вернутся в «Активный».
+  archivedAt          DateTime?
+  archivedById        String?
+  archivedBy          User?          @relation("StudentArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  archiveComment      String?
+  statusBeforeArchive StudentStatus?
   programId       String?
   program         Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
   createdAt       DateTime      @default(now())

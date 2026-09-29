@@ -903,6 +903,14 @@ export class ApplicationsService implements OnModuleInit {
     if (!existing.archivedAt) {
       throw new ConflictException('Заявка не в архиве');
     }
+    // 29.09.2026 — студент в архиве ушёл из работы целиком: одна его заявка,
+    // вернувшаяся «в работу», висела бы у менеджера без студента в списке.
+    // Заявки возвращаются вместе со студентом из раздела «Архив».
+    if (existing.student?.status === 'ARCHIVED') {
+      throw new ConflictException(
+        'Студент этой заявки в архиве. Верните его в разделе «Архив» — заявки, ушедшие вместе с ним, вернутся сами.',
+      );
+    }
     const updated = await this.prisma.application.update({
       where: { id },
       data: { archivedAt: null, archivedById: null, archiveReason: null },

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { AnalyticsMonthPoint } from '../api/types';
 import { formatMoney } from '../utils/money';
 import Icon from '../Icon';
+import { plural } from '../utils/plural';
 
 /**
  * «Динамика по месяцам» в финансовой аналитике.
@@ -284,12 +285,6 @@ export default function MonthlyChart({ points }: { points: AnalyticsMonthPoint[]
   );
 }
 
-/** Русские числительные: 1 платёж, 2 платежа, 5 платежей. */
-export function plural(n: number, one: string, few: string, many: string): string {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs > 10 && abs < 20) return many;
-  if (last > 1 && last < 5) return few;
-  if (last === 1) return one;
-  return many;
-}
+// 29.09.2026 — хелпер переехал в utils/plural.ts (им пользуются и списки
+// студентов); здесь реэкспорт, чтобы старые импорты из MonthlyChart работали.
+export { plural };

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { listStudents, listStudentsPaged } from '../api/students';
+import { AnimatePresence, motion } from 'framer-motion';
+import { listStudents, listStudentsPaged, type ArchiveStudentsResult } from '../api/students';
 import { listUsers } from '../api/users';
 import { listGrants, ordinalShortRu } from '../api/grants';
 import type { Direction, Student, User } from '../api/types';
@@ -12,6 +12,9 @@ import { useRealtime } from '../realtime';
 import { generateStudentsReport } from '../utils/studentsReport';
 import DirectionOptions from '../components/DirectionOptions';
 import Pagination from '../components/Pagination';
+import ArchiveStudentsModal from '../components/ArchiveStudentsModal';
+import { BulkBar, HeaderCheckbox, RowCheckbox } from '../components/BulkSelect';
+import { archiveResultToast } from '../utils/archive';
 import Icon from '../Icon';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 
@@ -74,12 +77,24 @@ export default function Students() {
   const grant = filters.grant as 'multi' | 'any' | 'none' | '';
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
 
+  // 29.09.2026 — «В архиве» больше не пункт фильтра статусов: у архива свой
+  // раздел в меню. Старые ссылки и закладки с ?stageFilter=ARCHIVED ведём туда.
+  useEffect(() => {
+    if (stageFilter === 'ARCHIVED') navigate('/archive', { replace: true });
+  }, [stageFilter, navigate]);
+
   const [items, setItems] = useState<Student[]>([]);
   const [total, setTotal] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  // 29.09.2026 — выбор нескольких студентов для «В архив». id → ФИО: окно
+  // подтверждения называет людей по имени, а выбранные на других страницах в
+  // текущем items уже не лежат. Переход по страницам выбор сохраняет, смена
+  // фильтра — сбрасывает (см. onFilterChange).
+  const [selected, setSelected] = useState<Map<string, string>>(() => new Map());
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   // Счётчик поколений запросов списка. debounce откладывает СТАРТ, но уже
   // улетевший запрос не отменяет: медленный ответ по «Ива» приходил после
@@ -162,6 +177,9 @@ export default function Students() {
     value: string,
   ) => {
     setFilters({ [key]: value, page: '1' });
+    // Выбранные по старому фильтру могли пропасть с экрана — «В архив» не
+    // должен задевать людей, которых человек сейчас не видит.
+    setSelected(new Map());
   };
 
   // Список пользователей для фильтра по менеджерам — только админу
@@ -272,6 +290,40 @@ export default function Students() {
     }
   };
 
+  // ---- 29.09.2026: галочки и «В архив» -------------------------------------
+  const selectedOnPage = pagedItems.filter((s) => selected.has(s.id)).length;
+  const allOnPage = pagedItems.length > 0 && selectedOnPage === pagedItems.length;
+
+  const toggle = (s: Student, on: boolean) => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (on) next.set(s.id, s.fullName);
+      else next.delete(s.id);
+      return next;
+    });
+  };
+  const togglePage = (on: boolean) => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      for (const s of pagedItems) {
+        if (on) next.set(s.id, s.fullName);
+        else next.delete(s.id);
+      }
+      return next;
+    });
+  };
+
+  // После архива выбор снимаем целиком: ушедших в списке больше нет, а
+  // пропущенные сервером (уже в архиве, чужие) тоже с экрана пропадут —
+  // «Выбрано: 2» без видимых строк только путало бы.
+  const onArchived = (res: ArchiveStudentsResult) => {
+    setArchiveOpen(false);
+    const t = archiveResultToast(res.archived, res.skipped, 'archive');
+    toast(t.message, t.kind);
+    setSelected(new Map());
+    load();
+  };
+
   return (
     <motion.div
       className="card"
@@ -358,7 +410,6 @@ export default function Students() {
             <optgroup label="Особые">
               <option value="PAUSED">Приостановлен</option>
               <option value="GRADUATED">Выпустился</option>
-              <option value="ARCHIVED">В архиве</option>
             </optgroup>
           </select>
           <select value={cabinet} onChange={(e) => onFilterChange('cabinet', e.target.value)}>
@@ -398,6 +449,15 @@ export default function Students() {
 
         {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 
+        {selected.size > 0 && (
+          <BulkBar count={selected.size} offPage={selected.size - selectedOnPage} onClear={() => setSelected(new Map())}>
+            <button className="btn btn-sm btn-primary" onClick={() => setArchiveOpen(true)} data-testid="bulk-archive">
+              <Icon name="inventory_2" size={16} style={{ marginRight: 4 }} />
+              В архив
+            </button>
+          </BulkBar>
+        )}
+
         <>
           {loading ? (
             <motion.div key="loading" className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -413,6 +473,13 @@ export default function Students() {
               <table className="table">
                 <thead>
                   <tr>
+                    <th className="select-cell">
+                      <HeaderCheckbox
+                        checked={allOnPage}
+                        indeterminate={selectedOnPage > 0 && !allOnPage}
+                        onChange={togglePage}
+                      />
+                    </th>
                     <th>ФИО</th><th>Телефоны</th><th>Направление</th><th>Кабинет</th><th>Менеджер</th><th>Статус</th><th>Виза</th>
                   </tr>
                 </thead>
@@ -424,14 +491,22 @@ export default function Students() {
                   {pagedItems.map((s) => (
                     <motion.tr
                       key={s.id}
+                      className={selected.has(s.id) ? 'row-selected' : undefined}
                       onClick={() => navigate(`/students/${s.id}`)}
                       variants={{
                         hidden: { opacity: 0, x: -10 },
                         show: { opacity: 1, x: 0, transition: { duration: 0.25 } },
                       }}
-                      whileHover={{ backgroundColor: 'rgba(0,0,0,0.02)', x: 2 }}
+                      // Фон при наведении и у выбранной строки — из CSS (.table tr:hover,
+                      // .row-selected). Анимированный framer'ом backgroundColor оставлял
+                      // после наведения инлайн-стиль, который перекрывал подсветку выбора.
+                      whileHover={{ x: 2 }}
                       style={{ cursor: 'pointer' }}
+                      data-testid="student-row"
                     >
+                      <td className="select-cell" onClick={(e) => e.stopPropagation()}>
+                        <RowCheckbox checked={selected.has(s.id)} onChange={(on) => toggle(s, on)} name={s.fullName} />
+                      </td>
                       <td>
                         <strong>{s.fullName}</strong>
                         {/* ТЗ «Разделение воронок» — тот же приём, что у визы (см. колонку
@@ -532,6 +607,16 @@ export default function Students() {
         )}
       </div>
 
+      <AnimatePresence>
+        {archiveOpen && (
+          <ArchiveStudentsModal
+            key="archive-students"
+            students={[...selected.entries()].map(([id, fullName]) => ({ id, fullName }))}
+            onClose={() => setArchiveOpen(false)}
+            onDone={onArchived}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

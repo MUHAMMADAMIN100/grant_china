@@ -22,6 +22,7 @@ import { StudentsService } from './students.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { RejectVisaClaimDto } from './dto/visa-claim-review.dto';
+import { ArchiveStudentsDto, UnarchiveStudentsDto } from './dto/archive-students.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -89,6 +90,8 @@ export class StudentsController {
     // не применяется (undefined) — колонка/фильтр не показывается, пока
     // пользователь явно его не выберет.
     @Query('grant') grant?: string,
+    // 29.09.2026 — раздел «Архив»: 'true' — только архивные, иначе — без них.
+    @Query('archived') archived?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -104,6 +107,7 @@ export class StudentsController {
       currentUserRegion: user?.region,
       stage: stage || undefined,
       grant: grant === 'multi' || grant === 'any' || grant === 'none' ? grant : undefined,
+      archived: archived === 'true',
       page: parsePage(page),
       pageSize: parsePageSize(pageSize),
     });
@@ -112,6 +116,22 @@ export class StudentsController {
   @Get('stats')
   stats(@CurrentUser() user: any) {
     return this.students.stats(user);
+  }
+
+  /**
+   * 29.09.2026 — архив студентов. Один запрос на пачку (галочки в списке);
+   * карточка шлёт тот же запрос с одним id. Без @Roles: право проверяется по
+   * КАЖДОМУ студенту в сервисе (руководство — любых, менеджер — своих), а
+   * чужие id просто возвращаются в skipped.
+   */
+  @Post('archive')
+  archive(@Body() dto: ArchiveStudentsDto, @CurrentUser() user: any) {
+    return this.students.archiveMany(dto.ids, dto.comment, user);
+  }
+
+  @Post('unarchive')
+  unarchive(@Body() dto: UnarchiveStudentsDto, @CurrentUser() user: any) {
+    return this.students.unarchiveMany(dto.ids, user);
   }
 
   @Get(':id')
