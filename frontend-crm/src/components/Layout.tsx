@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import NotificationBell from './NotificationBell';
+import UserActions from './UserActions';
 import AiAssistant from './AiAssistant';
 import IncomingCallPopup from './IncomingCallPopup';
 
@@ -81,6 +82,12 @@ export default function Layout() {
           </motion.div>
           <div className="topbar-actions">
             <NotificationBell />
+            {/* 29.09.2026 — только на телефоне (CSS .topbar-user-actions): там
+                блок пользователя внизу меню скрыт, а с ним пропадали Telegram,
+                смена пароля и выход. На компьютере они в меню слева. */}
+            <div className="topbar-user-actions">
+              <UserActions variant="topbar" />
+            </div>
           </div>
         </motion.div>
         <div className="content">

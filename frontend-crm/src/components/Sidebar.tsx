@@ -7,14 +7,10 @@ import { pendingPaymentsCount } from '../api/payments';
 import { conversationsUnreadCount } from '../api/messaging';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
-import ChangePasswordModal from './ChangePasswordModal';
-import TelegramLinkModal from './TelegramLinkModal';
+import UserActions from './UserActions';
 
 export default function Sidebar() {
   const user = useAuth((s) => s.user);
-  const logout = useAuth((s) => s.logout);
-  const [pwdOpen, setPwdOpen] = useState(false);
-  const [tgOpen, setTgOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [unreadChats, setUnreadChats] = useState(0);
   const initials = user?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
@@ -153,43 +149,10 @@ export default function Sidebar() {
           <div className="user-name">{user?.fullName}</div>
           <div className="user-role">{user?.role ? ROLE_LABEL[user.role] : ''}</div>
         </div>
-        {/* 12.08.2026 — подключение личного Telegram: уведомления CRM
-            дублируются в мессенджер. Рядом со сменой пароля, потому что это
-            такая же личная настройка сотрудника, а не раздел системы. */}
-        <motion.button
-          className="logout-btn"
-          onClick={() => setTgOpen(true)}
-          title="Уведомления в Telegram"
-          whileHover={{ scale: 1.15 }}
-          whileTap={{ scale: 0.9 }}
-        >
-          <Icon name="send" size={20} />
-        </motion.button>
-        <motion.button
-          className="logout-btn"
-          onClick={() => setPwdOpen(true)}
-          title="Сменить пароль"
-          whileHover={{ scale: 1.15 }}
-          whileTap={{ scale: 0.9 }}
-        >
-          <Icon name="lock_reset" size={20} />
-        </motion.button>
-        <motion.button
-          className="logout-btn"
-          onClick={logout}
-          title="Выйти"
-          whileHover={{ scale: 1.15, rotate: 15 }}
-          whileTap={{ scale: 0.9 }}
-        >
-          <Icon name="logout" size={20} />
-        </motion.button>
+        {/* Telegram, смена пароля, выход — общий компонент: на телефоне этот
+            блок скрыт, и те же кнопки стоят в шапке (см. Layout). */}
+        <UserActions variant="sidebar" />
       </motion.div>
-      <TelegramLinkModal open={tgOpen} onClose={() => setTgOpen(false)} />
-      <ChangePasswordModal
-        open={pwdOpen}
-        mode={{ kind: 'self' }}
-        onClose={() => setPwdOpen(false)}
-      />
     </motion.aside>
   );
 }

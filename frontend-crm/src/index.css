@@ -3190,3 +3190,20 @@ select.input-error {
   .bulk-bar-actions { width: 100%; }
   .bulk-bar-actions .btn { flex: 1; justify-content: center; }
 }
+
+/* 29.09.2026 — Telegram / пароль / выход в шапке мобильной версии.
+   На компьютере эти кнопки в блоке пользователя внизу меню, поэтому здесь скрыты. */
+.topbar-user-actions { display: none; }
+.topbar-icon-btn {
+  width: 40px; height: 40px; border-radius: 8px;
+  background: var(--bg); color: var(--text);
+  display: flex; align-items: center; justify-content: center;
+}
+.topbar-icon-btn:hover { background: var(--border); }
+@media (max-width: 720px) {
+  .topbar-user-actions { display: flex; align-items: center; gap: 6px; }
+  .topbar-actions { gap: 6px; }
+  .topbar-icon-btn, .topbar .notif-button { width: 36px; height: 36px; }
+  /* Длинный заголовок раздела не должен выталкивать кнопки за край экрана. */
+  .topbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
