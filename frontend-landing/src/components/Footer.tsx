@@ -86,7 +86,10 @@ export default function Footer() {
         </motion.div>
 
         <div className="footer-bottom">
-          <div>© {new Date().getFullYear()} GrantChina. Все права защищены.</div>
+          <div>
+            © {new Date().getFullYear()} GrantChina. Все права защищены. ·{' '}
+            <a href="/privacy" className="footer-privacy">Политика конфиденциальности</a>
+          </div>
           <div className="footer-tags">
             Образовательное агентство · Обучение в Китае · Без посредников
           </div>

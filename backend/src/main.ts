@@ -9,7 +9,8 @@ import { HttpAdapterHost } from '@nestjs/core';
 import { StorageErrorFilter } from './common/storage-error.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody — подпись уведомлений Meta считается по СЫРЫМ байтам тела (29.10.2026).
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
 
   // Railway/Vercel/любой reverse proxy терминирует TLS у себя и отправляет

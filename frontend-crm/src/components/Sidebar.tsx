@@ -30,6 +30,12 @@ export default function Sidebar() {
     conversationsUnreadCount().then((r) => setUnreadChats(r.count)).catch(() => {});
   };
   useEffect(refreshUnreadChats, []);
+  // 29.10.2026 — в заголовке вкладки браузера число чатов, которые ждут ответа:
+  // видно, даже когда CRM открыта в фоновой вкладке.
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\+?\)\s*/, '');
+    document.title = unreadChats > 0 ? `(${unreadChats > 99 ? '99+' : unreadChats}) ${base}` : base;
+  }, [unreadChats]);
 
   useRealtime({
     'payment:submitted': refreshPendingCount,

@@ -1,7 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module, OnModuleInit } from '@nestjs/common';
 import { MessagingController } from './messaging.controller';
 import { MessagingService } from './messaging.service';
 import { TelegramClientBotService } from './telegram-client.service';
+import { InstagramApi, MetaTokensService, WhatsAppApi } from './meta/meta.api';
+import { MetaMediaService } from './meta/meta.media';
+import { logMetaConfig, MetaChatsService } from './meta/meta-chats.service';
+import { MetaChatsController, MetaWebhooksController, PublicChatFilesController } from './meta/meta.controllers';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
@@ -18,8 +22,15 @@ import { NotificationsModule } from '../notifications/notifications.module';
  */
 @Module({
   imports: [NotificationsModule],
-  controllers: [MessagingController],
-  providers: [MessagingService, TelegramClientBotService],
-  exports: [MessagingService],
+  // 29.10.2026 — Instagram и WhatsApp через приложения Meta (папка meta/).
+  controllers: [MessagingController, MetaWebhooksController, MetaChatsController, PublicChatFilesController],
+  providers: [MessagingService, TelegramClientBotService, MetaTokensService, InstagramApi, WhatsAppApi, MetaMediaService, MetaChatsService],
+  // MetaTokensService — наружу ради джобы instagram-token (продление ключа).
+  exports: [MessagingService, MetaTokensService],
 })
-export class MessagingModule {}
+export class MessagingModule implements OnModuleInit {
+  onModuleInit() {
+    // Неполная настройка видна в журнале сразу при запуске, а не первым потерянным сообщением.
+    logMetaConfig(new Logger('Meta'));
+  }
+}

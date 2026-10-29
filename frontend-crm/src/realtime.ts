@@ -41,6 +41,31 @@ const SOCKET_PATH = isAbsoluteApi
   : `${API_URL.replace(/\/api$/, '')}/socket.io`;
 
 let socket: Socket | null = null;
+
+/**
+ * 29.10.2026 — подписчики живут отдельно от сокета.
+ *
+ * Раньше хуки вешали обработчики на тот сокет, что был в момент монтирования
+ * страницы. connectRealtime() при каждом вызове создаёт НОВЫЙ сокет и
+ * закрывает старый — при входе, при проверке сессии (в разработке она
+ * вызывается дважды) и при переподключении после разрыва сервером. Страница,
+ * подписавшаяся на старый сокет, переставала получать живые обновления до
+ * перезагрузки: события приходили, но слушать их было некому (найдено
+ * проверкой «Диалогов»: второй менеджер не видел, что чат взяли). Теперь
+ * каждый новый сокет раздаёт события по общему списку подписчиков.
+ */
+type Listener = (...args: any[]) => void;
+const listeners = new Map<string, Set<Listener>>();
+
+function subscribe(event: string, cb: Listener): () => void {
+  let set = listeners.get(event);
+  if (!set) listeners.set(event, (set = new Set()));
+  set.add(cb);
+  return () => {
+    set!.delete(cb);
+  };
+}
+
 type ConnState = 'connected' | 'disconnected' | 'reconnecting';
 let connState: ConnState = 'disconnected';
 const stateListeners: ((s: ConnState) => void)[] = [];
@@ -82,6 +107,9 @@ export function connectRealtime() {
       transports: isAbsoluteApi ? ['websocket', 'polling'] : ['polling'],
       reconnection: true,
       reconnectionDelay: 1000,
+    });
+    socket.onAny((event: string, ...args: any[]) => {
+      listeners.get(event)?.forEach((cb) => cb(...args));
     });
     socket.on('connect', () => setState('connected'));
     socket.on('disconnect', (reason) => {
@@ -151,15 +179,7 @@ export function getSocket() {
 export function useRealtimeEvent(event: string, handler: (...args: any[]) => void) {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
-  useEffect(() => {
-    const s = getSocket();
-    if (!s) return;
-    const cb = (...args: any[]) => handlerRef.current(...args);
-    s.on(event, cb);
-    return () => {
-      s.off(event, cb);
-    };
-  }, [event]);
+  useEffect(() => subscribe(event, (...args: any[]) => handlerRef.current(...args)), [event]);
 }
 
 /** Подписка на несколько событий. handlers — объект { event: callback } */
@@ -167,17 +187,8 @@ export function useRealtime(handlers: Record<string, (...args: any[]) => void>) 
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
   useEffect(() => {
-    const s = getSocket();
-    if (!s) return;
-    const events = Object.keys(handlersRef.current);
-    const wrapped = events.map((ev) => {
-      const cb = (...args: any[]) => handlersRef.current[ev]?.(...args);
-      s.on(ev, cb);
-      return [ev, cb] as const;
-    });
-    return () => {
-      wrapped.forEach(([ev, cb]) => s.off(ev, cb));
-    };
+    const offs = Object.keys(handlersRef.current).map((ev) => subscribe(ev, (...args: any[]) => handlersRef.current[ev]?.(...args)));
+    return () => offs.forEach((off) => off());
   }, []);
 }
 

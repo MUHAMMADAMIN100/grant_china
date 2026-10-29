@@ -1772,3 +1772,16 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   background: #fef2f2; color: #991b1b; padding: 8px 10px; border-radius: 8px;
 }
 .stu-visa-claim-rejected .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }
+
+/* 29.10.2026 — страница «Политика конфиденциальности» (/privacy). */
+.privacy-page { padding: 48px 0 72px; background: #fff; min-height: 100vh; }
+.privacy-container { max-width: 760px; }
+.privacy-page h1 { font-size: 32px; margin: 16px 0 6px; color: var(--text); }
+.privacy-page h2 { font-size: 21px; margin: 28px 0 10px; color: var(--text); scroll-margin-top: 24px; }
+.privacy-page p, .privacy-page li { font-size: 16px; line-height: 1.65; color: #3b4255; }
+.privacy-page ul { padding-left: 22px; margin: 8px 0; }
+.privacy-page a { color: var(--primary); }
+.privacy-updated { color: #8a90a2 !important; font-size: 14px !important; }
+.privacy-back { font-size: 15px; text-decoration: none; }
+.footer-privacy { color: inherit; text-decoration: underline; }
+@media (max-width: 640px) { .privacy-page { padding: 28px 0 48px; } .privacy-page h1 { font-size: 26px; } }

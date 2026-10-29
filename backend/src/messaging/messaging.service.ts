@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { MessageDirection, Prisma, Region, Role } from '@prisma/client';
 import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,6 +10,8 @@ import { assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { normalizePhone } from '../common/phone';
 import { canSendTo } from './channels';
 import { TelegramClientBotService } from './telegram-client.service';
+import { META_CHANNELS, isMetaChannel } from './meta/meta.config';
+import { MESSAGE_INCLUDE, MetaChatsService } from './meta/meta-chats.service';
 import { AssignConversationDto, LinkConversationDto, SendMessageDto } from './dto/messaging.dto';
 
 /** ТЗ v3 р4 — регион менеджера. Необязательный: внутренние вызовы могут
@@ -47,6 +49,7 @@ export class MessagingService {
     private notifications: NotificationsService,
     private realtime: RealtimeGateway,
     private telegram: TelegramClientBotService,
+    private meta: MetaChatsService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -67,6 +70,9 @@ export class MessagingService {
     const mine = assignedToUserFilter(user) as Prisma.StudentWhereInput[];
     return {
       OR: [
+        // 29.10.2026 — чаты Instagram и WhatsApp видят все сотрудники
+        // (решение владельца). Telegram — по прежним правилам ниже.
+        { channel: { in: [...META_CHANNELS] } },
         { studentId: null, applicationId: null },
         { assignedToId: user.id },
         { student: { OR: mine } },
@@ -77,11 +83,21 @@ export class MessagingService {
 
   private canAccess(c: ConversationRow, user: CurrentUser): boolean {
     if (isPrivileged(user.role)) return true;
+    if (isMetaChannel(c.channel)) return true;
     if (c.assignedToId === user.id) return true;
     if (!c.studentId && !c.applicationId) return true;
     if (c.student && canAccessStudentRecord(c.student, user)) return true;
     if (c.application && canAccessStudentRecord(c.application, user)) return true;
     return false;
+  }
+
+  /**
+   * 29.10.2026 — Instagram / WhatsApp: видят чат все сотрудники, а менять занятый
+   * чат могут его ответственный и руководство; свободный — любой (решение владельца).
+   */
+  private assertMetaOwner(c: ConversationRow, user: CurrentUser, what: string) {
+    if (!isMetaChannel(c.channel) || isPrivileged(user.role) || !c.assignedToId || c.assignedToId === user.id) return;
+    throw new ForbiddenException(`Чат ведёт ${c.assignedTo?.fullName ?? 'другой сотрудник'} — ${what} могут ответственный и руководство.`);
   }
 
   private async loadForMutation(id: string, user: CurrentUser): Promise<ConversationRow> {
@@ -137,8 +153,14 @@ export class MessagingService {
 
   /** Счётчик для бейджа в меню — считает ровно то, что сотрудник увидит в списке. */
   async unreadCount(user: CurrentUser) {
+    // Instagram / WhatsApp: «ждут ответа» — свободные чаты и мои. Чаты коллег
+    // видны всем, но в счётчик сотрудника не идут: погасить их может только
+    // ответственный, и счётчик стоял бы у всех вечно.
+    const notColleagues: Prisma.ConversationWhereInput = isPrivileged(user.role)
+      ? {}
+      : { OR: [{ channel: { notIn: [...META_CHANNELS] } }, { assignedToId: null }, { assignedToId: user.id }] };
     const count = await this.prisma.conversation.count({
-      where: { deletedAt: null, unreadCount: { gt: 0 }, AND: [this.scopeWhere(user)] },
+      where: { deletedAt: null, unreadCount: { gt: 0 }, AND: [this.scopeWhere(user), notColleagues] },
     });
     return { count };
   }
@@ -166,7 +188,7 @@ export class MessagingService {
         orderBy: { sentAt: 'desc' },
         skip,
         take: pageSize,
-        include: { author: { select: { id: true, fullName: true } } },
+        include: MESSAGE_INCLUDE,
       }),
       this.prisma.channelMessage.count({ where }),
     ]);
@@ -178,13 +200,22 @@ export class MessagingService {
   // ------------------------------------------------------------------
 
   async markRead(id: string, user: CurrentUser) {
-    await this.loadForMutation(id, user);
+    const conversation = await this.loadForMutation(id, user);
+    // Instagram / WhatsApp: «прочитано» в занятом чате ставит только ответственный.
+    // Иначе коллега или руководитель, заглянув в чат, гасил бы ответственному
+    // метку «клиент ждёт ответа».
+    if (isMetaChannel(conversation.channel) && conversation.assignedToId && conversation.assignedToId !== user.id) {
+      return { ok: true, unreadCount: conversation.unreadCount };
+    }
     await this.prisma.conversation.update({ where: { id }, data: { unreadCount: 0 } });
-    return { ok: true };
+    return { ok: true, unreadCount: 0 };
   }
 
   async assign(id: string, dto: AssignConversationDto, user: CurrentUser) {
     const conversation = await this.loadForMutation(id, user);
+    if (isMetaChannel(conversation.channel) && !isPrivileged(user.role)) {
+      throw new ForbiddenException('Ответственного в чатах Instagram и WhatsApp назначает руководство. Свободный чат можно взять кнопкой «Взять себе».');
+    }
     let assignedToId: string | null = null;
     if (dto.assignedToId) {
       const target = await this.prisma.user.findFirst({
@@ -202,6 +233,7 @@ export class MessagingService {
   /** Ручная привязка диалога к карточке (ТЗ 6.4 — «привязка диалогов к карточкам клиентов»). */
   async link(id: string, dto: LinkConversationDto, user: CurrentUser) {
     const conversation = await this.loadForMutation(id, user);
+    this.assertMetaOwner(conversation, user, 'привязывать его к карточке');
 
     let studentId: string | null = conversation.studentId;
     let applicationId: string | null = conversation.applicationId;
@@ -257,6 +289,9 @@ export class MessagingService {
   /** ТЗ 6.4 — ответ клиенту прямо из CRM. */
   async send(id: string, dto: SendMessageDto, user: CurrentUser) {
     const conversation = await this.loadForMutation(id, user);
+    // 29.10.2026 — Instagram / WhatsApp: длинный текст режется по байтам на
+    // несколько сообщений, поэтому в ответе массив; CRM понимает оба вида.
+    if (isMetaChannel(conversation.channel)) return this.meta.sendText(id, dto.text, user);
     if (!canSendTo(conversation.channel)) {
       throw new BadRequestException(
         `Отправка в канал «${conversation.channel}» пока не подключена — ответьте клиенту в самом мессенджере.`,

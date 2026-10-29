@@ -7,7 +7,9 @@ export class SendMessageDto {
   // как менеджер уже нажал «Отправить».
   @IsString()
   @MinLength(1)
-  @MaxLength(4000)
+  // 29.10.2026 — до 20 000 знаков: для Instagram/WhatsApp длинный текст
+  // делится на части по байтам (MetaChatsService.sendText), Telegram режет сам.
+  @MaxLength(20000)
   text: string;
 }
 

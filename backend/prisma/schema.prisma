@@ -2142,6 +2142,17 @@ model Conversation {
   // 0 при явном «прочитано».
   unreadCount     Int       @default(0)
 
+  // 29.10.2026 — Instagram / WhatsApp через приложения Meta. Всё необязательное:
+  // у Telegram-диалогов этих полей нет.
+  // accountId — НАШ аккаунт: id Instagram или WhatsApp Phone number ID.
+  accountId        String?
+  // Последнее сообщение КЛИЕНТА: от него Meta отсчитывает 24 часа на ответ.
+  lastIncomingAt   DateTime?
+  // Фото клиента храним у себя (имя файла в uploads/chat): ссылка Instagram
+  // протухает через несколько дней.
+  contactPicture   String?
+  profileCheckedAt DateTime?
+
   messages ChannelMessage[]
 
   createdAt DateTime  @default(now())
@@ -2201,6 +2212,20 @@ model ChannelMessage {
   // разговора (та же причина, что у Payment.paidAt и Consultation.heldAt).
   sentAt DateTime @default(now())
 
+  // 29.10.2026 — Instagram / WhatsApp. status — только у наших исходящих:
+  // SENDING → SENT → DELIVERED → READ, либо FAILED (error — наш код причины,
+  // errorDetail — код Meta). Статус никогда не идёт назад.
+  status            String?
+  error             String?
+  errorDetail       String?
+  replyToExternalId String?
+  // Реакция клиента на это сообщение (эмодзи); null — реакции нет.
+  contactReaction   String?
+  // Клиент удалил сообщение у себя. Строку не удаляем (правило проекта),
+  // интерфейс показывает «Сообщение удалено клиентом» без текста.
+  deletedByContactAt DateTime?
+  chatAttachments   ChatAttachment[]
+
   createdAt DateTime  @default(now())
   deletedAt DateTime?
 
@@ -2208,6 +2233,52 @@ model ChannelMessage {
   @@unique([conversationId, externalId])
   // Лента диалога: WHERE conversationId=? AND deletedAt IS NULL ORDER BY sentAt.
   @@index([conversationId, deletedAt, sentAt])
+  // Статусы WhatsApp и эхо Instagram приходят только с id сообщения Meta.
+  @@index([externalId])
+}
+
+// 29.10.2026 — вложение сообщения Instagram / WhatsApp: файл, фото, голосовое,
+// пост, место. Файлы лежат в uploads/chat (подпапка: уборка «файлов-сирот»
+// смотрит только верхний уровень uploads и эти файлы не трогает).
+model ChatAttachment {
+  id        String         @id @default(uuid())
+  messageId String
+  message   ChannelMessage @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  // IMAGE VIDEO AUDIO FILE STICKER SHARE REEL STORY LOCATION CONTACT UNSUPPORTED
+  kind String
+
+  // Файл у нас на диске (uploads/chat/<storedName>) и его свойства.
+  storedName String? @unique
+  mimeType   String?
+  size       Int?
+  name       String?
+  // Входящие: ссылка Instagram / страница поста; mediaId — id файла WhatsApp.
+  url     String?
+  mediaId String?
+  // PENDING — ещё качаем в фоне, DONE — лежит у нас, FAILED — не удалось.
+  downloadState String?
+
+  // Наш исходящий файл: его забирает Meta по публичной ссылке без входа.
+  isPublic     Boolean @default(false)
+  // Отдельная копия для мессенджера (голосовое WhatsApp — Ogg/Opus).
+  deliveryName String? @unique
+
+  latitude  Float?
+  longitude Float?
+  address   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([messageId])
+}
+
+// 29.10.2026 — состояние интеграций «ключ → JSON»: продлённый ключ Instagram,
+// отметки «ключ отказан» по Instagram и WhatsApp.
+model IntegrationState {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
 
 // 08.09.2026 — свои источники привлечения. Встроенный справочник живёт в

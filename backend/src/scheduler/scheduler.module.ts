@@ -10,6 +10,8 @@ import { AcademicYearReminderJob } from './jobs/academic-year-reminder.job';
 import { PayrollPeriodCloseJob } from './jobs/payroll-period-close.job';
 import { FlightReminderJob } from './jobs/flight-reminder.job';
 import { StorageCheckJob } from './jobs/storage-check.job';
+import { InstagramTokenJob } from './jobs/instagram-token.job';
+import { MessagingModule } from '../messaging/messaging.module';
 import { FilesModule } from '../files/files.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksModule } from '../tasks/tasks.module';
@@ -19,6 +21,8 @@ import { PayrollModule } from '../payroll/payroll.module';
   imports: [
     // 07.09.2026 — StorageCheckJob берёт пробу записи из FilesModule.StorageService.
     FilesModule,
+    // 29.10.2026 — InstagramTokenJob продлевает ключ Instagram через MetaTokensService.
+    MessagingModule,
     // РОВНО ОДИН РАЗ на всё приложение (см. schedulerPlan проекта
     // архитектора) — два forRoot() дали бы два независимых набора таймеров,
     // то есть двойные прогоны внутри одного процесса.
@@ -42,6 +46,7 @@ import { PayrollModule } from '../payroll/payroll.module';
     PayrollPeriodCloseJob,
     FlightReminderJob,
     StorageCheckJob,
+    InstagramTokenJob,
     // Мульти-провайдер: оркестратор (scheduler.service.ts) получает список
     // джоб через DI и не знает о них поимённо. Новые джобы дописываются в
     // КОНЕЦ массива намеренно (риск 1 проекта архитектора): если в одной из
@@ -56,7 +61,8 @@ import { PayrollModule } from '../payroll/payroll.module';
         d: PayrollPeriodCloseJob,
         e: FlightReminderJob,
         f: StorageCheckJob,
-      ) => [a, b, c, d, e, f],
+        g: InstagramTokenJob,
+      ) => [a, b, c, d, e, f, g],
       inject: [
         FollowUpReminderJob,
         ApplicationAutoArchiveJob,
@@ -64,6 +70,7 @@ import { PayrollModule } from '../payroll/payroll.module';
         PayrollPeriodCloseJob,
         FlightReminderJob,
         StorageCheckJob,
+        InstagramTokenJob,
       ],
     },
   ],

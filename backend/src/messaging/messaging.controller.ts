@@ -15,6 +15,7 @@ import { MessagingService } from './messaging.service';
 import { TelegramClientBotService } from './telegram-client.service';
 import { AssignConversationDto, LinkConversationDto, SendMessageDto } from './dto/messaging.dto';
 import { CHANNELS } from './channels';
+import { MetaChatsService } from './meta/meta-chats.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -58,12 +59,23 @@ export class MessagingController {
   constructor(
     private messaging: MessagingService,
     private telegram: TelegramClientBotService,
+    private meta: MetaChatsService,
   ) {}
 
+  /**
+   * 29.10.2026 — Instagram и WhatsApp умеют отвечать, когда подключены
+   * (outbound считается по настройкам), а meta — их состояние для CRM:
+   * не настроен / настроен не полностью / подключён / ключ отказан.
+   */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('channels')
-  channels() {
-    return { items: CHANNELS, telegramEnabled: this.telegram.isEnabled() };
+  async channels() {
+    const meta = await this.meta.channelStatus();
+    const items = CHANNELS.map((c) => {
+      const m = meta.find((x) => x.value === c.value);
+      return m ? { ...c, outbound: m.enabled } : c;
+    });
+    return { items, telegramEnabled: this.telegram.isEnabled(), meta };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

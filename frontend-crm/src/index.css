@@ -3207,3 +3207,133 @@ select.input-error {
   /* Длинный заголовок раздела не должен выталкивать кнопки за край экрана. */
   .topbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+
+/* ============================================================================
+   29.10.2026 — Instagram / WhatsApp в «Диалогах»
+   ========================================================================== */
+.conv-item-row { display: flex; gap: 10px; align-items: flex-start; }
+.conv-item-body { flex: 1; min-width: 0; }
+.chat-avatar {
+  flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: #fff; background: #94a3b8;
+}
+.chat-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.chat-avatar.ch-instagram { background: linear-gradient(135deg, #f58529, #dd2a7b 55%, #8134af); }
+.chat-avatar.ch-whatsapp { background: #25d366; }
+.chat-avatar.ch-telegram { background: #2aabee; }
+.chat-ch-badge.ch-instagram { background: #fde7f1; color: #b4236d; }
+.chat-ch-badge.ch-whatsapp { background: #dcfce7; color: #15803d; }
+.chat-owner { color: var(--text-soft); }
+.conv-back { display: none; border: none; background: none; padding: 4px; color: var(--text); cursor: pointer; }
+.conv-thread-head { gap: 10px; }
+
+.chat-meta-status { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.chat-meta-chip { padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+.chat-meta-chip.connected { border-color: #bbf7d0; background: #f0fdf4; }
+.chat-meta-chip.misconfigured, .chat-meta-chip.token_refused { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+
+.conv-msg { position: relative; }
+.conv-msg.failed { outline: 1px solid #fca5a5; }
+.chat-att { margin-bottom: 6px; display: block; color: inherit; }
+.chat-att-row { display: flex; align-items: center; gap: 6px; }
+.chat-att-link { color: inherit; text-decoration: underline; }
+.chat-att-muted { font-size: 12.5px; opacity: .75; font-style: italic; }
+.chat-att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.chat-att-size { font-size: 11px; opacity: .75; }
+.chat-att-caption { font-size: 12.5px; margin-top: 4px; }
+.chat-image { display: block; max-width: 260px; max-height: 320px; border-radius: 10px; object-fit: cover; }
+.chat-sticker { display: block; width: 120px; height: 120px; object-fit: contain; }
+.chat-video { display: block; max-width: 280px; max-height: 320px; border-radius: 10px; background: #000; }
+.chat-audio { display: block; width: 260px; max-width: 100%; height: 40px; }
+.chat-map { position: relative; display: block; overflow: hidden; border-radius: 10px; background: #e5e7eb; }
+.chat-map img { user-select: none; }
+.chat-map-pin {
+  position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border-radius: 50%; background: #d52b2b; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+.chat-map-credit { position: absolute; right: 4px; bottom: 2px; font-size: 9px; color: #374151; background: rgba(255,255,255,.75); padding: 0 3px; border-radius: 3px; }
+.chat-deleted { font-style: italic; opacity: .75; }
+.chat-reaction {
+  position: absolute; bottom: -10px; left: 8px; font-size: 14px; line-height: 1;
+  background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 2px 5px;
+}
+.conv-msg.out .chat-reaction { left: auto; right: 8px; }
+.chat-status { display: inline-flex; vertical-align: -3px; margin-left: 4px; }
+.chat-status.read { color: #7dd3fc; }
+.conv-msg.in .chat-status.read { color: #0284c7; }
+.chat-status.failed { color: #fecaca; }
+.chat-menu-btn { border: none; background: none; color: inherit; opacity: .6; padding: 0 0 0 6px; cursor: pointer; vertical-align: -4px; }
+.chat-menu-btn:hover { opacity: 1; }
+.chat-menu {
+  position: absolute; z-index: 5; top: 100%; right: 0; margin-top: 4px; min-width: 140px;
+  background: #fff; color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.12); overflow: hidden;
+}
+.conv-msg.in .chat-menu { right: auto; left: 0; }
+.chat-menu button { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 13.5px; }
+.chat-menu button:hover { background: var(--bg); }
+.chat-failed { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 12.5px; }
+.conv-msg.out .chat-failed { color: #fff; }
+.conv-msg.out .chat-failed .btn { color: var(--text) !important; }
+
+.chat-composer-wrap { border-top: 1px solid var(--border); }
+.chat-composer-wrap .conv-composer { border-top: none; }
+.chat-edit-bar { display: flex; align-items: center; gap: 6px; padding: 6px 16px 0; font-size: 12.5px; color: var(--primary); }
+.chat-edit-bar button { margin-left: auto; border: none; background: none; cursor: pointer; color: var(--text-soft); }
+.chat-composer-error { padding: 6px 16px 0; font-size: 12.5px; color: var(--danger); }
+.chat-tools { display: flex; gap: 2px; align-self: center; }
+.chat-tool { border: none; background: none; width: 36px; height: 36px; border-radius: 8px; cursor: pointer; color: var(--text-soft); display: inline-flex; align-items: center; justify-content: center; }
+.chat-tool:hover:not(:disabled) { background: var(--bg); color: var(--primary); }
+.chat-textarea-box { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-textarea-box textarea { width: 100%; }
+.chat-bytes { font-size: 11px; color: var(--text-light); margin-top: 3px; text-align: right; }
+.chat-bytes.over { color: #b45309; }
+.chat-voice-bar { align-items: center; }
+.chat-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #dc2626; animation: chatRec 1s infinite; }
+.chat-rec-time { font-variant-numeric: tabular-nums; flex: 1; }
+@keyframes chatRec { 50% { opacity: .2; } }
+.chat-location-card { width: min(720px, calc(100vw - 32px)); max-width: none; text-align: left; }
+.chat-location-map { height: 340px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.chat-location-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.chat-location-coords { font-size: 12.5px; color: var(--text-soft); }
+.chat-optional { font-weight: 400; font-size: 12px; color: var(--text-soft); }
+
+/* Компьютер: карточка «Диалогов» ровно в экран (64 — шапка, 2×28 — отступы
+   страницы), чаты занимают всё, что осталось под заголовком и плашками.
+   Длинный список и переписка листаются внутри, поле ответа всегда видно.
+   Раньше высота считалась без плашек, а ряд сетки рос по содержимому —
+   при десятках чатов поле ответа уходило ниже края экрана. */
+@media (min-width: 901px) {
+  .conv-page { display: flex; flex-direction: column; height: calc(100vh - 120px); min-height: 560px; }
+  .conv-page > .conv-layout { flex: 1; min-height: 0; max-height: none; grid-template-rows: minmax(0, 1fr); }
+  .conv-list, .conv-thread { min-height: 0; }
+}
+/* Круглая кнопка AI-помощника висит в правом нижнем углу поверх страницы —
+   «Отправить» и текст под лентой держим левее неё. */
+@media (min-width: 721px) {
+  .conv-page .conv-composer, .conv-page .conv-composer-disabled { padding-right: 84px; }
+}
+@media (max-width: 720px) {
+  .conv-page .conv-composer > .btn:last-child { margin-right: 58px; }
+  .conv-page .conv-composer-disabled { padding-right: 64px; }
+}
+
+/* Телефон: список и беседа показываются по очереди. */
+@media (max-width: 900px) {
+  .conv-layout.has-active .conv-list { display: none; }
+  .conv-layout:not(.has-active) .conv-thread { display: none; }
+  .conv-layout .conv-items { max-height: none; }
+  .conv-layout.has-active .conv-messages { max-height: none; min-height: 50vh; }
+  .conv-back { display: inline-flex; }
+  .chat-image, .chat-video { max-width: 100%; }
+}
+/* iOS не увеличивает страницу при вводе, если шрифт поля не меньше 16px. */
+@media (max-width: 720px) {
+  .conv-composer textarea, .chat-location-card input, .chat-location-card textarea { font-size: 16px; }
+  .conv-composer { flex-wrap: wrap; }
+  .chat-tools { order: 2; }
+  .conv-composer > .btn { order: 3; margin-left: auto; }
+  .chat-textarea-box { flex-basis: 100%; }
+  .chat-location-map { height: 260px; }
+}
