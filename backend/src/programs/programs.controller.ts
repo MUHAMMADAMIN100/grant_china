@@ -25,6 +25,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { isPrivileged } from '../common/roles';
+import { COST_LABEL, CostPeriod, SEMESTER_COST_LABEL, parsePriceInput } from './program-price';
 
 const programImageStorage = diskStorage({
   destination: process.env.UPLOADS_DIR || './uploads',
@@ -51,14 +52,17 @@ export class ProgramsController {
     @Query('direction') direction?: Direction,
     @Query('minCost') minCost?: string,
     @Query('maxCost') maxCost?: string,
+    // 04.11.2026: по какой цене искать — 'year' (по умолчанию) или 'semester'.
+    @Query('costPeriod') costPeriod?: CostPeriod,
     @Query('search') search?: string,
   ) {
     return this.programs.findAll({
       city,
       major,
       direction,
-      minCost: minCost ? Number(minCost) : undefined,
-      maxCost: maxCost ? Number(maxCost) : undefined,
+      minCost,
+      maxCost,
+      costPeriod,
       search,
       publishedOnly: true,
     });
@@ -120,7 +124,10 @@ export class ProgramsController {
       city: String(body.city ?? ''),
       major: String(body.major ?? ''),
       direction: body.direction as Direction,
-      cost: body.cost !== undefined ? Number(body.cost) : 0,
+      // Пустое поле цены — «не указана» (null); хотя бы одну из двух требует
+      // programs.service.create. Раньше пустая цена молча превращалась в 0.
+      cost: parsePriceInput(body.cost, COST_LABEL),
+      semesterCost: parsePriceInput(body.semesterCost, SEMESTER_COST_LABEL),
       currency: body.currency || undefined,
       duration: body.duration || undefined,
       language: body.language || undefined,
@@ -136,9 +143,6 @@ export class ProgramsController {
     }
     if (!dto.name || !dto.university || !dto.city || !dto.major || !dto.direction) {
       throw new BadRequestException('Заполните обязательные поля программы');
-    }
-    if (!Number.isFinite(dto.cost)) {
-      throw new BadRequestException('Стоимость должна быть числом');
     }
     return this.programs.create(dto, user);
   }

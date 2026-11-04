@@ -7,7 +7,9 @@ export interface Program {
   city: string;
   major: string;
   direction: 'BACHELOR' | 'MASTER' | 'LANGUAGE';
-  cost: number;
+  /** Цена за год / за 1 семестр; null — не указана, хотя бы одна есть (04.11.2026). */
+  cost: number | null;
+  semesterCost: number | null;
   currency: string;
   duration: string | null;
   language: string | null;
@@ -23,6 +25,8 @@ export async function listPublicPrograms(filters: {
   direction?: string;
   minCost?: number;
   maxCost?: number;
+  /** 'year' (по умолчанию) или 'semester' — по какой цене сравнивать. */
+  costPeriod?: 'year' | 'semester';
   search?: string;
 } = {}): Promise<Program[]> {
   const params = new URLSearchParams();

@@ -35,7 +35,11 @@ async function postToChannel(program: Program): Promise<{ messageId: number; has
     `🎯 ${escMd(program.major)} · ${DIRECTION_LABEL[program.direction]}\n` +
     (program.duration ? `⏱ ${escMd(program.duration)}\n` : '') +
     (program.language ? `🌐 ${escMd(program.language)}\n` : '') +
-    `\n💰 Стоимость: *${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год\n` +
+    // 04.11.2026: цена за год стала необязательной, появилась цена за семестр.
+    `\n💰 Стоимость: ${[
+      program.cost != null ? `*${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год` : null,
+      program.semesterCost != null ? `*${program.semesterCost.toLocaleString('ru-RU')} ${program.currency}* / семестр` : null,
+    ].filter(Boolean).join(' · ')}\n` +
     (program.description ? `\n${escMd(program.description.slice(0, 600))}` : '');
 
   const publicBase = process.env.PUBLIC_API_BASE;

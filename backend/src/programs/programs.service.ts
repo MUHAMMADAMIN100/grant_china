@@ -9,6 +9,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { TelegramService } from '../telegram/telegram.service';
 import { isPrivileged } from '../common/roles';
 import { FileResolverService } from '../files/file-resolver.service';
+import { CostPeriod, assertPrices, formatPrice, priceRangeWhere } from './program-price';
 
 type CurrentUser = { id: string; role: Role };
 
@@ -61,21 +62,21 @@ export class ProgramsService {
     city?: string;
     major?: string;
     direction?: Direction;
-    minCost?: number;
-    maxCost?: number;
+    minCost?: string | number;
+    maxCost?: string | number;
+    costPeriod?: CostPeriod;
     search?: string;
     publishedOnly?: boolean;
   }) {
     // Soft-delete: всегда исключаем удалённые программы
-    const where: Prisma.ProgramWhereInput = { deletedAt: null };
+    const where: Prisma.ProgramWhereInput = {
+      deletedAt: null,
+      // «Цена от — до» — по цене за год или за семестр (costPeriod).
+      ...priceRangeWhere(filters.minCost, filters.maxCost, filters.costPeriod),
+    };
     if (filters.city) where.city = containsInsensitive(filters.city);
     if (filters.major) where.major = containsInsensitive(filters.major);
     if (filters.direction) where.direction = filters.direction;
-    if (typeof filters.minCost === 'number' || typeof filters.maxCost === 'number') {
-      where.cost = {};
-      if (typeof filters.minCost === 'number') (where.cost as any).gte = filters.minCost;
-      if (typeof filters.maxCost === 'number') (where.cost as any).lte = filters.maxCost;
-    }
     if (filters.publishedOnly) where.published = true;
     if (filters.search) {
       where.OR = [
@@ -109,6 +110,7 @@ export class ProgramsService {
     if (!isPrivileged(user.role)) {
       throw new ForbiddenException('Только Основатель или администратор может создавать программы');
     }
+    assertPrices(dto.cost, dto.semesterCost);
     const program = await this.prisma.program.create({
       data: {
         name: dto.name.trim(),
@@ -116,7 +118,8 @@ export class ProgramsService {
         city: dto.city.trim(),
         major: dto.major.trim(),
         direction: dto.direction,
-        cost: dto.cost,
+        cost: dto.cost ?? null,
+        semesterCost: dto.semesterCost ?? null,
         currency: dto.currency || 'CNY',
         duration: dto.duration || null,
         language: dto.language || null,
@@ -150,6 +153,12 @@ export class ProgramsService {
       throw new ForbiddenException('Только Основатель или администратор может редактировать программы');
     }
     const existing = await this.findOne(id);
+    // null в dto — «цену убрали», undefined — «не трогали». После правки
+    // должна остаться хотя бы одна из двух цен.
+    assertPrices(
+      dto.cost !== undefined ? dto.cost : existing.cost,
+      dto.semesterCost !== undefined ? dto.semesterCost : existing.semesterCost,
+    );
     const updated = await this.prisma.program.update({ where: { id }, data: dto });
 
     this.realtime.emitAllStaff('program:updated', { id: updated.id });
@@ -222,16 +231,28 @@ export class ProgramsService {
 
   /** Карточка программы без описания: заголовок, вуз, город, стоимость. */
   private buildCard(program: Program, header: string): string {
-    return (
+    const head =
       `${header}\n\n` +
       `📚 *${this.escape(program.name)}*\n` +
       `🏛 ${this.escape(program.university)}\n` +
       `📍 ${this.escape(program.city)}\n` +
       `🎯 ${this.escape(program.major)} · ${DIRECTION_LABEL[program.direction]}\n` +
       (program.duration ? `⏱ ${this.escape(program.duration)}\n` : '') +
-      (program.language ? `🌐 ${this.escape(program.language)}\n` : '') +
-      `\n💰 Стоимость: *${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год`
-    );
+      (program.language ? `🌐 ${this.escape(program.language)}\n` : '');
+    const prices = this.buildPrices(program);
+    return prices ? `${head}\n💰 Стоимость: ${prices}` : head.trimEnd();
+  }
+
+  /**
+   * «*16 200 CNY* / год · *8 100 CNY* / семестр» — только указанные цены
+   * (04.11.2026: появилась цена за семестр, цена за год стала необязательной).
+   * Валюта (CNY/USD/RUB/TJS) символов разметки не содержит, экранировать нечего.
+   */
+  private buildPrices(program: Program): string {
+    const parts: string[] = [];
+    if (program.cost != null) parts.push(`*${formatPrice(program.cost, program.currency)}* / год`);
+    if (program.semesterCost != null) parts.push(`*${formatPrice(program.semesterCost, program.currency)}* / семестр`);
+    return parts.join(' · ');
   }
 
   /**

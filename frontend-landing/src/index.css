@@ -886,6 +886,27 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .sp-range { display: flex; gap: 4px; }
 .sp-range input { width: 50%; }
+/* 04.11.2026 — под «от — до» переключатель «за год | за семестр»: две
+   половинки ровно под двумя полями. Под полями, а не в строке подписи: там
+   он не помещался в узкую ячейку и сдвигал поля «Цены» ниже соседних. */
+.sp-period {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 2px;
+  background: white; border: 1.5px solid var(--border); border-radius: 7px;
+}
+.sp-period button {
+  border: none; background: none; cursor: pointer;
+  padding: 3px 4px; border-radius: 5px;
+  font-family: inherit; font-size: 12px; font-weight: 600; line-height: 16px;
+  color: var(--text-soft); white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.sp-period button:hover { color: var(--primary); }
+.sp-period button.on { background: var(--primary); color: white; }
+.sp-period button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+@media (max-width: 900px) {
+  /* Общее правило даёт кнопкам 44px под палец; переключатель целиком — 44px, как поля. */
+  .sp-period button { min-height: 37px; font-size: 13px; }
+}
 .sp-reset {
   grid-column: 1 / -1;
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
@@ -932,6 +953,9 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   text-align: right; line-height: 1;
 }
 .sp-cost span { font-size: 10px; color: var(--text-soft); font-weight: 500; }
+/* Цена за год и/или за семестр — каждая своей строкой. */
+.sp-cost-line { white-space: nowrap; }
+.sp-cost-line + .sp-cost-line { margin-top: 4px; }
 .sp-item-name {
   font-size: 15px; font-weight: 700; line-height: 1.3;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -1000,6 +1024,8 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   text-align: center;
 }
 .sp-modal-cost span { font-size: 14px; color: var(--text-soft); font-weight: 500; }
+.sp-modal-cost-line + .sp-modal-cost-line { margin-top: 4px; }
+.sp-empty-hint { font-size: 12px; max-width: 340px; line-height: 1.5; }
 .sp-modal-desc {
   margin-top: 16px;
   font-size: 14px; line-height: 1.6; color: var(--text);

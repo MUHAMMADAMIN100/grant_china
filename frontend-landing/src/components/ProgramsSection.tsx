@@ -4,10 +4,22 @@ import {
   buildFileUrl,
   getStudentProgramFilters,
   listStudentPrograms,
+  type CostPeriod,
   type StudentProgram,
 } from '../studentApi';
 import { useStudentRealtime } from '../realtime';
 import Icon from '../Icon';
+
+/**
+ * Указанные цены программы, сначала год (04.11.2026: появилась цена за
+ * семестр, цена за год стала необязательной — хотя бы одна есть всегда).
+ */
+function priceLines(p: StudentProgram) {
+  const lines: { key: CostPeriod; value: string; unit: string }[] = [];
+  if (p.cost != null) lines.push({ key: 'year', value: p.cost.toLocaleString('ru-RU'), unit: 'год' });
+  if (p.semesterCost != null) lines.push({ key: 'semester', value: p.semesterCost.toLocaleString('ru-RU'), unit: 'семестр' });
+  return lines;
+}
 
 const DIRECTION_LABEL: Record<string, string> = {
   BACHELOR: 'Бакалавриат',
@@ -32,6 +44,10 @@ export default function ProgramsSection() {
   const [direction, setDirection] = useState('');
   const [minCost, setMinCost] = useState('');
   const [maxCost, setMaxCost] = useState('');
+  // По какой цене сравнивать «от — до»: за год или за семестр. Программы
+  // без выбранной цены в результат не попадают (решение владельца 04.11.2026).
+  const [costPeriod, setCostPeriod] = useState<CostPeriod>('year');
+  const priceFiltered = !!(minCost || maxCost);
 
   const load = async () => {
     try {
@@ -42,6 +58,7 @@ export default function ProgramsSection() {
         direction: direction || undefined,
         minCost: minCost ? Number(minCost) : undefined,
         maxCost: maxCost ? Number(maxCost) : undefined,
+        costPeriod: priceFiltered ? costPeriod : undefined,
       });
       setItems(data);
     } catch {
@@ -63,7 +80,7 @@ export default function ProgramsSection() {
   useEffect(() => {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
-  }, [search, city, major, direction, minCost, maxCost]);
+  }, [search, city, major, direction, minCost, maxCost, costPeriod]);
 
   useStudentRealtime({
     'program:new': () => {
@@ -82,7 +99,7 @@ export default function ProgramsSection() {
 
   const reset = () => {
     setSearch(''); setCity(''); setMajor(''); setDirection('');
-    setMinCost(''); setMaxCost('');
+    setMinCost(''); setMaxCost(''); setCostPeriod('year');
   };
 
   const hasFilters = search || city || major || direction || minCost || maxCost;
@@ -148,8 +165,35 @@ export default function ProgramsSection() {
             <div className="sp-filter">
               <label>Цена (от — до)</label>
               <div className="sp-range">
-                <input type="number" placeholder="от" value={minCost} onChange={(e) => setMinCost(e.target.value)} />
-                <input type="number" placeholder="до" value={maxCost} onChange={(e) => setMaxCost(e.target.value)} />
+                <input
+                  type="number"
+                  placeholder="от"
+                  aria-label={costPeriod === 'year' ? 'Цена за год от' : 'Цена за семестр от'}
+                  value={minCost}
+                  onChange={(e) => setMinCost(e.target.value)}
+                />
+                <input
+                  type="number"
+                  placeholder="до"
+                  aria-label={costPeriod === 'year' ? 'Цена за год до' : 'Цена за семестр до'}
+                  value={maxCost}
+                  onChange={(e) => setMaxCost(e.target.value)}
+                />
+              </div>
+              {/* По какой цене искать — половинки ровно под полями «от» и «до». */}
+              <div className="sp-period" role="radiogroup" aria-label="Искать по цене за год или за семестр">
+                {([['year', 'за год'], ['semester', 'за семестр']] as const).map(([value, text]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={costPeriod === value}
+                    className={costPeriod === value ? 'on' : ''}
+                    onClick={() => setCostPeriod(value)}
+                  >
+                    {text}
+                  </button>
+                ))}
               </div>
             </div>
             {hasFilters && (
@@ -166,7 +210,10 @@ export default function ProgramsSection() {
       ) : items.length === 0 ? (
         <div className="sp-empty">
           <Icon name="school" size={40} />
-          <div>Программ пока нет</div>
+          <div>{hasFilters ? 'По выбранным фильтрам программ не найдено' : 'Программ пока нет'}</div>
+          {priceFiltered && costPeriod === 'semester' && (
+            <div className="sp-empty-hint">Цена за семестр указана не у всех программ — попробуйте искать по цене «за год».</div>
+          )}
         </div>
       ) : (
         <motion.div
@@ -195,7 +242,11 @@ export default function ProgramsSection() {
                 <div className="sp-item-head">
                   <div className="sp-badge">{DIRECTION_LABEL[p.direction]}</div>
                   <div className="sp-cost">
-                    {p.cost.toLocaleString('ru-RU')} <span>{p.currency}/год</span>
+                    {priceLines(p).map((l) => (
+                      <div key={l.key} className="sp-cost-line">
+                        {l.value} <span>{p.currency}/{l.unit}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <div className="sp-item-name">{p.name}</div>
@@ -252,7 +303,11 @@ export default function ProgramsSection() {
                   {selected.language && <div><Icon name="translate" size={16} /> {selected.language}</div>}
                 </div>
                 <div className="sp-modal-cost">
-                  {selected.cost.toLocaleString('ru-RU')} {selected.currency} <span>/ год</span>
+                  {priceLines(selected).map((l) => (
+                    <div key={l.key} className="sp-modal-cost-line">
+                      {l.value} {selected.currency} <span>/ {l.unit}</span>
+                    </div>
+                  ))}
                 </div>
                 {selected.description && (
                   <div className="sp-modal-desc">{selected.description}</div>

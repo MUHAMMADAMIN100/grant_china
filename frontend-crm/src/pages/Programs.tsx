@@ -8,9 +8,13 @@ import { useUI } from '../ui/Dialogs';
 import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import DirectionOptions from '../components/DirectionOptions';
-import { compose, hasErrors, maxLen, minLen, positive, required, validateAll } from '../utils/validators';
+import { compose, hasErrors, maxLen, minLen, numberRule, positive, required, validateAll } from '../utils/validators';
 import { useUrlFilter } from '../hooks/useUrlFilter';
 import { isTempId, removeById, replaceById, runOptimistic, tempId } from '../utils/optimistic';
+import { MAX_PROGRAM_PRICE, PRICES_REQUIRED_MESSAGE, programPriceLines, toPriceValue } from '../utils/programPrice';
+
+// Цена за год и за семестр проверяются одинаково; пустое поле — «не указана».
+const priceRule = compose(positive('Стоимость должна быть больше 0'), numberRule({ max: MAX_PROGRAM_PRICE }));
 
 // Дефолты фильтров вынесены за компонент — иначе useMemo на каждом рендере
 // создавал бы новую ссылку и URL-хук триггерился без причины.
@@ -22,7 +26,8 @@ const emptyForm: Partial<Program> = {
   city: '',
   major: '',
   direction: 'BACHELOR',
-  cost: 0,
+  cost: null,
+  semesterCost: null,
   currency: 'CNY',
   duration: '',
   language: '',
@@ -184,23 +189,30 @@ export default function Programs() {
   const patchRow = (list: Program[], id: string, patch: Partial<Program>) =>
     replaceById(list, id, patch).filter((p) => p.id !== id || matchesFilters(p));
 
-  const formErrors = editing
-    ? validateAll(
-        {
-          name: editing.name || '',
-          university: editing.university || '',
-          city: editing.city || '',
-          major: editing.major || '',
-          cost: editing.cost ?? '',
-        },
-        {
-          name: compose(required('Введите название'), minLen(2), maxLen(200)),
-          university: compose(required('Введите университет'), minLen(2), maxLen(200)),
-          city: compose(required('Укажите город'), minLen(2), maxLen(100)),
-          major: compose(required('Укажите специальность'), minLen(2), maxLen(200)),
-          cost: compose(required('Укажите стоимость'), positive('Стоимость должна быть больше 0')),
-        },
-      )
+  // Цены: за год и/или за семестр — хотя бы одна (04.11.2026).
+  const pricesMissing = !!editing && toPriceValue(editing.cost) === null && toPriceValue(editing.semesterCost) === null;
+  const formErrors: Partial<Record<'name' | 'university' | 'city' | 'major' | 'cost' | 'semesterCost' | 'prices', string>> = editing
+    ? {
+        ...validateAll(
+          {
+            name: editing.name || '',
+            university: editing.university || '',
+            city: editing.city || '',
+            major: editing.major || '',
+            cost: editing.cost ?? '',
+            semesterCost: editing.semesterCost ?? '',
+          },
+          {
+            name: compose(required('Введите название'), minLen(2), maxLen(200)),
+            university: compose(required('Введите университет'), minLen(2), maxLen(200)),
+            city: compose(required('Укажите город'), minLen(2), maxLen(100)),
+            major: compose(required('Укажите специальность'), minLen(2), maxLen(200)),
+            cost: priceRule,
+            semesterCost: priceRule,
+          },
+        ),
+        ...(pricesMissing ? { prices: PRICES_REQUIRED_MESSAGE } : {}),
+      }
     : {};
   const formInvalid = hasErrors(formErrors);
 
@@ -211,9 +223,12 @@ export default function Programs() {
     // Снимок формы: если сервер откажет, вернём модалку ровно с тем, что было
     // набрано. Перенабирать десяток полей из-за отказа человек не должен.
     const draft = { ...editing };
+    // Пустая цена уходит как null: при правке это «цену убрали» (бэкенд
+    // проверит, что вторая осталась), при создании — «не указана».
     const payload = {
       ...editing,
-      cost: typeof editing.cost === 'string' ? parseFloat(editing.cost) : editing.cost,
+      cost: toPriceValue(editing.cost),
+      semesterCost: toPriceValue(editing.semesterCost),
     };
 
     // СОЗДАНИЕ С КАРТИНКОЙ ждёт ответ по-старому, со спиннером: адрес файла
@@ -248,7 +263,8 @@ export default function Programs() {
       city: payload.city || '',
       major: payload.major || '',
       direction: payload.direction || 'BACHELOR',
-      cost: Number(payload.cost) || 0,
+      cost: payload.cost,
+      semesterCost: payload.semesterCost,
       currency: payload.currency || 'CNY',
       duration: payload.duration || null,
       language: payload.language || null,
@@ -426,8 +442,13 @@ export default function Programs() {
                     {p.duration && <span><Icon name="schedule" size={14} /> {p.duration}</span>}
                     {p.language && <span><Icon name="translate" size={14} /> {p.language}</span>}
                   </div>
+                  {/* Указанные цены: за год и/или за семестр (04.11.2026). */}
                   <div className="program-card-cost">
-                    {p.cost.toLocaleString('ru-RU')} {p.currency} <span>/ год</span>
+                    {programPriceLines(p).map((l) => (
+                      <div key={l.key} className="program-card-price">
+                        {l.amount} <span>{l.unit}</span>
+                      </div>
+                    ))}
                   </div>
                   {!p.published && <div className="program-card-draft">Скрыто на лендинге</div>}
                 </motion.div>
@@ -504,27 +525,56 @@ export default function Programs() {
                     <DirectionOptions />
                   </select>
                 </div>
-                <div className="form-group">
-                  <label>Стоимость / год *</label>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={editing.cost as any || ''}
-                    onChange={(e) => setEditing({ ...editing, cost: Number(e.target.value) })}
-                    className={formErrors.cost ? 'input-error' : ''}
-                    required
-                  />
-                  {formErrors.cost && <div className="form-error-text">{formErrors.cost}</div>}
-                </div>
-                <div className="form-group">
-                  <label>Валюта</label>
-                  <select value={editing.currency || 'CNY'} onChange={(e) => setEditing({ ...editing, currency: e.target.value })}>
-                    <option value="CNY">CNY (юань)</option>
-                    <option value="USD">USD</option>
-                    <option value="RUB">RUB</option>
-                    <option value="TJS">TJS</option>
-                  </select>
+                {/*
+                  Цены (04.11.2026): за год и за 1 семестр, валюта общая.
+                  Обязательна хотя бы одна — программа «1 semester» живёт
+                  только с ценой за семестр. Пустое поле = «не указана».
+                */}
+                <div className="program-prices">
+                  <div className="form-group">
+                    <label htmlFor="program-cost">Стоимость / год</label>
+                    <input
+                      id="program-cost"
+                      type="number"
+                      inputMode="decimal"
+                      min={1}
+                      step={1}
+                      value={editing.cost ?? ''}
+                      onChange={(e) => setEditing({ ...editing, cost: e.target.value === '' ? null : Number(e.target.value) })}
+                      className={formErrors.cost || formErrors.prices ? 'input-error' : ''}
+                    />
+                    {formErrors.cost && <div className="form-error-text">{formErrors.cost}</div>}
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="program-semester-cost">Стоимость / семестр</label>
+                    <input
+                      id="program-semester-cost"
+                      type="number"
+                      inputMode="decimal"
+                      min={1}
+                      step={1}
+                      value={editing.semesterCost ?? ''}
+                      onChange={(e) => setEditing({ ...editing, semesterCost: e.target.value === '' ? null : Number(e.target.value) })}
+                      className={formErrors.semesterCost || formErrors.prices ? 'input-error' : ''}
+                    />
+                    {formErrors.semesterCost && <div className="form-error-text">{formErrors.semesterCost}</div>}
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="program-currency">Валюта</label>
+                    <select id="program-currency" value={editing.currency || 'CNY'} onChange={(e) => setEditing({ ...editing, currency: e.target.value })}>
+                      <option value="CNY">CNY (юань)</option>
+                      <option value="USD">USD</option>
+                      <option value="RUB">RUB</option>
+                      <option value="TJS">TJS</option>
+                    </select>
+                  </div>
+                  <div className="program-prices-note">
+                    {formErrors.prices ? (
+                      <div className="form-error-text">{formErrors.prices}</div>
+                    ) : (
+                      <div className="program-prices-hint">Достаточно одной цены — за год или за семестр. Можно указать обе.</div>
+                    )}
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>Длительность</label>

@@ -18,6 +18,7 @@ import {
 import type { Request, Response } from 'express';
 import { Direction } from '@prisma/client';
 import { containsInsensitive } from '../common/search';
+import { CostPeriod, priceRangeWhere } from '../programs/program-price';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -292,17 +293,18 @@ export class StudentAuthController {
     @Query('direction') direction?: Direction,
     @Query('minCost') minCost?: string,
     @Query('maxCost') maxCost?: string,
+    // 04.11.2026: переключатель фильтра «за год / за семестр» в кабинете.
+    @Query('costPeriod') costPeriod?: CostPeriod,
     @Query('search') search?: string,
   ) {
-    const where: any = { published: true, deletedAt: null };
+    const where: any = {
+      published: true,
+      deletedAt: null,
+      ...priceRangeWhere(minCost, maxCost, costPeriod),
+    };
     if (city) where.city = containsInsensitive(city);
     if (major) where.major = containsInsensitive(major);
     if (direction) where.direction = direction;
-    if (minCost || maxCost) {
-      where.cost = {};
-      if (minCost) where.cost.gte = Number(minCost);
-      if (maxCost) where.cost.lte = Number(maxCost);
-    }
     if (search) {
       where.OR = [
         { name: containsInsensitive(search) },

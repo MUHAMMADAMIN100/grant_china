@@ -9,7 +9,10 @@ export interface Program {
   city: string;
   major: string;
   direction: Direction;
-  cost: number;
+  /** Цена за год; null — не указана. Обязательна хотя бы одна из двух цен (04.11.2026). */
+  cost: number | null;
+  /** Цена за 1 семестр, в той же валюте; null — не указана. */
+  semesterCost: number | null;
   currency: string;
   duration: string | null;
   language: string | null;

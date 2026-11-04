@@ -623,7 +623,12 @@ model Program {
   city              String
   major             String
   direction         Direction
-  cost              Float
+  // 04.11.2026 — цена за год и цена за 1 семестр (валюта общая). Обязательна
+  // хотя бы одна из двух: программа «1 semester» хранит только semesterCost,
+  // поэтому cost стал необязательным (null — «цена за год не указана»).
+  // Проверка «хотя бы одна» — в programs.service (assertPrices).
+  cost              Float?
+  semesterCost      Float?
   currency          String    @default("CNY")
   duration          String?
   language          String?

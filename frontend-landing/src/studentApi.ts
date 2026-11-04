@@ -235,7 +235,10 @@ export interface StudentProgram {
   city: string;
   major: string;
   direction: 'BACHELOR' | 'MASTER' | 'LANGUAGE';
-  cost: number;
+  /** Цена за год; null — не указана. Хотя бы одна из двух цен есть всегда (04.11.2026). */
+  cost: number | null;
+  /** Цена за 1 семестр в той же валюте; null — не указана. */
+  semesterCost: number | null;
   currency: string;
   duration: string | null;
   language: string | null;
@@ -245,12 +248,16 @@ export interface StudentProgram {
   createdAt: string;
 }
 
+/** По какой цене ищет фильтр «Цена от — до». */
+export type CostPeriod = 'year' | 'semester';
+
 export async function listStudentPrograms(filters: {
   city?: string;
   major?: string;
   direction?: string;
   minCost?: number;
   maxCost?: number;
+  costPeriod?: CostPeriod;
   search?: string;
 } = {}) {
   const { data } = await client.get<StudentProgram[]>('/student-auth/programs', { params: filters });

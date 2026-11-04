@@ -785,6 +785,26 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   margin-top: auto;
 }
 .program-card-cost span { font-size: 12px; color: var(--text-soft); font-weight: 500; }
+/* 04.11.2026 — цена за год и/или за семестр: каждая своей строкой. */
+.program-card-price + .program-card-price { margin-top: 2px; }
+
+/* Форма программы: цена за год, за семестр и общая валюта одним рядом,
+   под ними — подсказка «достаточно одной» или ошибка «нет ни одной». */
+.program-prices {
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: 1fr 1fr 1fr; column-gap: 16px;
+  margin-bottom: 16px;
+}
+.program-prices > .form-group { margin-bottom: 0; }
+.program-prices-note { grid-column: 1 / -1; margin-top: 6px; }
+.program-prices-note .form-error-text { margin-top: 0; }
+.program-prices-hint { font-size: 12px; color: var(--text-soft); }
+@media (max-width: 900px) {
+  /* Телефон/планшет: две цены рядом, подсказка сразу под ними, валюта ниже. */
+  .program-prices { grid-template-columns: 1fr 1fr; row-gap: 12px; }
+  .program-prices-note { order: 1; margin-top: -6px; }
+  .program-prices > .form-group:nth-child(3) { grid-column: 1 / -1; order: 2; }
+}
 .program-card-draft {
   background: #fef2f2; color: var(--danger); font-size: 11px;
   padding: 3px 8px; border-radius: 4px; font-weight: 600;
