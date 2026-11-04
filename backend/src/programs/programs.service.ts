@@ -12,6 +12,32 @@ import { FileResolverService } from '../files/file-resolver.service';
 
 type CurrentUser = { id: string; role: Role };
 
+/** Пределы Telegram: подпись под фото — 1024 знака, текстовое сообщение — 4096. */
+const CAPTION_LIMIT = 1024;
+const TEXT_LIMIT = 4096;
+const NEW_HEADER = '🎓 *Новая программа в GrantChina*';
+const UPDATED_HEADER = '🎓 *Программа GrantChina*';
+
+/**
+ * Сколько знаков насчитает Telegram: разметка Markdown (`*`, `_`, `` ` ``) и
+ * экранирующие `\` в подсчёт не входят, считаются UTF-16-единицы — как длина
+ * строки в JS (эмодзи — две).
+ */
+export function telegramLength(markdown: string): number {
+  let n = 0;
+  for (let i = 0; i < markdown.length; i++) {
+    const ch = markdown[i];
+    if (ch === '\\' && i + 1 < markdown.length) {
+      n += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === '*' || ch === '_' || ch === '`') continue;
+    n += 1;
+  }
+  return n;
+}
+
 const DIRECTION_LABEL: Record<Direction, string> = {
   BACHELOR: 'Бакалавриат',
   MASTER: 'Магистратура',
@@ -194,7 +220,8 @@ export class ProgramsService {
     };
   }
 
-  private buildCaption(program: Program, header = '🎓 *Новая программа в GrantChina*'): string {
+  /** Карточка программы без описания: заголовок, вуз, город, стоимость. */
+  private buildCard(program: Program, header: string): string {
     return (
       `${header}\n\n` +
       `📚 *${this.escape(program.name)}*\n` +
@@ -203,9 +230,26 @@ export class ProgramsService {
       `🎯 ${this.escape(program.major)} · ${DIRECTION_LABEL[program.direction]}\n` +
       (program.duration ? `⏱ ${this.escape(program.duration)}\n` : '') +
       (program.language ? `🌐 ${this.escape(program.language)}\n` : '') +
-      `\n💰 Стоимость: *${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год\n` +
-      (program.description ? `\n${this.escape(program.description.slice(0, 600))}` : '')
+      `\n💰 Стоимость: *${program.cost.toLocaleString('ru-RU')} ${program.currency}* / год`
     );
+  }
+
+  /**
+   * Пост программы в канале: `first` — фото с подписью (или текст, если фото нет),
+   * `second` — полное описание отдельным сообщением, когда оно не влезает в первое.
+   *
+   * 04.11.2026: раньше описание просто обрезалось до 600 знаков, чтобы подпись
+   * под фото не превысила лимит Telegram (1024), — и клиенты видели пост,
+   * оборванный на полуслове («Загранпаспорт и фотог»). Теперь текст не теряется.
+   */
+  private buildPost(program: Program, asPhoto: boolean, header: string): { first: string; second: string | null } {
+    const card = this.buildCard(program, header);
+    const description = program.description?.trim();
+    if (!description) return { first: card, second: null };
+    const full = `${card}\n\n${this.escape(description)}`;
+    const limit = asPhoto ? CAPTION_LIMIT : TEXT_LIMIT;
+    if (telegramLength(full) <= limit) return { first: full, second: null };
+    return { first: card, second: this.escape(description) };
   }
 
   private buildPhotoUrl(program: Program): string | null {
@@ -215,87 +259,107 @@ export class ProgramsService {
     return publicBase ? `${publicBase}${program.imageUrl}` : null;
   }
 
-  private async notifyChannelNew(program: Program) {
-    if (!program.published) return;
-    const caption = this.buildCaption(program);
+  /**
+   * Опубликовать пост программы: фото с подписью (или текст) и, если описание
+   * не влезло, полное описание вторым сообщением сразу под ним. Id обоих
+   * сообщений сохраняются, чтобы потом править и снимать их вместе.
+   */
+  private async publishPost(program: Program, header: string) {
     const photoUrl = this.buildPhotoUrl(program);
+    const post = this.buildPost(program, !!photoUrl, header);
 
     let messageId: number | null = null;
     let hasPhoto = false;
-
     if (photoUrl) {
-      const res = await this.telegram.sendPhotoToChannel(photoUrl, caption);
+      const res = await this.telegram.sendPhotoToChannel(photoUrl, post.first);
       if (res) {
         messageId = res.messageId;
         hasPhoto = res.hasPhoto;
       }
     } else {
-      messageId = await this.telegram.sendToChannel(caption);
-      hasPhoto = false;
+      messageId = await this.telegram.sendToChannel(post.first);
     }
 
-    if (messageId) {
-      await this.prisma.program.update({
-        where: { id: program.id },
-        data: { telegramMessageId: messageId, telegramHasPhoto: hasPhoto },
-      });
-    }
+    const textId = messageId && post.second ? await this.telegram.sendToChannel(post.second) : null;
+    // Не ушло — id обнуляем: следующее сохранение программы опубликует пост заново.
+    await this.prisma.program.update({
+      where: { id: program.id },
+      data: { telegramMessageId: messageId, telegramHasPhoto: hasPhoto, telegramTextMessageId: textId },
+    });
+  }
+
+  private async notifyChannelNew(program: Program) {
+    if (!program.published) return;
+    await this.publishPost(program, NEW_HEADER);
   }
 
   private async notifyChannelUpdate(program: Program, imageChanged: boolean) {
     if (!program.telegramMessageId) return;
-    const caption = this.buildCaption(program, '🎓 *Программа GrantChina*');
-    const photoUrl = this.buildPhotoUrl(program);
+    // Лимит считаем по тому, чем первое сообщение уже является: подпись под фото или текст.
+    const post = this.buildPost(program, program.telegramHasPhoto, UPDATED_HEADER);
+    const layoutChanged = !!program.telegramTextMessageId !== !!post.second;
 
-    // Если картинка не менялась — просто обновляем подпись/текст и выходим.
-    // editMessageMedia с тем же URL Telegram ругает "message is not modified".
-    if (!imageChanged) {
-      if (program.telegramHasPhoto) {
-        await this.telegram.editChannelCaption(program.telegramMessageId, caption);
-      } else {
-        await this.telegram.editChannelText(program.telegramMessageId, caption);
-      }
-      return;
+    // Картинка поменялась или пост надо разбить на два / собрать в один —
+    // надёжнее пересоздать (editMessageMedia плохо переносит смену фото↔текст).
+    if (imageChanged || layoutChanged) {
+      if (await this.repostChannel(program, UPDATED_HEADER, imageChanged)) return;
     }
 
-    // Картинка поменялась. Самый надёжный путь — удалить старое сообщение и
-    // отправить новое (Telegram editMessageMedia плохо работает с разной
-    // топологией: текст<->фото, подмена URL, etc.). Сохраняем новый messageId.
-    await this.repostChannel(program, caption, photoUrl);
+    // Иначе правим на месте. editMessageMedia с тем же URL Telegram ругает
+    // «message is not modified», поэтому меняем только подпись/текст.
+    if (program.telegramHasPhoto) {
+      await this.telegram.editChannelCaption(program.telegramMessageId, post.first);
+    } else {
+      await this.telegram.editChannelText(program.telegramMessageId, post.first);
+    }
+    await this.syncDescriptionMessage(program, post.second);
   }
 
-  private async repostChannel(program: Program, caption: string, photoUrl: string | null) {
-    if (!program.telegramMessageId) return;
-    await this.telegram.deleteChannelMessage(program.telegramMessageId);
-
-    let newId: number | null = null;
-    let hasPhoto = false;
-    if (photoUrl) {
-      const res = await this.telegram.sendPhotoToChannel(photoUrl, caption);
-      if (res) {
-        newId = res.messageId;
-        hasPhoto = res.hasPhoto;
+  /** Второе сообщение (полное описание): поправить, дослать или убрать. */
+  private async syncDescriptionMessage(program: Program, second: string | null) {
+    const id = program.telegramTextMessageId;
+    if (second) {
+      if (id) {
+        await this.telegram.editChannelText(id, second);
+        return;
       }
-    } else {
-      newId = await this.telegram.sendToChannel(caption);
-      hasPhoto = false;
+      const newId = await this.telegram.sendToChannel(second);
+      if (newId) await this.prisma.program.update({ where: { id: program.id }, data: { telegramTextMessageId: newId } });
+      return;
     }
+    if (!id) return;
+    if (!(await this.telegram.deleteChannelMessage(id))) {
+      await this.telegram.editChannelText(id, '⬆️ Описание программы — в посте выше.');
+    }
+    await this.prisma.program.update({ where: { id: program.id }, data: { telegramTextMessageId: null } });
+  }
 
-    if (newId) {
-      await this.prisma.program.update({
-        where: { id: program.id },
-        data: { telegramMessageId: newId, telegramHasPhoto: hasPhoto },
-      });
+  /**
+   * Удалить старый пост и опубликовать заново. Telegram не даёт удалять
+   * сообщения старше 48 часов — тогда false: смена картинки всё равно
+   * публикует новый пост (как раньше), а смену разбивки вызывающий делает
+   * правкой на месте, без дубля в канале.
+   */
+  private async repostChannel(program: Program, header: string, imageChanged: boolean): Promise<boolean> {
+    if (!program.telegramMessageId) return false;
+    const deleted = await this.telegram.deleteChannelMessage(program.telegramMessageId);
+    if (!deleted && !imageChanged) return false;
+    if (program.telegramTextMessageId && !(await this.telegram.deleteChannelMessage(program.telegramTextMessageId))) {
+      await this.telegram.editChannelText(program.telegramTextMessageId, '⬇️ Программа обновлена — актуальный пост ниже.');
     }
+    await this.publishPost(program, header);
+    return true;
   }
 
   private async notifyChannelDelete(program: Program) {
     if (!program.telegramMessageId) return;
+    // Не получилось удалить (старше 48 часов / нет прав) — помечаем пост
+    const cancelled = `~${this.escape(program.name)}~\n\n❌ *Программа снята с публикации*`;
+    if (program.telegramTextMessageId && !(await this.telegram.deleteChannelMessage(program.telegramTextMessageId))) {
+      await this.telegram.editChannelText(program.telegramTextMessageId, cancelled);
+    }
     const ok = await this.telegram.deleteChannelMessage(program.telegramMessageId);
     if (ok) return;
-    // Не получилось удалить (старше 48 часов / нет прав) — помечаем пост
-    const cancelled =
-      `~${this.escape(program.name)}~\n\n❌ *Программа снята с публикации*`;
     if (program.telegramHasPhoto) {
       await this.telegram.editChannelCaption(program.telegramMessageId, cancelled);
     } else {

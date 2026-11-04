@@ -632,6 +632,10 @@ model Program {
   published         Boolean   @default(true)
   telegramMessageId Int?
   telegramHasPhoto  Boolean   @default(false)
+  // 04.11.2026 — подпись под фото в Telegram ограничена 1024 знаками. Если
+  // описание с карточкой не влезает, полный текст уходит вторым постом сразу
+  // под фото; здесь его id, чтобы править и снимать вместе с первым.
+  telegramTextMessageId Int?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
