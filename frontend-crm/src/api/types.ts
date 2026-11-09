@@ -357,6 +357,9 @@ export interface Task {
   dueDate: string | null;
   /** Ключ идемпотентности автозадач ('consultation-followup:<id>' и т.п.). null у ручных задач. */
   originKey: string | null;
+  /** 09.11.2026 — задача по заявке (воронка). null — общая задача. */
+  applicationId?: string | null;
+  application?: { id: string; fullName: string; status: ApplicationStatus } | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -50,6 +50,7 @@ export default function Sidebar() {
   const links = [
     { to: '/dashboard', icon: 'dashboard', label: 'Дашборд' },
     { to: '/applications', icon: 'assignment', label: 'Заявки' },
+    { to: '/funnel', icon: 'view_kanban', label: 'Воронка' },
     { to: '/consultations', icon: 'record_voice_over', label: 'Консультации' },
     { to: '/students', icon: 'school', label: 'Студенты' },
     // 29.09.2026 — архив студентов: все роли, менеджер видит там только своих.

@@ -33,15 +33,18 @@ export class TasksController {
     @Query('dueFrom') dueFrom?: string,
     @Query('dueTo') dueTo?: string,
     @Query('overdue') overdue?: string,
+    @Query('applicationId') applicationId?: string,
   ) {
     return this.tasks.findAll({
       mine: mine === 'true',
       currentUserId: user.id,
       role: user.role,
+      region: user.region,
       search,
       dueFrom: dueFrom ? new Date(dueFrom) : undefined,
       dueTo: dueTo ? new Date(dueTo) : undefined,
       overdue: overdue === 'true',
+      applicationId: applicationId || undefined,
     });
   }
 

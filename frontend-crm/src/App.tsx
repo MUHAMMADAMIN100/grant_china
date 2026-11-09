@@ -22,6 +22,7 @@ import ProtectedRoute from './components/ProtectedRoute';
  */
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Applications = lazy(() => import('./pages/Applications'));
+const Funnel = lazy(() => import('./pages/Funnel'));
 const ApplicationDetail = lazy(() => import('./pages/ApplicationDetail'));
 const Consultations = lazy(() => import('./pages/Consultations'));
 const Students = lazy(() => import('./pages/Students'));
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/applications" element={<Applications />} />
+        <Route path="/funnel" element={<Funnel />} />
         <Route path="/applications/:id" element={<ApplicationDetail />} />
         {/* ТЗ 3.2 — доступна всем ролям, видимость (свои/все консультации)
             режется внутри ConsultationsService, как /finance и /dashboard. */}

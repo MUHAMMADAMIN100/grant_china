@@ -3363,3 +3363,179 @@ select.input-error {
   .chat-textarea-box { flex-basis: 100%; }
   .chat-location-map { height: 260px; }
 }
+
+/* ===== 09.11.2026 — «Воронка»: доска заявок по этапам ===== */
+.fn-page { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.fn-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.fn-title { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.fn-total { color: var(--text-soft); font-size: 13px; }
+.fn-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.fn-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.fn-search {
+  flex: 1 1 240px; min-width: 200px; display: flex; align-items: center; gap: 8px;
+  padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card);
+  color: var(--text-light);
+}
+.fn-search:focus-within { border-color: var(--primary); }
+.fn-search input { flex: 1; border: none; outline: none; padding: 9px 0; font: inherit; font-size: 14px; background: none; color: var(--text); min-width: 0; }
+.fn-seg { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-card); }
+.fn-seg button { padding: 6px 12px; border-radius: 7px; font-size: 13px; color: var(--text-soft); display: inline-flex; align-items: center; white-space: nowrap; }
+.fn-seg button:hover { color: var(--text); background: var(--bg); }
+.fn-seg button.on { background: var(--primary); color: #fff; font-weight: 600; }
+.fn-view button { padding: 5px 8px; }
+.fn-filter-btn.active { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.fn-filters { display: flex; gap: 10px; flex-wrap: wrap; overflow: hidden; }
+.fn-filters select {
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px;
+  background: var(--bg-card); min-width: 180px;
+}
+.fn-hint { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-soft); }
+
+.fn-board {
+  display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px;
+  align-items: flex-start; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+}
+.fn-col {
+  flex: 0 0 272px; display: flex; flex-direction: column;
+  background: #eef1f6; border: 1px solid transparent; border-radius: 12px;
+  max-height: calc(100vh - 270px); min-height: 220px;
+  transition: background .12s, border-color .12s;
+}
+.fn-col.over { background: var(--primary-soft); border-color: var(--primary); border-style: dashed; }
+.fn-col-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 12px 9px; border-top: 3px solid; border-radius: 12px 12px 0 0;
+}
+.fn-col-title { font-weight: 700; font-size: 13.5px; line-height: 1.25; }
+.fn-col-count { flex: none; min-width: 26px; padding: 1px 8px; border-radius: 10px; background: var(--bg-card); font-size: 12px; font-weight: 700; color: var(--text-soft); text-align: center; }
+.fn-col-body { flex: 1; overflow-y: auto; padding: 2px 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.fn-col-empty { padding: 26px 10px; text-align: center; font-size: 12.5px; color: var(--text-light); border: 1px dashed #cfd5e1; border-radius: 10px; }
+.fn-col-more { font-size: 12px; color: var(--text-soft); text-align: center; padding: 6px; }
+
+.fn-card {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 11px; display: flex; flex-direction: column; gap: 6px;
+  box-shadow: var(--shadow); cursor: grab; user-select: none;
+  transition: box-shadow .12s, transform .12s, opacity .12s;
+}
+.fn-card:hover { box-shadow: 0 4px 14px rgba(15, 19, 32, .09); border-color: #d3d9e4; }
+.fn-card:active { cursor: grabbing; }
+.fn-card.dragging { opacity: .45; transform: rotate(1.5deg); }
+.fn-card.locked { cursor: pointer; }
+.fn-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fn-avatar {
+  flex: none; width: 28px; height: 28px; border-radius: 50%; color: #fff;
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+.fn-avatar-sm { width: 22px; height: 22px; font-size: 9.5px; }
+.fn-card-name {
+  font-weight: 600; font-size: 14px; line-height: 1.25; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.fn-card-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); min-width: 0; }
+.fn-card-row > span:not(.fn-avatar):not(.fn-tag):not(.fn-free) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fn-card-soft { color: var(--text-soft); justify-content: space-between; }
+.fn-tag { padding: 0 6px; border-radius: 5px; background: var(--warning-soft); color: #b45309; font-size: 11px; font-weight: 600; }
+.fn-free { color: var(--text-light); display: inline-flex; }
+.fn-reason {
+  font-size: 12px; color: var(--danger); background: var(--danger-soft); border-radius: 6px; padding: 4px 7px;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.fn-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); cursor: default; }
+.fn-tasks {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 7px;
+  font-size: 12px; color: var(--text-soft); background: var(--bg); border: 1px solid var(--border);
+}
+.fn-tasks b { font-weight: 700; }
+.fn-tasks:hover { border-color: var(--text-light); color: var(--text); }
+.fn-tasks.open { color: var(--info); background: var(--info-soft); border-color: #bfdbfe; }
+.fn-tasks.overdue { color: #fff; background: var(--danger); border-color: var(--danger); }
+.fn-card-actions { display: inline-flex; align-items: center; gap: 2px; }
+.fn-icon {
+  position: relative; width: 30px; height: 30px; border-radius: 8px; color: var(--text-soft);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.fn-icon:hover { background: var(--bg); color: var(--primary); }
+.fn-move select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
+.fn-move:focus-within { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+.fn-list-card { overflow: hidden; }
+.fn-row-name { font-weight: 600; }
+.fn-row-sub { font-size: 12px; color: var(--text-soft); }
+.fn-stage { display: inline-block; padding: 2px 9px; border: 1px solid; border-radius: 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.fn-tasks-plain { font-weight: 700; }
+.fn-tasks-plain.overdue { color: var(--danger); }
+.fn-table td { white-space: nowrap; }
+.fn-table td:first-child { white-space: normal; min-width: 180px; }
+
+.fn-dialog { max-width: 480px; text-align: left; }
+.fn-tasks-dialog { max-width: 560px; }
+.fn-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.fn-dialog-text { color: var(--text-soft); font-size: 13.5px; margin-bottom: 14px; }
+.fn-open-app { display: inline-flex; align-items: center; gap: 4px; margin-top: 14px; color: var(--primary); font-weight: 600; font-size: 14px; }
+.fn-label-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.fn-label-row input { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; min-width: 0; }
+.fn-label-row input:focus { outline: none; border-color: var(--primary); }
+.fn-label-num { flex: none; width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.fn-label-count { flex: none; min-width: 28px; text-align: right; font-size: 12px; color: var(--text-soft); }
+
+/* Задачи по заявке (окно воронки и карточка заявки) */
+.app-tasks { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.app-task-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.app-task { display: flex; gap: 10px; align-items: flex-start; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-card); }
+.app-task input[type="checkbox"] { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--success); flex: none; cursor: pointer; }
+.app-task input[type="checkbox"]:disabled { cursor: not-allowed; }
+.app-task-body { min-width: 0; flex: 1; }
+.app-task-title { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.app-task-desc { font-size: 13px; color: var(--text-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-task-meta { display: flex; flex-wrap: wrap; gap: 4px; font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+.app-task-due { display: inline-flex; align-items: center; gap: 3px; }
+.app-task.overdue { border-color: #fecaca; background: var(--danger-soft); }
+.app-task.overdue .app-task-due { color: var(--danger); font-weight: 600; }
+.app-task.done .app-task-title { text-decoration: line-through; color: var(--text-soft); }
+.app-tasks-empty { font-size: 13px; color: var(--text-soft); padding: 4px 0; }
+.app-tasks-toggle { align-self: flex-start; font-size: 12.5px; color: var(--text-soft); text-decoration: underline; padding: 0; }
+.app-task-form { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.app-task-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.app-task-quick .conv-chip { flex: 0 0 auto; padding: 5px 12px; }
+.app-task-form > input, .app-task-form > textarea, .app-task-form-row input, .app-task-form-row select {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; background: var(--bg-card);
+}
+.app-task-form > textarea { resize: vertical; }
+.app-task-form > input:focus, .app-task-form > textarea:focus, .app-task-form-row input:focus, .app-task-form-row select:focus { outline: none; border-color: var(--primary); }
+.app-task-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.app-task-form-row label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-soft); font-weight: 500; }
+.app-task-form > .btn { align-self: flex-start; }
+
+@media (max-width: 720px) {
+  .fn-title { font-size: 19px; }
+  .fn-hero { align-items: flex-start; }
+  .fn-hero-actions { width: 100%; }
+  .fn-hero-actions .btn { flex: 1 1 auto; justify-content: center; padding: 9px 10px; }
+  .fn-search { flex-basis: 100%; }
+  .fn-seg:not(.fn-view) { flex: 1 1 100%; }
+  .fn-seg:not(.fn-view) button { flex: 1; justify-content: center; padding: 6px 4px; }
+  .fn-filter-btn { flex: 1; justify-content: center; }
+  .fn-filters select { flex: 1 1 100%; min-width: 0; }
+  .fn-hint { display: none; }
+  .fn-board { scroll-snap-type: x mandatory; margin: 0 -10px; padding: 0 10px 10px; scroll-padding: 0 10px; }
+  .fn-col { flex-basis: 84vw; max-width: 300px; scroll-snap-align: start; max-height: calc(100vh - 300px); }
+  .fn-card { cursor: pointer; }
+  .fn-icon { width: 34px; height: 34px; }
+  .app-task-form-row { grid-template-columns: 1fr; }
+}
+
+.task-app-link { color: var(--primary); }
+.task-app-link:hover { text-decoration: underline; }
+
+/* Полоса «Отказ» внизу экрана, пока карточку тащат */
+.fn-dropbar {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: min(560px, calc(100vw - 32px)); padding: 18px;
+  border: 2px dashed var(--danger); border-radius: 14px;
+  background: rgba(254, 242, 242, .97); color: var(--danger); font-weight: 700; font-size: 15px;
+  box-shadow: 0 12px 30px rgba(15, 19, 32, .18);
+}
+.fn-dropbar.over { background: var(--danger); color: #fff; border-style: solid; }
+.fn-dropbar > * { pointer-events: none; }

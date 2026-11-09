@@ -17,6 +17,7 @@ import ApplicationFormSection from '../components/ApplicationFormSection';
 import BackButton from '../components/BackButton';
 import CommentsFeed from '../components/CommentsFeed';
 import CallsCard from '../components/CallsCard';
+import ApplicationTasks from '../components/ApplicationTasks';
 import ContractStatusBadge from '../components/ContractStatusBadge';
 import ContractFormModal from '../components/ContractFormModal';
 import Icon from '../Icon';
@@ -807,6 +808,19 @@ export default function ApplicationDetail() {
             комментариев и вне блока `student &&`: звонить начинают ещё до
             того, как заявка превратилась в карточку студента. */}
         <CallsCard applicationId={app.id} phone={app.phone} canEdit={canAct} />
+
+        {/* 09.11.2026 — задачи по заявке: те же, что в окне «Задачи» на карточке воронки. */}
+        {canAct && (
+          <div className="sub-card">
+            <div className="sub-card-header">
+              <div className="sub-card-title">
+                <Icon name="event" size={18} style={{ marginRight: 6 }} />
+                Задачи
+              </div>
+            </div>
+            <ApplicationTasks applicationId={app.id} />
+          </div>
+        )}
 
         <CommentsFeed applicationId={app.id} canAdd={canAct} />
       </div>

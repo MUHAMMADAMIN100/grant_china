@@ -286,6 +286,9 @@ model Application {
   // ТЗ 6.4 (волна 8) — диалоги мессенджеров, привязанные к этой заявке.
   conversations Conversation[]
 
+  // 09.11.2026 — задачи по заявке (воронка).
+  tasks Task[]
+
   // ВЕХА «ЛИД ОБРАБОТАН» (метрика ТЗ 5.1). Денормализованные поля, а не
   // вычисление из ActivityLog: журнал НЕ содержит applicationId (STATUS_CHANGE
   // пишет только studentId, а у заявки без студента он null), парсинг
@@ -606,6 +609,12 @@ model Task {
   // Обратная сторона 1:1 связи с консультацией (FK живёт на Consultation).
   consultation Consultation? @relation("ConsultationFollowUpTask")
 
+  // 09.11.2026 — задача по заявке («перезвонить», «встреча», «документы»):
+  // ставится из воронки и из карточки заявки, счётчик открытых — на карточке
+  // воронки. Необязательная: у прежних задач заявки нет.
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
   @@index([assignedToId])
   @@index([status])
   @@index([deletedAt])
@@ -614,6 +623,8 @@ model Task {
   // Планировщик и общий список «ближайшие сроки»:
   // WHERE deletedAt IS NULL AND dueDate <= ? ORDER BY dueDate.
   @@index([deletedAt, dueDate])
+  // Счётчик открытых задач на карточках воронки.
+  @@index([applicationId, status])
 }
 
 model Program {

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -115,6 +116,46 @@ export class ApplicationsController {
       to: parseDateParam(to),
       repeat: repeat === 'true',
     });
+  }
+
+  // 09.11.2026 — «Воронка»: доска заявок по этапам. Фильтры те же, что у
+  // списка (кроме этапа и вкладки — колонки и есть этапы). Объявлено ДО ':id'.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('board')
+  board(
+    @CurrentUser() user: any,
+    @Query('direction') direction?: Direction,
+    @Query('search') search?: string,
+    @Query('mine') mine?: string,
+    @Query('manager') manager?: string,
+    @Query('source') source?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.apps.board({
+      direction,
+      search,
+      mine: mine === 'true',
+      managerUserId: manager || undefined,
+      currentUserId: user?.id,
+      currentUserRole: user?.role,
+      currentUserRegion: user?.region,
+      source,
+      from: parseDateParam(from),
+      to: parseDateParam(to),
+    });
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('funnel-labels')
+  funnelLabels() {
+    return this.apps.funnelLabels();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Put('funnel-labels')
+  setFunnelLabels(@Body() body: Record<string, unknown>, @CurrentUser() user: any) {
+    return this.apps.setFunnelLabels(body, user);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

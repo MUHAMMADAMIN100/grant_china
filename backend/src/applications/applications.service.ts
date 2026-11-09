@@ -1114,4 +1114,138 @@ export class ApplicationsService implements OnModuleInit {
     ]);
     return { total, byStatus, byDirection, archived };
   }
+
+  // =========================================================== воронка (09.11.2026)
+
+  /**
+   * Доска «Воронка»: колонки — 6 этапов заявки и «Отказ» (заявки в архиве).
+   * Видимость и фильтры — те же, что у списка «Заявки» (buildFilterConditions):
+   * менеджер видит только свои заявки. Старые статусы IN_PROGRESS/COMPLETED
+   * ложатся в «Проверку документов» и «Зачислены», как их и показывает CRM.
+   * На карточке — открытые задачи по заявке (и просроченные) и чат, если он
+   * привязан. В колонке не больше FUNNEL_PER_COLUMN карточек, count — все.
+   */
+  async board(filters: Omit<ApplicationListFilters, 'status' | 'page' | 'pageSize'>) {
+    const base = this.buildFilterConditions(filters);
+    const columnWhere = (key: FunnelColumnKey): Prisma.ApplicationWhereInput =>
+      key === 'ARCHIVED'
+        ? { deletedAt: null, AND: [...base, { archivedAt: { not: null } }] }
+        : { deletedAt: null, AND: [...base, { archivedAt: null }, { status: { in: FUNNEL_STATUSES[key] } }] };
+    const columns = await Promise.all(
+      FUNNEL_COLUMNS.map(async (key) => {
+        const where = columnWhere(key);
+        const [items, count] = await this.prisma.$transaction([
+          this.prisma.application.findMany({
+            where,
+            orderBy: key === 'ARCHIVED' ? { archivedAt: 'desc' } : { createdAt: 'desc' },
+            take: FUNNEL_PER_COLUMN,
+            select: FUNNEL_CARD_SELECT,
+          }),
+          this.prisma.application.count({ where }),
+        ]);
+        return { key, count, items };
+      }),
+    );
+    const ids = columns.flatMap((c) => c.items.map((i) => i.id));
+    const now = new Date();
+    const openWhere: Prisma.TaskWhereInput = { applicationId: { in: ids }, deletedAt: null, status: { not: 'DONE' } };
+    const [open, overdue, convs] = ids.length
+      ? await Promise.all([
+          this.prisma.task.groupBy({ by: ['applicationId'], where: openWhere, _count: { _all: true } }),
+          this.prisma.task.groupBy({ by: ['applicationId'], where: { ...openWhere, dueDate: { lt: now } }, _count: { _all: true } }),
+          this.prisma.conversation.findMany({
+            where: { applicationId: { in: ids }, deletedAt: null },
+            select: { id: true, applicationId: true, channel: true },
+            orderBy: { lastMessageAt: 'desc' },
+          }),
+        ])
+      : [[], [], []];
+    const openBy = new Map(open.map((t) => [t.applicationId, t._count._all]));
+    const overdueBy = new Map(overdue.map((t) => [t.applicationId, t._count._all]));
+    const chatBy = new Map<string, { id: string; channel: string }>();
+    for (const c of convs) if (c.applicationId && !chatBy.has(c.applicationId)) chatBy.set(c.applicationId, { id: c.id, channel: c.channel });
+    const labels = await this.funnelLabels();
+    return {
+      columns: columns.map((c) => ({
+        key: c.key,
+        label: labels[c.key],
+        count: c.count,
+        items: c.items.map((a) => ({
+          ...a,
+          openTasks: openBy.get(a.id) ?? 0,
+          overdueTasks: overdueBy.get(a.id) ?? 0,
+          chat: chatBy.get(a.id) ?? null,
+        })),
+      })),
+    };
+  }
+
+  /** Подписи колонок воронки: свои (если руководство переименовало) поверх стандартных. */
+  async funnelLabels(): Promise<Record<FunnelColumnKey, string>> {
+    const row = await this.prisma.integrationState.findUnique({ where: { key: FUNNEL_LABELS_KEY } });
+    const saved = (row?.value ?? {}) as Partial<Record<FunnelColumnKey, string>>;
+    const out = { ...DEFAULT_FUNNEL_LABELS };
+    for (const key of FUNNEL_COLUMNS) if (typeof saved[key] === 'string' && saved[key]!.trim()) out[key] = saved[key]!.trim();
+    return out;
+  }
+
+  /** Переименовать колонки воронки — только Основатель и администратор. Пустая подпись = стандартная. */
+  async setFunnelLabels(labels: Record<string, unknown>, user: CurrentUser) {
+    if (!isPrivileged(user.role)) throw new ForbiddenException('Колонки воронки переименовывает руководство');
+    const value: Partial<Record<FunnelColumnKey, string>> = {};
+    for (const key of FUNNEL_COLUMNS) {
+      const v = labels?.[key];
+      if (v === undefined || v === null) continue;
+      if (typeof v !== 'string') throw new BadRequestException('Подпись колонки — текст');
+      const t = v.trim();
+      if (t.length > 40) throw new BadRequestException('Подпись колонки — не длиннее 40 знаков');
+      if (t && t !== DEFAULT_FUNNEL_LABELS[key]) value[key] = t;
+    }
+    await this.prisma.integrationState.upsert({
+      where: { key: FUNNEL_LABELS_KEY },
+      create: { key: FUNNEL_LABELS_KEY, value: value as Prisma.InputJsonValue },
+      update: { value: value as Prisma.InputJsonValue },
+    });
+    this.realtime.emitAllStaff('funnel:labels', {});
+    return this.funnelLabels();
+  }
 }
+
+/** 09.11.2026 — колонки воронки: этапы заявки по порядку и «Отказ» (архив). */
+export const FUNNEL_COLUMNS = ['NEW', 'DOCS_REVIEW', 'DOCS_SUBMITTED', 'PRE_ADMISSION', 'AWAITING_PAYMENT', 'ENROLLED', 'ARCHIVED'] as const;
+export type FunnelColumnKey = (typeof FUNNEL_COLUMNS)[number];
+const FUNNEL_STATUSES: Record<Exclude<FunnelColumnKey, 'ARCHIVED'>, ApplicationStatus[]> = {
+  NEW: [ApplicationStatus.NEW],
+  DOCS_REVIEW: [ApplicationStatus.DOCS_REVIEW, ApplicationStatus.IN_PROGRESS],
+  DOCS_SUBMITTED: [ApplicationStatus.DOCS_SUBMITTED],
+  PRE_ADMISSION: [ApplicationStatus.PRE_ADMISSION],
+  AWAITING_PAYMENT: [ApplicationStatus.AWAITING_PAYMENT],
+  ENROLLED: [ApplicationStatus.ENROLLED, ApplicationStatus.COMPLETED],
+};
+export const DEFAULT_FUNNEL_LABELS: Record<FunnelColumnKey, string> = {
+  NEW: 'Новые заявки',
+  DOCS_REVIEW: 'Проверка документов',
+  DOCS_SUBMITTED: 'Подача документов',
+  PRE_ADMISSION: 'Предварительное зачисление',
+  AWAITING_PAYMENT: 'Ожидание оплаты',
+  ENROLLED: 'Зачислены',
+  ARCHIVED: 'Отказ',
+};
+const FUNNEL_LABELS_KEY = 'funnelLabels';
+const FUNNEL_PER_COLUMN = 300;
+const FUNNEL_CARD_SELECT = {
+  id: true,
+  fullName: true,
+  phone: true,
+  direction: true,
+  status: true,
+  source: true,
+  sourceDetail: true,
+  createdAt: true,
+  archivedAt: true,
+  archiveReason: true,
+  studentId: true,
+  repeatOfId: true,
+  manager: { select: { id: true, fullName: true } },
+  chinaManager: { select: { id: true, fullName: true } },
+} satisfies Prisma.ApplicationSelect;

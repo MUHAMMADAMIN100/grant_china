@@ -9,6 +9,8 @@ export interface TaskFilters {
   dueTo?: string;
   /** true — только просроченные незакрытые (dueDate < now, status !== DONE). */
   overdue?: boolean;
+  /** 09.11.2026 — все задачи одной заявки (воронка, карточка заявки). */
+  applicationId?: string;
 }
 
 export async function listTasks(filters: TaskFilters = {}) {
@@ -19,6 +21,7 @@ export async function listTasks(filters: TaskFilters = {}) {
       dueFrom: filters.dueFrom || undefined,
       dueTo: filters.dueTo || undefined,
       overdue: filters.overdue ? 'true' : undefined,
+      applicationId: filters.applicationId || undefined,
     },
   });
   return data;
@@ -34,6 +37,8 @@ export async function createTask(payload: {
   description: string;
   assignedToId: string;
   dueDate?: string;
+  /** 09.11.2026 — задача по заявке: менеджер может поставить её себе. */
+  applicationId?: string;
 }) {
   const { data } = await api.post<Task>('/tasks', payload);
   return data;

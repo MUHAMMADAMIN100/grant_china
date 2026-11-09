@@ -9,6 +9,7 @@ import IncomingCallPopup from './IncomingCallPopup';
 const TITLES: Record<string, string> = {
   '/dashboard': 'Дашборд',
   '/applications': 'Заявки',
+  '/funnel': 'Воронка',
   '/consultations': 'Консультации',
   '/students': 'Студенты',
   '/archive': 'Архив',

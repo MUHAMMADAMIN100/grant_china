@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Role, TaskStatus } from '@prisma/client';
+import { Prisma, Region, Role, TaskStatus } from '@prisma/client';
 import { containsInsensitive } from '../common/search';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -10,12 +10,15 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ActivityService } from '../activity/activity.service';
 import { isPrivileged } from '../common/roles';
 import { notDeleted } from '../common/soft-delete';
+import { canAccessStudentRecord } from '../common/access';
 
-type CurrentUser = { id: string; role: Role };
+type CurrentUser = { id: string; role: Role; region?: Region };
 
 const TASK_INCLUDE = {
   assignedTo: { select: { id: true, fullName: true, email: true } },
   createdBy: { select: { id: true, fullName: true, email: true } },
+  // 09.11.2026 — заявка, к которой относится задача (воронка).
+  application: { select: { id: true, fullName: true, status: true } },
 } as const;
 
 /** Внутренний контракт для системных (авто-созданных) задач — см. createSystemTask(). */
@@ -38,11 +41,26 @@ export class TasksService {
     private activity: ActivityService,
   ) {}
 
+  /** Заявка, к которой привязывают задачу: существует и доступна сотруднику, иначе 404. */
+  private async accessibleApplication(applicationId: string, user: CurrentUser) {
+    const app = await this.prisma.application.findFirst({
+      where: { id: applicationId, deletedAt: null },
+      select: { id: true, fullName: true, studentId: true, managerId: true, chinaManagerId: true },
+    });
+    if (!app || !canAccessStudentRecord(app, user)) throw new NotFoundException('Заявка не найдена');
+    return app;
+  }
+
   async create(dto: CreateTaskDto, user: CurrentUser) {
+    // 09.11.2026 — задачу по заявке может поставить и менеджер — себе, по
+    // доступной ему заявке (из воронки: «перезвонить», «встреча»). Остальные
+    // задачи по-прежнему ставят только Основатель и администратор.
+    const application = dto.applicationId ? await this.accessibleApplication(dto.applicationId, user) : null;
     if (!isPrivileged(user.role)) {
-      throw new ForbiddenException('Только Основатель или администратор может создавать задачи');
+      if (!application) throw new ForbiddenException('Только Основатель или администратор может создавать задачи');
+      if (dto.assignedToId !== user.id) throw new ForbiddenException('Задачу по заявке менеджер ставит только себе');
     }
-    const assignee = await this.prisma.user.findUnique({ where: { id: dto.assignedToId } });
+    const assignee = await this.prisma.user.findFirst({ where: { id: dto.assignedToId, deletedAt: null } });
     if (!assignee) throw new NotFoundException('Сотрудник не найден');
 
     const task = await this.prisma.task.create({
@@ -52,6 +70,7 @@ export class TasksService {
         assignedToId: dto.assignedToId,
         createdById: user.id,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        applicationId: application?.id ?? null,
       },
       include: TASK_INCLUDE,
     });
@@ -93,7 +112,9 @@ export class TasksService {
         actorId: user.id,
         actorRole: user.role,
         action: 'TASK_CREATE',
-        details: `Создана задача «${task.title}» для ${assignee.fullName}`,
+        studentId: application?.studentId ?? null,
+        studentName: application?.fullName ?? null,
+        details: `Создана задача «${task.title}» для ${assignee.fullName}${application ? ` по заявке «${application.fullName}»` : ''}`,
       })
       .catch(() => undefined);
 
@@ -110,11 +131,20 @@ export class TasksService {
     dueTo?: Date;
     /** true — только просроченные незакрытые (dueDate < now, status !== DONE). */
     overdue?: boolean;
+    /** 09.11.2026 — задачи одной заявки (воронка, карточка заявки). */
+    applicationId?: string;
+    region?: Region;
   }) {
-    const baseWhere: any =
+    let baseWhere: any =
       isPrivileged(filters.role) && !filters.mine
         ? { ...notDeleted }
         : { assignedToId: filters.currentUserId, ...notDeleted };
+    // Задачи заявки видит каждый, кому доступна сама заявка, — все, а не только
+    // свои: менеджер должен видеть, что коллега уже назначил звонок.
+    if (filters.applicationId) {
+      await this.accessibleApplication(filters.applicationId, { id: filters.currentUserId, role: filters.role, region: filters.region });
+      baseWhere = { applicationId: filters.applicationId, ...notDeleted };
+    }
     const and: Prisma.TaskWhereInput[] = [];
     const search = (filters.search || '').trim();
     if (search) {

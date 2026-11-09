@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
 import { listUsers } from '../api/users';
 import type { Task, TaskStatus, User } from '../api/types';
@@ -489,6 +490,12 @@ export default function Tasks() {
                             <Icon name="edit" size={14} />
                             От: {t.createdBy.fullName}
                           </span>
+                        )}
+                        {t.application && (
+                          <Link className="task-meta-item task-app-link" to={`/applications/${t.application.id}`} onClick={(e) => e.stopPropagation()} title="Открыть заявку">
+                            <Icon name="assignment" size={14} />
+                            Заявка: {t.application.fullName}
+                          </Link>
                         )}
                         <span className="task-meta-item">
                           <Icon name="schedule" size={14} />

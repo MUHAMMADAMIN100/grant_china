@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   assignConversation,
@@ -172,6 +172,24 @@ export default function Conversations() {
   const stickRef = useRef(true);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
+
+  // 09.11.2026 — ссылка «открыть переписку» из воронки: /conversations?c=<id>.
+  // Открываем один раз и убираем параметр, чтобы «назад» к списку не открывал чат снова.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const c = searchParams.get('c');
+    if (!c) return;
+    setActiveId(c);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('c');
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const loadList = useCallback((opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);

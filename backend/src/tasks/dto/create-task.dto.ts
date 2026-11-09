@@ -20,4 +20,9 @@ export class CreateTaskDto {
   @IsOptional()
   @IsISO8601()
   dueDate?: string;
+
+  // 09.11.2026 — задача по заявке (из воронки или карточки заявки).
+  @IsOptional()
+  @IsString()
+  applicationId?: string;
 }
