@@ -13,5 +13,7 @@ import { FilesModule } from '../files/files.module';
   imports: [NotificationsModule, TelegramModule, MailModule, FilesModule],
   providers: [ApplicationsService],
   controllers: [ApplicationsController],
+  // 09.11.2026 — аналитика «Продажи» берёт названия колонок воронки.
+  exports: [ApplicationsService],
 })
 export class ApplicationsModule {}

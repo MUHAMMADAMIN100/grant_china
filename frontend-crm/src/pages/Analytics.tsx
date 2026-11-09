@@ -8,6 +8,10 @@ import { staggerContainer } from '../motion';
 import StatTile, { type StatDetail } from '../components/StatTile';
 import MonthlyChart, { plural } from '../components/MonthlyChart';
 import Icon from '../Icon';
+import { useSearchParams } from 'react-router-dom';
+import { useAuth } from '../store/auth';
+import { isPrivileged } from '../api/types';
+import SalesAnalyticsView from './SalesAnalytics';
 
 /**
  * Финансовая аналитика для руководства (ТЗ 2.6). Доступна только FOUNDER/ADMIN
@@ -125,7 +129,7 @@ function BarRow({ label, sub, amount, max }: { label: string; sub?: string; amou
   );
 }
 
-export default function Analytics() {
+function FinanceAnalytics() {
   const defaults = useMemo(
     () => ({
       preset: 'month',
@@ -536,5 +540,37 @@ export default function Analytics() {
         )}
       </div>
     </motion.div>
+  );
+}
+
+/**
+ * 09.11.2026 — «Аналитика» с вкладками: «Продажи» (новая, открывается первой,
+ * видна всем — менеджеру свои цифры) и «Финансы» (прежняя страница, только
+ * руководству — бэкенд /payments/analytics закрыт @Roles(FOUNDER, ADMIN)).
+ */
+export default function Analytics() {
+  const me = useAuth((s) => s.user);
+  const admin = isPrivileged(me?.role);
+  const [params, setParams] = useSearchParams();
+  const tab = admin && params.get('tab') === 'finance' ? 'finance' : 'sales';
+  // Параметры периода у вкладок свои — при переключении старые не тащим.
+  const go = (t: 'sales' | 'finance') => setParams(t === 'finance' ? { tab: 'finance' } : {}, { replace: true });
+  return (
+    <div className="sa-shell">
+      {/* Менеджеру доступна одна вкладка — полосу вкладок не показываем. */}
+      {admin && (
+      <div className="sa-tabs" role="tablist" aria-label="Разделы аналитики">
+        <button type="button" role="tab" aria-selected={tab === 'sales'} className={tab === 'sales' ? 'on' : ''} onClick={() => go('sales')} data-testid="an-tab-sales">
+          <Icon name="trending_up" size={18} /> Продажи
+        </button>
+        {admin && (
+          <button type="button" role="tab" aria-selected={tab === 'finance'} className={tab === 'finance' ? 'on' : ''} onClick={() => go('finance')} data-testid="an-tab-finance">
+            <Icon name="account_balance" size={18} /> Финансы
+          </button>
+        )}
+      </div>
+      )}
+      {tab === 'finance' ? <FinanceAnalytics /> : <SalesAnalyticsView />}
+    </div>
   );
 }

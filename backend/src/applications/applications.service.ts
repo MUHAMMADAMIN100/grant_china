@@ -1214,7 +1214,7 @@ export class ApplicationsService implements OnModuleInit {
 /** 09.11.2026 — колонки воронки: этапы заявки по порядку и «Отказ» (архив). */
 export const FUNNEL_COLUMNS = ['NEW', 'DOCS_REVIEW', 'DOCS_SUBMITTED', 'PRE_ADMISSION', 'AWAITING_PAYMENT', 'ENROLLED', 'ARCHIVED'] as const;
 export type FunnelColumnKey = (typeof FUNNEL_COLUMNS)[number];
-const FUNNEL_STATUSES: Record<Exclude<FunnelColumnKey, 'ARCHIVED'>, ApplicationStatus[]> = {
+export const FUNNEL_STATUSES: Record<Exclude<FunnelColumnKey, 'ARCHIVED'>, ApplicationStatus[]> = {
   NEW: [ApplicationStatus.NEW],
   DOCS_REVIEW: [ApplicationStatus.DOCS_REVIEW, ApplicationStatus.IN_PROGRESS],
   DOCS_SUBMITTED: [ApplicationStatus.DOCS_SUBMITTED],

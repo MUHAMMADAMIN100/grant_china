@@ -37,6 +37,7 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
 import { LeadSourcesModule } from './lead-sources/lead-sources.module';
 import { AiModule } from './ai/ai.module';
 import { MessagingModule } from './messaging/messaging.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 // Проблема E аудита: ServeStaticModule отдавал ВЕСЬ каталог /uploads (сканы
 // паспортов, BANK/MEDICAL справки, фото студентов) анониму без всякой
@@ -114,6 +115,7 @@ if (!UPLOADS_PROTECTED) {
     KnowledgeModule,
     AiModule,
     MessagingModule,
+    AnalyticsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
