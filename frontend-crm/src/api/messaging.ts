@@ -96,6 +96,22 @@ export interface ChannelMessage {
   contactReaction?: string | null;
   deletedByContactAt?: string | null;
   chatAttachments?: ChatAttachment[];
+  /** 09.11.2026 — метка временного сообщения: по ней оно заменяется настоящим, без дубля. */
+  clientId?: string | null;
+}
+
+/**
+ * 09.11.2026 — событие вебсокета `conversation:updated`. Для Instagram/WhatsApp
+ * сервер кладёт в него саму строку диалога и изменённые сообщения — их
+ * показываем сразу, без повторного запроса. Без них (Telegram, назначения) —
+ * только сигнал, CRM перезапрашивает сама.
+ */
+export interface ConversationUpdatedEvent {
+  id?: string;
+  inbound?: boolean;
+  assignedToId?: string | null;
+  conversation?: Conversation;
+  messages?: ChannelMessage[];
 }
 
 export interface ConversationsPage {
@@ -105,8 +121,14 @@ export interface ConversationsPage {
   pageSize: number;
 }
 
+/**
+ * 09.11.2026 — неподключённые мессенджеры сервер не отдаёт вовсе (ни в items,
+ * ни в meta). telegramMisconfigured — клиентский бот настроен не полностью.
+ */
 export async function listChannels() {
-  const { data } = await api.get<{ items: ChannelOption[]; telegramEnabled: boolean; meta?: MetaChannelStatus[] }>('/messaging/channels');
+  const { data } = await api.get<{ items: ChannelOption[]; telegramEnabled: boolean; telegramMisconfigured?: boolean; meta?: MetaChannelStatus[] }>(
+    '/messaging/channels',
+  );
   return data;
 }
 
@@ -147,8 +169,8 @@ export async function listConversationMessages(id: string, params: { page?: numb
 }
 
 /** Instagram / WhatsApp режут длинный текст на части — тогда сервер вернёт массив. */
-export async function sendConversationMessage(id: string, text: string) {
-  const { data } = await api.post<ChannelMessage | ChannelMessage[]>(`/messaging/conversations/${id}/messages`, { text });
+export async function sendConversationMessage(id: string, text: string, clientId?: string) {
+  const { data } = await api.post<ChannelMessage | ChannelMessage[]>(`/messaging/conversations/${id}/messages`, { text, clientId });
   return Array.isArray(data) ? data : [data];
 }
 

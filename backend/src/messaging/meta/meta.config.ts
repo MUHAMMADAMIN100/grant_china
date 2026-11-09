@@ -105,6 +105,9 @@ export const OUTGOING_LIMITS = {
   imageInstagram: 8 * MB,
   imageWhatsapp: 5 * MB,
   pdf: 25 * MB,
+  // 09.11.2026 — видео: пределы самих мессенджеров (Instagram — 25 МБ, WhatsApp — 16 МБ).
+  videoInstagram: 25 * MB,
+  videoWhatsapp: 16 * MB,
   voice: 10 * MB,
   voiceSeconds: 300,
 };

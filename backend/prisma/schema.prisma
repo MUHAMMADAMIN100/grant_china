@@ -2234,6 +2234,10 @@ model ChannelMessage {
   // интерфейс показывает «Сообщение удалено клиентом» без текста.
   deletedByContactAt DateTime?
   chatAttachments   ChatAttachment[]
+  // 09.11.2026 — метка, которую CRM даёт сообщению до отправки. По ней
+  // временное сообщение на экране заменяется настоящим, а не дублируется,
+  // в каком бы порядке ни пришли ответ сервера и событие вебсокета.
+  clientId          String?
 
   createdAt DateTime  @default(now())
   deletedAt DateTime?

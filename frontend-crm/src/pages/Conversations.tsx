@@ -20,6 +20,7 @@ import {
   type ChannelMessage,
   type ChannelOption,
   type Conversation,
+  type ConversationUpdatedEvent,
   type MetaChannelStatus,
 } from '../api/messaging';
 import { listApplications } from '../api/applications';
@@ -47,11 +48,45 @@ const errText = (e: any, fallback: string) => {
 };
 
 /** Сообщения по времени; временные (ещё не подтверждённые сервером) — в конце. */
+const STATUS_RANK: Record<string, number> = { SENDING: 0, SENT: 1, DELIVERED: 2, READ: 3 };
+
+/** Статус исходящего назад не идёт: запоздавшее «отправляется» не перетрёт «прочитано». */
+function newerOf(prev: ChannelMessage, next: ChannelMessage): ChannelMessage {
+  const a = prev.status;
+  const b = next.status;
+  if (a && b && a !== 'FAILED' && b !== 'FAILED' && (STATUS_RANK[b] ?? 0) < (STATUS_RANK[a] ?? 0)) return { ...next, status: a };
+  return next;
+}
+
+/**
+ * Слияние лент по id: более поздний список побеждает (кроме отката статуса).
+ * 09.11.2026 — временное сообщение (temp-…) убирается, как только пришло
+ * настоящее с той же clientId: так сообщение не задваивается, в каком бы
+ * порядке ни пришли ответ на отправку и событие вебсокета.
+ */
 function mergeMessages(...lists: ChannelMessage[][]): ChannelMessage[] {
   const byId = new Map<string, ChannelMessage>();
-  for (const list of lists) for (const m of list) byId.set(m.id, m);
-  return [...byId.values()].sort((a, b) => (a.sentAt === b.sentAt ? a.createdAt.localeCompare(b.createdAt) : a.sentAt.localeCompare(b.sentAt)));
+  for (const list of lists) {
+    for (const m of list) {
+      const prev = byId.get(m.id);
+      byId.set(m.id, prev ? newerOf(prev, m) : m);
+    }
+  }
+  const confirmed = new Set<string>();
+  byId.forEach((m) => {
+    if (!isTempId(m.id) && m.clientId) confirmed.add(m.clientId);
+  });
+  return [...byId.values()]
+    .filter((m) => !(isTempId(m.id) && m.clientId && confirmed.has(m.clientId)))
+    .sort((a, b) => (a.sentAt === b.sentAt ? a.createdAt.localeCompare(b.createdAt) : a.sentAt.localeCompare(b.sentAt)));
 }
+
+/** Список диалогов — свежие сверху, как отдаёт сервер. */
+const byLastMessage = (list: Conversation[]) => [...list].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+
+/** Метка временного сообщения (ChannelMessage.clientId). */
+const newClientId = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `c-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 /** Короткий сигнал о сообщении клиента (без файла-звука). */
 function beep() {
@@ -102,7 +137,8 @@ export default function Conversations() {
 
   const [channels, setChannels] = useState<ChannelOption[]>([]);
   const [metaStatus, setMetaStatus] = useState<MetaChannelStatus[]>([]);
-  const [telegramEnabled, setTelegramEnabled] = useState(true);
+  // 09.11.2026 — плашка про клиентского Telegram-бота только при неполной настройке.
+  const [telegramMisconfigured, setTelegramMisconfigured] = useState(false);
   const [items, setItems] = useState<Conversation[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -160,7 +196,7 @@ export default function Conversations() {
     listChannels()
       .then((res) => {
         setChannels(res.items);
-        setTelegramEnabled(res.telegramEnabled);
+        setTelegramMisconfigured(!!res.telegramMisconfigured);
         setMetaStatus(res.meta ?? []);
       })
       .catch(() => setChannels([]));
@@ -265,22 +301,59 @@ export default function Conversations() {
   };
 
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const threadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useRealtime({
-    'conversation:updated': (payload: { id?: string; inbound?: boolean; assignedToId?: string | null }) => {
+    'conversation:updated': (payload: ConversationUpdatedEvent) => {
       // Сигнал — сообщение клиента в свободном или моём чате, который я сейчас не смотрю.
       if (payload?.inbound && (!payload.assignedToId || payload.assignedToId === me?.id) && (payload.id !== activeIdRef.current || document.hidden)) beep();
+      const activeNow = activeIdRef.current;
+      const isActive = !!payload?.id && payload.id === activeNow;
+
+      // 09.11.2026 — Instagram/WhatsApp: строка диалога и сообщения уже в событии —
+      // показываем сразу, без пауз и повторных запросов.
+      const conv = payload?.conversation;
+      if (conv) {
+        setItems((prev) => (prev.some((c) => c.id === conv.id) ? byLastMessage(replaceById(prev, conv.id, conv)) : prev));
+        if (isActive && activeTouchedRef.current < Date.now() - 1500) setActive(conv);
+      }
+      if (isActive && payload.messages?.length) {
+        touch(payload.messages);
+        setMessages((prev) => mergeMessages(prev, payload.messages!));
+        if (payload.inbound && !document.hidden) {
+          markConversationRead(activeNow!)
+            .then((r) => setItems((prev) => prev.map((c) => (c.id === activeNow ? { ...c, unreadCount: r.unreadCount ?? 0 } : c))))
+            .catch(() => {});
+        }
+      }
+
+      // Список сверяем с сервером фоном: новый диалог, фильтры, счётчик.
+      // Строку, которая уже на экране, событие обновило выше — это не мигнёт.
       if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
       reloadTimerRef.current = setTimeout(() => {
         reloadTimerRef.current = null;
         loadList({ silent: true });
-        const id = activeIdRef.current;
-        if (payload?.id && payload.id === id) {
+      }, conv ? 1200 : 400);
+
+      // Событие без сообщений (Telegram, назначение, «взять себе») — ленту перезапрашиваем.
+      if (isActive && !payload.messages) {
+        if (threadTimerRef.current) clearTimeout(threadTimerRef.current);
+        threadTimerRef.current = setTimeout(() => {
+          threadTimerRef.current = null;
+          const id = activeIdRef.current;
+          if (!id || id !== payload.id) return;
           refreshThread(id);
           if (!document.hidden) markConversationRead(id).catch(() => {});
-        }
-      }, 400);
+        }, conv ? 0 : 300);
+      }
     },
   });
+  useEffect(
+    () => () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      if (threadTimerRef.current) clearTimeout(threadTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const q = linkQuery.trim();
@@ -332,12 +405,6 @@ export default function Conversations() {
     active: prev.active && prev.active.id === id ? { ...prev.active, ...patch } : prev.active,
   });
 
-  type SendPair = { messages: ChannelMessage[]; items: Conversation[] };
-  const commitSendTo = (conversationId: string) => (next: SendPair) => {
-    if (activeIdRef.current === conversationId) setMessages(next.messages);
-    setItems(next.items);
-  };
-
   /** Свободный чат Instagram/WhatsApp после ответа становится моим — показываем сразу. */
   const markTakenLocally = (id: string) => {
     if (!active || active.id !== id || !meta || active.assignedToId || !me) return;
@@ -371,6 +438,11 @@ export default function Conversations() {
       }
     }
     const sentAt = new Date().toISOString();
+    // 09.11.2026 — у временного сообщения метка clientId: настоящее приходит с
+    // ней же (в ответе или раньше — событием вебсокета) и встаёт на его место.
+    // Раньше настоящее подтягивалось по сигналу, пока временное ещё висело, —
+    // сообщение задваивалось, а через миг одна копия пропадала.
+    const clientId = newClientId();
     const pending: ChannelMessage = {
       id: tempId(),
       conversationId: id,
@@ -383,33 +455,31 @@ export default function Conversations() {
       sentAt,
       createdAt: sentAt,
       status: meta ? 'SENDING' : null,
+      clientId,
     };
     stickRef.current = true;
-    let ok = false;
-    await runOptimistic<SendPair, ChannelMessage[]>({
-      current: { messages, items },
-      optimistic: (prev) => ({
-        messages: [...prev.messages, pending],
-        items: replaceById(prev.items, id, { lastMessageText: text, lastMessageAt: sentAt }),
-      }),
-      commit: commitSendTo(id),
-      request: () => sendConversationMessage(id, text).then((msgs) => (touch(msgs), msgs)),
-      reconcile: (_prev, msgs) => ({
-        messages: mergeMessages(messagesRef.current.filter((m) => m.id !== pending.id), msgs),
-        items: replaceById(itemsRef.current, id, { lastMessageText: msgs[msgs.length - 1]?.text ?? text, lastMessageAt: msgs[msgs.length - 1]?.sentAt ?? sentAt }),
-      }),
-      onError: (message) => toast(message, 'error'),
-    }).then((r) => {
-      ok = !!r;
+    if (activeIdRef.current === id) setMessages((prev) => [...prev, pending]);
+    setItems((prev) => byLastMessage(replaceById(prev, id, { lastMessageText: text, lastMessageAt: sentAt })));
+    try {
+      const msgs = await sendConversationMessage(id, text, clientId);
+      touch(msgs);
+      if (activeIdRef.current === id) setMessages((prev) => mergeMessages(prev.filter((m) => m.id !== pending.id), msgs));
+      const last = msgs[msgs.length - 1];
+      setItems((prev) => replaceById(prev, id, { lastMessageText: last?.text ?? text, lastMessageAt: last?.sentAt ?? sentAt }));
       // Сервер принял, но Meta отказала — причина видна под сообщением, и всплывает подсказка.
-      const failed = r?.find((m) => m.status === 'FAILED');
+      const failed = msgs.find((m) => m.status === 'FAILED');
       if (failed) toast(FAILURE_TEXT[failed.error ?? ''] ?? 'Сообщение не ушло', 'error');
-    });
-    if (ok) {
       setEdit(null);
       markTakenLocally(id);
+      return true;
+    } catch (e) {
+      // Убираем только своё временное сообщение: всё, что за это время пришло
+      // по вебсокету, остаётся на месте (раньше лента откатывалась к снимку).
+      if (activeIdRef.current === id) setMessages((prev) => prev.filter((m) => m.id !== pending.id));
+      loadList({ silent: true });
+      toast(errText(e, 'Не удалось отправить'), 'error');
+      return false;
     }
-    return ok;
   };
 
   const sendWith = async (request: () => Promise<ChannelMessage>, failText: string): Promise<boolean> => {
@@ -566,13 +636,12 @@ export default function Conversations() {
         </div>
       )}
 
-      {!telegramEnabled && (
+      {isAdmin && telegramMisconfigured && (
         <div className="card-body" style={{ paddingBottom: 0 }}>
           <div className="kb-hint">
             <Icon name="info" size={18} />
             <div>
-              Клиентский Telegram-бот не подключён — задайте <code>TELEGRAM_CLIENT_BOT_TOKEN</code> и <code>TELEGRAM_CLIENT_WEBHOOK_SECRET</code> в
-              переменных окружения бэкенда.
+              Клиентский Telegram-бот настроен не полностью — задайте <code>TELEGRAM_CLIENT_WEBHOOK_SECRET</code> в переменных окружения бэкенда.
             </div>
           </div>
         </div>

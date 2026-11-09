@@ -70,12 +70,19 @@ export class MessagingController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('channels')
   async channels() {
-    const meta = await this.meta.channelStatus();
-    const items = CHANNELS.map((c) => {
+    const all = await this.meta.channelStatus();
+    // 09.11.2026 — неподключённый мессенджер (WhatsApp у GrantChina не нужен) не
+    // показываем вовсе: ни плашки «не подключён», ни пункта в фильтре каналов.
+    // Настроенный не полностью или с отказанным ключом — показываем: это сбой.
+    const hidden = new Set(all.filter((m) => m.state === 'NOT_CONFIGURED').map((m) => m.value as string));
+    const meta = all.filter((m) => !hidden.has(m.value));
+    const items = CHANNELS.filter((c) => !hidden.has(c.value)).map((c) => {
       const m = meta.find((x) => x.value === c.value);
       return m ? { ...c, outbound: m.enabled } : c;
     });
-    return { items, telegramEnabled: this.telegram.isEnabled(), meta };
+    // Плашку про клиентского Telegram-бота CRM показывает только при неполной
+    // настройке (ключ есть, секрета нет) — не подключён вовсе значит не нужен.
+    return { items, telegramEnabled: this.telegram.isEnabled(), telegramMisconfigured: this.telegram.isMisconfigured(), meta };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

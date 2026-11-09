@@ -25,6 +25,7 @@ import { classifyMetaError, MetaApiError, type MetaFailure } from './meta.http';
 import { InstagramApi, MetaTokensService, WhatsAppApi } from './meta.api';
 import { MetaMediaService, sniff } from './meta.media';
 import type { ChatEvent, IncomingAttachment } from './meta.parsers';
+import { CONVERSATION_INCLUDE } from '../conversation-include';
 
 type CurrentUser = { id: string; role: Role; region?: Region };
 
@@ -82,10 +83,14 @@ export function splitByBytes(text: string, limit: number): string[] {
   return parts;
 }
 
-/** Instagram мест не умеет: ему уходит текст с названием, адресом и ссылкой на карту. */
+/**
+ * Instagram мест не умеет: ему уходит текст с названием, адресом и ссылкой на
+ * карту (и отдельно картинка карты, см. sendLocation). 09.11.2026 — ссылка
+ * Google Maps: на телефоне она сразу открывает приложение карт.
+ */
 export function locationText(lat: number, lon: number, name?: string | null, address?: string | null): string {
   const head = [name, address].filter(Boolean).join(', ');
-  const link = `https://www.openstreetmap.org/?mlat=${lat.toFixed(6)}&mlon=${lon.toFixed(6)}#map=17/${lat.toFixed(6)}/${lon.toFixed(6)}`;
+  const link = `https://maps.google.com/?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
   return `📍 ${head ? `${head}\n` : ''}${link}`;
 }
 
@@ -307,7 +312,7 @@ export class MetaChatsService {
     } else if (result.created) {
       void this.notifyAllStaff({ type: 'MESSAGE_INBOUND', title: `Новый чат в ${label}`, message: `${who}: ${text}`, payload: { conversationId: conv.id } });
     }
-    this.emit(conv.id, { inbound: true, assignedToId: conv.assignedToId });
+    this.emit(conv.id, { inbound: true, assignedToId: conv.assignedToId }, [result.messageId]);
 
     for (const attId of result.attachmentIds) background.push(() => this.downloadAttachment(channel, attId, conv.id));
     if (channel === 'INSTAGRAM') {
@@ -334,12 +339,19 @@ export class MetaChatsService {
         .catch(async () => this.prisma.conversation.findUniqueOrThrow({ where: { channel_externalId: { channel, externalId: ev.contactId } }, select: { id: true } }));
       background.push(() => this.refreshInstagramProfile(conv!.id, ev.contactId));
     }
+    // 09.11.2026 — место в Instagram уходит двумя сообщениями: картинка карты и
+    // текст со ссылкой. Эхо картинки — часть нашего же «места», отдельным
+    // сообщением в ленту его не пишем. Сначала точное совпадение по id из
+    // ответа Meta, ниже — запасной случай, когда эхо обогнало этот ответ.
+    const mapEcho = !ev.text && ev.attachments.length > 0 && ev.attachments.every((a) => a.kind === 'IMAGE');
+    const recent = new Date(Date.now() - 2 * 60_000);
+    if (mapEcho && (await this.prisma.chatAttachment.findFirst({ where: { kind: 'LOCATION', mediaId: ev.externalId }, select: { id: true } }))) return;
     const candidate = await this.prisma.channelMessage.findFirst({
       where: {
         conversationId: conv.id,
         direction: MessageDirection.OUTBOUND,
         externalId: null,
-        createdAt: { gte: new Date(Date.now() - 2 * 60_000) },
+        createdAt: { gte: recent },
         text: ev.text ?? null,
       },
       orderBy: { createdAt: 'asc' },
@@ -352,8 +364,18 @@ export class MetaChatsService {
           data: { externalId: ev.externalId, status: candidate.status === 'SENDING' || candidate.status === 'FAILED' ? 'SENT' : candidate.status, error: null, errorDetail: null },
         })
         .catch(() => undefined);
-      this.emit(conv.id, {});
+      this.emit(conv.id, {}, [candidate.id]);
       return;
+    }
+    if (mapEcho) {
+      const map = await this.prisma.chatAttachment.findFirst({
+        where: { kind: 'LOCATION', storedName: { not: null }, mediaId: null, message: { conversationId: conv.id, direction: MessageDirection.OUTBOUND, createdAt: { gte: recent } } },
+        select: { id: true },
+      });
+      if (map) {
+        await this.prisma.chatAttachment.update({ where: { id: map.id }, data: { mediaId: ev.externalId } }).catch(() => undefined);
+        return;
+      }
     }
     const kinds = ev.attachments.map((a) => a.kind);
     try {
@@ -367,7 +389,7 @@ export class MetaChatsService {
           status: 'SENT',
           chatAttachments: { create: ev.attachments.map((a) => this.attachmentData(a)) },
         },
-        select: { chatAttachments: { select: { id: true } } },
+        select: { id: true, chatAttachments: { select: { id: true } } },
       });
       await this.prisma.$executeRaw`
         UPDATE "Conversation" SET
@@ -376,6 +398,8 @@ export class MetaChatsService {
           "updatedAt" = NOW()
         WHERE "id" = ${conv.id}`;
       for (const a of msg.chatAttachments) background.push(() => this.downloadAttachment(channel, a.id, conv!.id));
+      this.emit(conv.id, {}, [msg.id]);
+      return;
     } catch (e) {
       if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) throw e;
     }
@@ -395,32 +419,32 @@ export class MetaChatsService {
       if (cur !== 'FAILED' && (STATUS_RANK[ev.status] ?? 0) <= (STATUS_RANK[cur] ?? 0)) return;
       await this.prisma.channelMessage.update({ where: { id: msg.id }, data: { status: ev.status, error: null, errorDetail: null } });
     }
-    this.emit(msg.conversationId, {});
+    this.emit(msg.conversationId, {}, [msg.id]);
   }
 
   private async handleReaction(channel: MetaChannel, ev: Extract<ChatEvent, { type: 'reaction' }>) {
     const msg = await this.findMessage(channel, ev.externalId);
     if (!msg) return;
     await this.prisma.channelMessage.update({ where: { id: msg.id }, data: { contactReaction: ev.emoji } });
-    this.emit(msg.conversationId, {});
+    this.emit(msg.conversationId, {}, [msg.id]);
   }
 
   /** Instagram «прочитано»: всё наше отправленное до этого момента — прочитано. */
   private async handleRead(channel: MetaChannel, ev: Extract<ChatEvent, { type: 'read' }>) {
     const conv = await this.prisma.conversation.findUnique({ where: { channel_externalId: { channel, externalId: ev.contactId } }, select: { id: true } });
     if (!conv) return;
-    const res = await this.prisma.channelMessage.updateMany({
-      where: { conversationId: conv.id, direction: MessageDirection.OUTBOUND, status: { in: ['SENT', 'DELIVERED'] }, sentAt: { lte: ev.at } },
-      data: { status: 'READ' },
-    });
-    if (res.count) this.emit(conv.id, {});
+    const where: Prisma.ChannelMessageWhereInput = { conversationId: conv.id, direction: MessageDirection.OUTBOUND, status: { in: ['SENT', 'DELIVERED'] }, sentAt: { lte: ev.at } };
+    const ids = (await this.prisma.channelMessage.findMany({ where, select: { id: true } })).map((m) => m.id);
+    if (!ids.length) return;
+    await this.prisma.channelMessage.updateMany({ where: { id: { in: ids }, status: { in: ['SENT', 'DELIVERED'] } }, data: { status: 'READ' } });
+    this.emit(conv.id, {}, ids);
   }
 
   private async handleDeleted(channel: MetaChannel, ev: Extract<ChatEvent, { type: 'deleted' }>) {
     const msg = await this.findMessage(channel, ev.externalId);
     if (!msg) return;
     await this.prisma.channelMessage.update({ where: { id: msg.id }, data: { deletedByContactAt: new Date() } });
-    this.emit(msg.conversationId, {});
+    this.emit(msg.conversationId, {}, [msg.id]);
   }
 
   private attachmentData(a: IncomingAttachment): Prisma.ChatAttachmentCreateWithoutMessageInput {
@@ -473,7 +497,7 @@ export class MetaChatsService {
       this.logger.warn(`${channel}: файл вложения ${att.id} не скачан: ${(e as Error).message}`);
       await this.prisma.chatAttachment.update({ where: { id: att.id }, data: { downloadState: 'FAILED' } }).catch(() => undefined);
     }
-    this.emit(conversationId, {});
+    this.emit(conversationId, {}, [att.messageId]);
   }
 
   /** Имени в уведомлении Instagram нет — спрашиваем профиль; фото храним у себя. */
@@ -515,8 +539,40 @@ export class MetaChatsService {
     for (const u of users) await this.notifications.notifyUser(u.id, data).catch(() => undefined);
   }
 
-  private emit(conversationId: string, extra: Record<string, unknown>) {
-    this.realtime.emitAllStaff('conversation:updated', { id: conversationId, ...extra });
+  /**
+   * Событие вебсокета об изменении чата.
+   *
+   * 09.11.2026: вместе с id летят сами изменённые сообщения и строка диалога —
+   * CRM показывает их сразу, без повторного запроса (раньше: сигнал → пауза
+   * 0,4 с → два HTTP-запроса). Чаты Instagram/WhatsApp видят все сотрудники
+   * (MessagingService.scopeWhere), поэтому содержимое уходит всем — как и
+   * раньше уходил сигнал. Payload собирается из базы в момент отправки, а
+   * события одного чата выстроены в очередь: «отправлено» не обгонит
+   * «отправляется».
+   */
+  private emitQueue = new Map<string, Promise<void>>();
+  private emit(conversationId: string, extra: Record<string, unknown>, messageIds: string[] = []) {
+    const prev = this.emitQueue.get(conversationId) ?? Promise.resolve();
+    const next = prev
+      .then(async () => {
+        const [conversation, messages] = await Promise.all([
+          this.prisma.conversation.findUnique({ where: { id: conversationId }, include: CONVERSATION_INCLUDE }),
+          messageIds.length
+            ? this.prisma.channelMessage.findMany({ where: { id: { in: messageIds } }, include: MESSAGE_INCLUDE, orderBy: { sentAt: 'asc' } })
+            : Promise.resolve(null),
+        ]);
+        this.realtime.emitAllStaff('conversation:updated', {
+          id: conversationId,
+          ...extra,
+          ...(conversation ? { conversation } : {}),
+          ...(messages ? { messages } : {}),
+        });
+      })
+      .catch(() => this.realtime.emitAllStaff('conversation:updated', { id: conversationId, ...extra }));
+    this.emitQueue.set(conversationId, next);
+    void next.finally(() => {
+      if (this.emitQueue.get(conversationId) === next) this.emitQueue.delete(conversationId);
+    });
   }
 
   // =================================================================== отправка
@@ -582,8 +638,17 @@ export class MetaChatsService {
     try {
       let externalId: string | undefined;
       if (channel === 'INSTAGRAM') {
-        if (att && att.kind !== 'LOCATION') {
-          const type = att.kind === 'IMAGE' ? 'image' : att.kind === 'AUDIO' ? 'audio' : 'file';
+        if (att?.kind === 'LOCATION') {
+          // 09.11.2026 — сначала картинка карты (если сервер смог её нарисовать),
+          // потом текст с названием и ссылкой. id картинки запоминаем, чтобы её
+          // эхо не стало отдельным сообщением в ленте (handleEcho).
+          if (att.storedName) {
+            const img = await this.ig.sendAttachment(to, 'image', this.publicUrl(att.storedName));
+            if (img.message_id) await this.prisma.chatAttachment.update({ where: { id: att.id }, data: { mediaId: img.message_id } }).catch(() => undefined);
+          }
+          externalId = (await this.ig.sendText(to, msg.text ?? '')).message_id;
+        } else if (att) {
+          const type = att.kind === 'IMAGE' ? 'image' : att.kind === 'AUDIO' ? 'audio' : att.kind === 'VIDEO' ? 'video' : 'file';
           externalId = (await this.ig.sendAttachment(to, type, this.publicUrl(att.storedName!))).message_id;
         } else {
           externalId = (await this.ig.sendText(to, msg.text ?? '')).message_id;
@@ -592,6 +657,8 @@ export class MetaChatsService {
         externalId = (await this.wa.sendLocation(to, att.latitude!, att.longitude!, att.name, att.address)).messages?.[0]?.id;
       } else if (att?.kind === 'IMAGE') {
         externalId = (await this.wa.sendImage(to, this.publicUrl(att.storedName!))).messages?.[0]?.id;
+      } else if (att?.kind === 'VIDEO') {
+        externalId = (await this.wa.sendVideo(to, this.publicUrl(att.storedName!))).messages?.[0]?.id;
       } else if (att?.kind === 'FILE') {
         externalId = (await this.wa.sendDocument(to, this.publicUrl(att.storedName!), att.name || 'Документ.pdf')).messages?.[0]?.id;
       } else if (att?.kind === 'AUDIO') {
@@ -630,7 +697,7 @@ export class MetaChatsService {
     return this.prisma.channelMessage.findUniqueOrThrow({ where: { id }, include: MESSAGE_INCLUDE });
   }
 
-  async sendText(conversationId: string, rawText: string, user: CurrentUser) {
+  async sendText(conversationId: string, rawText: string, user: CurrentUser, clientId?: string) {
     const conv = await this.loadConv(conversationId);
     this.assertEnabled(conv.channel as MetaChannel);
     this.assertCanReply(conv, user);
@@ -641,15 +708,16 @@ export class MetaChatsService {
     const ids: string[] = [];
     for (const part of parts) {
       const m = await this.prisma.channelMessage.create({
-        data: { conversationId, direction: MessageDirection.OUTBOUND, text: part, status: 'SENDING', authorId: user.id, sentAt: new Date() },
+        // clientId у всех частей один: CRM заменяет своё временное сообщение всеми частями сразу.
+        data: { conversationId, direction: MessageDirection.OUTBOUND, text: part, status: 'SENDING', authorId: user.id, sentAt: new Date(), clientId: clientId ?? null },
         select: { id: true },
       });
       ids.push(m.id);
-      this.emit(conversationId, {});
+      this.emit(conversationId, {}, [m.id]);
       await this.deliver(m.id);
     }
     await this.afterSend(conv, text, user);
-    this.emit(conversationId, {});
+    this.emit(conversationId, {}, ids);
     return Promise.all(ids.map((id) => this.messageOut(id)));
   }
 
@@ -661,13 +729,51 @@ export class MetaChatsService {
     this.assertWindow(conv);
     if (!file?.buffer?.length) throw new BadRequestException('Файл не получен');
     const type = sniff(file.buffer);
-    if (type !== 'jpg' && type !== 'png' && type !== 'pdf') throw new BadRequestException('Можно отправить фото JPG или PNG либо документ PDF.');
-    const isImage = type !== 'pdf';
-    const limit = isImage ? (channel === 'WHATSAPP' ? OUTGOING_LIMITS.imageWhatsapp : OUTGOING_LIMITS.imageInstagram) : OUTGOING_LIMITS.pdf;
-    if (file.size > limit) throw new BadRequestException(`Файл больше ${Math.round(limit / 1048576)} МБ — ${isImage ? 'сожмите фото' : 'уменьшите PDF'}.`);
-    const mime = type === 'pdf' ? 'application/pdf' : type === 'png' ? 'image/png' : 'image/jpeg';
-    const storedName = await this.media.save(file.buffer, `.${type}`);
-    const originalName = (file.originalname || (isImage ? 'Фото' : 'Документ.pdf')).slice(0, 200);
+    // 09.11.2026 — ещё и видео MP4/MOV (контейнер ISO: тип узнаём по первым байтам).
+    const isVideo = type === 'mp4' || type === 'mov';
+    if (type !== 'jpg' && type !== 'png' && type !== 'pdf' && !isVideo) {
+      throw new BadRequestException('Можно отправить фото JPG или PNG, видео MP4 или MOV либо документ PDF.');
+    }
+    const kind = isVideo ? 'VIDEO' : type === 'pdf' ? 'FILE' : 'IMAGE';
+    const limit =
+      kind === 'VIDEO'
+        ? channel === 'WHATSAPP' ? OUTGOING_LIMITS.videoWhatsapp : OUTGOING_LIMITS.videoInstagram
+        : kind === 'IMAGE'
+          ? channel === 'WHATSAPP' ? OUTGOING_LIMITS.imageWhatsapp : OUTGOING_LIMITS.imageInstagram
+          : OUTGOING_LIMITS.pdf;
+    const tooBig = { VIDEO: 'выберите ролик короче или сожмите его', IMAGE: 'сожмите фото', FILE: 'уменьшите PDF' }[kind];
+    if (file.size > limit) throw new BadRequestException(`Файл больше ${Math.round(limit / 1048576)} МБ — ${tooBig}.`);
+    let storedName: string;
+    let size = file.size;
+    let mime = type === 'pdf' ? 'application/pdf' : type === 'png' ? 'image/png' : 'image/jpeg';
+    if (kind === 'VIDEO') {
+      // Перепаковка в MP4 без перекодирования: заодно проверка, что внутри видео.
+      const source = await this.media.save(file.buffer, `.${type}`);
+      storedName = source;
+      mime = type === 'mov' ? 'video/quicktime' : 'video/mp4';
+      if (this.media.ffmpegAvailable()) {
+        try {
+          const mp4 = await this.media.remuxVideo(source);
+          if (mp4) {
+            storedName = mp4.name;
+            size = mp4.size;
+            mime = 'video/mp4';
+            await fs.promises.unlink(this.media.filePath(source)).catch(() => undefined);
+          }
+        } catch {
+          await fs.promises.unlink(this.media.filePath(source)).catch(() => undefined);
+          throw new BadRequestException('Не удалось открыть видео — нужен файл MP4 или MOV с видеодорожкой.');
+        }
+      }
+      if (size > limit) {
+        await fs.promises.unlink(this.media.filePath(storedName)).catch(() => undefined);
+        throw new BadRequestException(`Видео больше ${Math.round(limit / 1048576)} МБ — ${tooBig}.`);
+      }
+    } else {
+      storedName = await this.media.save(file.buffer, `.${type}`);
+    }
+    const fallbackName = { VIDEO: 'Видео.mp4', IMAGE: 'Фото', FILE: 'Документ.pdf' }[kind];
+    const originalName = (file.originalname || fallbackName).slice(0, 200);
     const m = await this.prisma.channelMessage.create({
       data: {
         conversationId,
@@ -676,14 +782,14 @@ export class MetaChatsService {
         status: 'SENDING',
         authorId: user.id,
         sentAt: new Date(),
-        chatAttachments: { create: [{ kind: isImage ? 'IMAGE' : 'FILE', storedName, mimeType: mime, size: file.size, name: originalName, isPublic: true, downloadState: 'DONE' }] },
+        chatAttachments: { create: [{ kind, storedName, mimeType: mime, size, name: originalName, isPublic: true, downloadState: 'DONE' }] },
       },
       select: { id: true },
     });
-    this.emit(conversationId, {});
+    this.emit(conversationId, {}, [m.id]);
     await this.deliver(m.id);
-    await this.afterSend(conv, isImage ? '[фото]' : `[файл] ${originalName}`, user);
-    this.emit(conversationId, {});
+    await this.afterSend(conv, kind === 'VIDEO' ? '[видео]' : kind === 'IMAGE' ? '[фото]' : `[файл] ${originalName}`, user);
+    this.emit(conversationId, {}, [m.id]);
     return this.messageOut(m.id);
   }
 
@@ -717,10 +823,10 @@ export class MetaChatsService {
       },
       select: { id: true },
     });
-    this.emit(conversationId, {});
+    this.emit(conversationId, {}, [m.id]);
     await this.deliver(m.id);
     await this.afterSend(conv, '[голосовое]', user);
-    this.emit(conversationId, {});
+    this.emit(conversationId, {}, [m.id]);
     return this.messageOut(m.id);
   }
 
@@ -736,6 +842,9 @@ export class MetaChatsService {
     const address = dto.address?.trim().slice(0, 300) || null;
     // Instagram получает текст — его же и храним, чтобы эхо совпало с сообщением.
     const text = channel === 'INSTAGRAM' ? locationText(latitude, longitude, name, address) : null;
+    // 09.11.2026 — и картинку карты с меткой: точкой на карте Instagram место не принимает.
+    // Не нарисовалась (нет сети к плиткам) — уйдёт одна ссылка, как раньше.
+    const mapName = channel === 'INSTAGRAM' ? await this.media.renderMap(latitude, longitude) : null;
     const m = await this.prisma.channelMessage.create({
       data: {
         conversationId,
@@ -744,14 +853,25 @@ export class MetaChatsService {
         status: 'SENDING',
         authorId: user.id,
         sentAt: new Date(),
-        chatAttachments: { create: [{ kind: 'LOCATION', latitude, longitude, name, address }] },
+        chatAttachments: {
+          create: [
+            {
+              kind: 'LOCATION',
+              latitude,
+              longitude,
+              name,
+              address,
+              ...(mapName ? { storedName: mapName, mimeType: 'image/png', isPublic: true, downloadState: 'DONE' } : {}),
+            },
+          ],
+        },
       },
       select: { id: true },
     });
-    this.emit(conversationId, {});
+    this.emit(conversationId, {}, [m.id]);
     await this.deliver(m.id);
     await this.afterSend(conv, `[место] ${name ?? address ?? ''}`.trim(), user);
-    this.emit(conversationId, {});
+    this.emit(conversationId, {}, [m.id]);
     return this.messageOut(m.id);
   }
 
@@ -776,9 +896,9 @@ export class MetaChatsService {
       data.text = t;
     }
     await this.prisma.channelMessage.update({ where: { id: messageId }, data });
-    this.emit(conv.id, {});
+    this.emit(conv.id, {}, [messageId]);
     await this.deliver(messageId);
-    this.emit(conv.id, {});
+    this.emit(conv.id, {}, [messageId]);
     return this.messageOut(messageId);
   }
 

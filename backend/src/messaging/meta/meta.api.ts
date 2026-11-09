@@ -219,6 +219,9 @@ export class WhatsAppApi {
   sendImage(to: string, link: string) {
     return this.send(to, { type: 'image', image: { link } });
   }
+  sendVideo(to: string, link: string) {
+    return this.send(to, { type: 'video', video: { link } });
+  }
   sendDocument(to: string, link: string, filename: string) {
     return this.send(to, { type: 'document', document: { link, filename } });
   }

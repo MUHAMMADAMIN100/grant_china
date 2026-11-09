@@ -1,7 +1,16 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import Icon from '../../Icon';
-import { byteLength, checkChatFile, splitByBytes, TEXT_LIMIT_BYTES, VOICE_MAX_BYTES, VOICE_MAX_SECONDS } from '../../utils/chatLimits';
+import {
+  byteLength,
+  chatFileKind,
+  checkChatFile,
+  splitByBytes,
+  TEXT_LIMIT_BYTES,
+  VOICE_MAX_BYTES,
+  VOICE_MAX_SECONDS,
+  type ChatFileKind,
+} from '../../utils/chatLimits';
 
 // Карта (Leaflet, ~150 КБ) грузится, только когда открывают «Место на карте».
 const LocationPicker = lazy(() => import('./LocationPicker'));
@@ -53,6 +62,13 @@ export default function ChatComposer({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [busy, setBusy] = useState(false);
+  // 09.11.2026 — выбранный файл сначала показывается (фото, видео, PDF), уходит по «Отправить».
+  const [picked, setPicked] = useState<{ file: File; kind: ChatFileKind; url: string } | null>(null);
+  const pickedUrlRef = useRef<string | null>(null);
+  pickedUrlRef.current = picked?.url ?? null;
+  useEffect(() => () => {
+    if (pickedUrlRef.current) URL.revokeObjectURL(pickedUrlRef.current);
+  }, []);
 
   useEffect(() => {
     if (edit) setDraft(edit.text);
@@ -79,14 +95,26 @@ export default function ChatComposer({
     if (!ok && !draftRef.current) setDraft(text);
   };
 
-  const pickFile = async (file: File | undefined) => {
+  const pickFile = (file: File | undefined) => {
     setFileError(null);
     if (!file || !meta) return;
     const err = checkChatFile(channel as 'INSTAGRAM' | 'WHATSAPP', file);
     if (err) return setFileError(err);
+    discardFile();
+    setPicked({ file, kind: chatFileKind(file)!, url: URL.createObjectURL(file) });
+  };
+
+  const discardFile = () => {
+    if (pickedUrlRef.current) URL.revokeObjectURL(pickedUrlRef.current);
+    setPicked(null);
+  };
+
+  const sendFile = async () => {
+    if (!picked) return;
     setBusy(true);
-    await onSendFile(file);
+    const ok = await onSendFile(picked.file);
     setBusy(false);
+    if (ok) discardFile();
   };
 
   const startRecording = async () => {
@@ -166,7 +194,23 @@ export default function ChatComposer({
         </div>
       )}
       {fileError && <div className="chat-composer-error">{fileError}</div>}
-      {rec.state !== 'idle' ? (
+      {picked ? (
+        <div className="conv-composer chat-file-preview" data-testid="file-preview">
+          {picked.kind === 'IMAGE' && <img src={picked.url} alt="" className="chat-file-preview-media" />}
+          {picked.kind === 'VIDEO' && <video src={picked.url} controls playsInline preload="metadata" className="chat-file-preview-media" data-testid="file-preview-video" />}
+          {picked.kind === 'FILE' && <Icon name="picture_as_pdf" size={32} />}
+          <div className="chat-file-preview-info">
+            <div className="chat-file-preview-name">{picked.file.name}</div>
+            <div className="chat-file-preview-size">
+              {picked.kind === 'VIDEO' ? 'Видео' : picked.kind === 'IMAGE' ? 'Фото' : 'PDF'} · {(picked.file.size / 1048576).toFixed(picked.file.size < 1048576 ? 2 : 1)} МБ
+            </div>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={discardFile} disabled={busy}>Удалить</button>
+          <button type="button" className="btn btn-primary" onClick={sendFile} disabled={busy} data-testid="file-send">
+            <Icon name="send" size={18} /> {busy ? (picked.kind === 'VIDEO' ? 'Загружаем…' : '…') : 'Отправить'}
+          </button>
+        </div>
+      ) : rec.state !== 'idle' ? (
         <div className="conv-composer chat-voice-bar" data-testid="voice-bar">
           {rec.state === 'recording' ? (
             <>
@@ -196,7 +240,7 @@ export default function ChatComposer({
         >
           {meta && (
             <div className="chat-tools">
-              <button type="button" className="chat-tool" title="Фото или PDF" onClick={() => fileRef.current?.click()} disabled={busy} data-testid="attach-btn">
+              <button type="button" className="chat-tool" title="Фото, видео или PDF" onClick={() => fileRef.current?.click()} disabled={busy} data-testid="attach-btn">
                 <Icon name="attach_file" size={20} />
               </button>
               <button type="button" className="chat-tool" title="Голосовое" onClick={startRecording} disabled={busy} data-testid="voice-btn">
@@ -209,9 +253,9 @@ export default function ChatComposer({
                 ref={fileRef}
                 type="file"
                 hidden
-                accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                accept=".jpg,.jpeg,.png,.pdf,.mp4,.mov,image/jpeg,image/png,application/pdf,video/mp4,video/quicktime"
                 onChange={(e) => {
-                  void pickFile(e.target.files?.[0]);
+                  pickFile(e.target.files?.[0]);
                   e.target.value = '';
                 }}
                 data-testid="attach-input"

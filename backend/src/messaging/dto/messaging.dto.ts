@@ -11,6 +11,12 @@ export class SendMessageDto {
   // делится на части по байтам (MetaChatsService.sendText), Telegram режет сам.
   @MaxLength(20000)
   text: string;
+
+  // 09.11.2026 — метка временного сообщения в CRM (см. ChannelMessage.clientId).
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  clientId?: string;
 }
 
 /**

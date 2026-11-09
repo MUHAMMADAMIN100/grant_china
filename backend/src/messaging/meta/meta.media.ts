@@ -2,9 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { UPLOADS_ROOT } from '../../files/storage.service';
 import { INCOMING_FILE_LIMIT } from './meta.config';
+import { MAP_CREDIT_PNG, MAP_PIN_PNG, MAP_PIN_SIZE } from './map-assets';
 
 /** Файлы переписок — в подпапке: уборка «файлов-сирот» смотрит только верхний уровень uploads. */
 export const CHAT_DIR = path.join(UPLOADS_ROOT, 'chat');
@@ -30,7 +32,7 @@ const EXT_BY_MIME: Record<string, string> = {
   'application/pdf': '.pdf',
 };
 
-export type SniffedType = 'jpg' | 'png' | 'pdf' | 'webm' | 'ogg' | 'mp4' | 'wav' | null;
+export type SniffedType = 'jpg' | 'png' | 'pdf' | 'webm' | 'ogg' | 'mp4' | 'mov' | 'wav' | null;
 
 /** Тип файла по первым байтам, а не по расширению (инструкция, шаг 6). */
 export function sniff(buf: Buffer): SniffedType {
@@ -40,7 +42,8 @@ export function sniff(buf: Buffer): SniffedType {
   if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return 'pdf';
   if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'webm';
   if (buf.subarray(0, 4).toString('latin1') === 'OggS') return 'ogg';
-  if (buf.subarray(4, 8).toString('latin1') === 'ftyp') return 'mp4';
+  // ISO-контейнер: QuickTime (.mov с iPhone) отличается маркой «qt  ».
+  if (buf.subarray(4, 8).toString('latin1') === 'ftyp') return buf.subarray(8, 12).toString('latin1') === 'qt  ' ? 'mov' : 'mp4';
   if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WAVE') return 'wav';
   return null;
 }
@@ -163,6 +166,96 @@ export class MetaMediaService {
     });
     const st = await fs.promises.stat(this.filePath(outName));
     return { name: outName, size: st.size };
+  }
+
+  /**
+   * 09.11.2026 — видео сотрудника для Instagram: перепаковка в MP4 без
+   * перекодирования (секунды, а не минуты) и moov в начале файла — ролик
+   * начинает играть до полной загрузки. Нет видеодорожки — ошибка: значит,
+   * прислали не видео (например, аудио .m4a с тем же контейнером).
+   */
+  async remuxVideo(inputName: string): Promise<{ name: string; size: number } | null> {
+    const bin = ffmpegBinary();
+    if (!bin) return null;
+    const outName = `${randomUUID()}.mp4`;
+    const args = ['-y', '-i', this.filePath(inputName), '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', '+faststart', this.filePath(outName)];
+    await new Promise<void>((resolve, reject) => {
+      execFile(bin, args, { timeout: 120_000, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
+    });
+    const st = await fs.promises.stat(this.filePath(outName));
+    return { name: outName, size: st.size };
+  }
+
+  /**
+   * 09.11.2026 — картинка карты для места в Instagram (точкой на карте Meta
+   * место отправить не даёт): 9 плиток OpenStreetMap вокруг точки → кадр
+   * 512×384, метка в центре, подпись «© OpenStreetMap». Плитки берём только с
+   * tile.openstreetmap.org — те же, что показывает сама CRM. Не получилось
+   * (нет сети, нет ffmpeg) — null: место уйдёт одной ссылкой, как раньше.
+   */
+  async renderMap(lat: number, lon: number, zoom = 16): Promise<string | null> {
+    const bin = ffmpegBinary();
+    if (!bin) return null;
+    const TILE = 256;
+    const n = 2 ** zoom;
+    const rad = (lat * Math.PI) / 180;
+    const x = ((lon + 180) / 360) * n * TILE;
+    const y = ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n * TILE;
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || ty < 1 || ty > n - 2) return null;
+    const W = 512;
+    const H = 384;
+    // Мозаика 3×3 начинается с плитки (tx-1, ty-1); точка — в её средней плитке.
+    const cropX = Math.round(x - (tx - 1) * TILE - W / 2);
+    const cropY = Math.round(y - (ty - 1) * TILE - H / 2);
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gc-map-'));
+    try {
+      const tiles: string[] = [];
+      await Promise.all(
+        [-1, 0, 1].flatMap((dy) =>
+          [-1, 0, 1].map(async (dx) => {
+            const file = path.join(dir, `t${(dy + 1) * 3 + dx + 1}.png`);
+            const url = `https://tile.openstreetmap.org/${zoom}/${(((tx + dx) % n) + n) % n}/${ty + dy}.png`;
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 10_000);
+            try {
+              const res = await fetch(url, { headers: { 'User-Agent': 'GrantChinaCRM/1.0 (+https://www.grantchina.tj)' }, signal: ctrl.signal });
+              if (!res.ok || !/image\/png/.test(res.headers.get('content-type') ?? '')) throw new Error(`плитка ${res.status}`);
+              const buf = Buffer.from(await res.arrayBuffer());
+              if (buf.length > 512 * 1024) throw new Error('плитка слишком большая');
+              await fs.promises.writeFile(file, buf);
+            } finally {
+              clearTimeout(timer);
+            }
+          }),
+        ),
+      );
+      for (let i = 0; i < 9; i++) tiles.push(path.join(dir, `t${i}.png`));
+      const pin = path.join(dir, 'pin.png');
+      const credit = path.join(dir, 'credit.png');
+      await fs.promises.writeFile(pin, MAP_PIN_PNG);
+      await fs.promises.writeFile(credit, MAP_CREDIT_PNG);
+      await this.ensureDir();
+      const outName = `${randomUUID()}.png`;
+      const layout = [0, 1, 2].flatMap((r) => [0, 1, 2].map((c) => `${c * TILE}_${r * TILE}`)).join('|');
+      const filter =
+        `${tiles.map((_, i) => `[${i}:v]format=rgb24[t${i}]`).join(';')};` +
+        `${tiles.map((_, i) => `[t${i}]`).join('')}xstack=inputs=9:layout=${layout}[m];` +
+        `[m]crop=${W}:${H}:${cropX}:${cropY}[c];` +
+        `[c][9:v]overlay=${W / 2 - MAP_PIN_SIZE.width / 2}:${H / 2 - MAP_PIN_SIZE.height}[p];` +
+        `[p][10:v]overlay=W-w-4:H-h-4`;
+      const args = ['-y', ...tiles.flatMap((t) => ['-i', t]), '-i', pin, '-i', credit, '-filter_complex', filter, '-frames:v', '1', this.filePath(outName)];
+      await new Promise<void>((resolve, reject) => {
+        execFile(bin, args, { timeout: 60_000, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
+      });
+      return outName;
+    } catch (e) {
+      this.logger.warn(`Карта для места не нарисована: ${(e as Error).message}`);
+      return null;
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   /** Длительность аудио в секундах по ffmpeg (для предела 5 минут). null — не удалось узнать. */

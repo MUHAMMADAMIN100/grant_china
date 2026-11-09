@@ -3310,6 +3310,12 @@ select.input-error {
 .chat-bytes { font-size: 11px; color: var(--text-light); margin-top: 3px; text-align: right; }
 .chat-bytes.over { color: #b45309; }
 .chat-voice-bar { align-items: center; }
+/* 09.11.2026 — превью выбранного файла перед отправкой: фото, видео, PDF. */
+.chat-file-preview { align-items: center; flex-wrap: wrap; }
+.chat-file-preview-media { max-height: 140px; max-width: 220px; border-radius: 8px; background: #000; object-fit: contain; }
+.chat-file-preview-info { flex: 1; min-width: 140px; }
+.chat-file-preview-name { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.chat-file-preview-size { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
 .chat-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #dc2626; animation: chatRec 1s infinite; }
 .chat-rec-time { font-variant-numeric: tabular-nums; flex: 1; }
 @keyframes chatRec { 50% { opacity: .2; } }

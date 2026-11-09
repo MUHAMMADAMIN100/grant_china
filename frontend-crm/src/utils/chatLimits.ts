@@ -50,14 +50,31 @@ const MB = 1024 * 1024;
 export const VOICE_MAX_SECONDS = 300;
 export const VOICE_MAX_BYTES = 10 * MB;
 
+export type ChatFileKind = 'IMAGE' | 'VIDEO' | 'FILE';
+
+/** Что за файл выбрали: фото, видео (09.11.2026) или PDF. null — такой не отправить. */
+export function chatFileKind(file: File): ChatFileKind | null {
+  const name = file.name.toLowerCase();
+  if (file.type === 'application/pdf' || name.endsWith('.pdf')) return 'FILE';
+  if (['image/jpeg', 'image/png'].includes(file.type) || /\.(jpe?g|png)$/.test(name)) return 'IMAGE';
+  if (['video/mp4', 'video/quicktime'].includes(file.type) || /\.(mp4|mov)$/.test(name)) return 'VIDEO';
+  return null;
+}
+
+/** Пределы — те же, что на сервере (OUTGOING_LIMITS): видео Instagram 25 МБ, WhatsApp 16 МБ. */
+const FILE_LIMIT: Record<ChatFileKind, Record<'INSTAGRAM' | 'WHATSAPP', number>> = {
+  IMAGE: { INSTAGRAM: 8 * MB, WHATSAPP: 5 * MB },
+  VIDEO: { INSTAGRAM: 25 * MB, WHATSAPP: 16 * MB },
+  FILE: { INSTAGRAM: 25 * MB, WHATSAPP: 25 * MB },
+};
+const TOO_BIG: Record<ChatFileKind, string> = { IMAGE: 'сожмите фото', VIDEO: 'выберите ролик короче или сожмите его', FILE: 'уменьшите PDF' };
+
 /** null — можно отправлять, иначе текст причины. */
 export function checkChatFile(channel: 'INSTAGRAM' | 'WHATSAPP', file: File): string | null {
-  const name = file.name.toLowerCase();
-  const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf');
-  const isImage = ['image/jpeg', 'image/png'].includes(file.type) || /\.(jpe?g|png)$/.test(name);
-  if (!isPdf && !isImage) return 'Можно отправить фото JPG или PNG либо документ PDF.';
-  const limit = isPdf ? 25 * MB : channel === 'WHATSAPP' ? 5 * MB : 8 * MB;
-  if (file.size > limit) return `Файл больше ${Math.round(limit / MB)} МБ — ${isPdf ? 'уменьшите PDF' : 'сожмите фото'}.`;
+  const kind = chatFileKind(file);
+  if (!kind) return 'Можно отправить фото JPG или PNG, видео MP4 или MOV либо документ PDF.';
+  const limit = FILE_LIMIT[kind][channel];
+  if (file.size > limit) return `Файл больше ${Math.round(limit / MB)} МБ — ${TOO_BIG[kind]}.`;
   return null;
 }
 

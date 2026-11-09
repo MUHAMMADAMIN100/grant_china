@@ -129,7 +129,7 @@ export class MetaChatsController {
   constructor(private chats: MetaChatsService) {}
 
   @Post('conversations/:id/files')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: OUTGOING_LIMITS.pdf + 1 } }))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: Math.max(OUTGOING_LIMITS.pdf, OUTGOING_LIMITS.videoInstagram) + 1 } }))
   sendFile(@Param('id') id: string, @UploadedFile() file: Express.Multer.File, @CurrentUser() user: any) {
     // Multer отдаёт имя файла в latin1: «Договор.pdf» в CRM и у клиента в WhatsApp превращался в «Ð”Ð¾Ð³…».
     return this.chats.sendFile(id, file && { buffer: file.buffer, size: file.size, originalname: fixFilenameEncoding(file.originalname) }, user);

@@ -43,6 +43,11 @@ export class TelegramClientBotService implements OnModuleInit {
     return Boolean(this.token);
   }
 
+  /** Ключ бота задан, а секрета вебхука нет — бот не примет ни одного сообщения. */
+  isMisconfigured(): boolean {
+    return Boolean(this.token) && !this.webhookSecret;
+  }
+
   /** Совпадает ли секрет из заголовка вебхука с настроенным. */
   verifySecret(secret: string | undefined): boolean {
     return Boolean(this.webhookSecret && secret && secret === this.webhookSecret);

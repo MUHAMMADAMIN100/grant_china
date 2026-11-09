@@ -18,11 +18,8 @@ import { AssignConversationDto, LinkConversationDto, SendMessageDto } from './dt
  * собирать объект не из JWT, и отсутствие трактуется как BOTH. */
 export type CurrentUser = { id: string; role: Role; region?: Region };
 
-const CONVERSATION_INCLUDE = {
-  student: { select: { id: true, fullName: true, managerId: true, chinaManagerId: true } },
-  application: { select: { id: true, fullName: true, status: true, managerId: true, chinaManagerId: true } },
-  assignedTo: { select: { id: true, fullName: true } },
-} satisfies Prisma.ConversationInclude;
+// Общая с событиями вебсокета (meta-chats.service) форма строки диалога.
+import { CONVERSATION_INCLUDE } from './conversation-include';
 
 type ConversationRow = Prisma.ConversationGetPayload<{ include: typeof CONVERSATION_INCLUDE }>;
 
@@ -291,7 +288,7 @@ export class MessagingService {
     const conversation = await this.loadForMutation(id, user);
     // 29.10.2026 — Instagram / WhatsApp: длинный текст режется по байтам на
     // несколько сообщений, поэтому в ответе массив; CRM понимает оба вида.
-    if (isMetaChannel(conversation.channel)) return this.meta.sendText(id, dto.text, user);
+    if (isMetaChannel(conversation.channel)) return this.meta.sendText(id, dto.text, user, dto.clientId);
     if (!canSendTo(conversation.channel)) {
       throw new BadRequestException(
         `Отправка в канал «${conversation.channel}» пока не подключена — ответьте клиенту в самом мессенджере.`,
@@ -316,6 +313,7 @@ export class MessagingService {
           externalId,
           authorId: user.id,
           sentAt: now,
+          clientId: dto.clientId ?? null,
         },
         include: { author: { select: { id: true, fullName: true } } },
       }),
