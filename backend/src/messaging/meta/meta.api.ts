@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { instagramConfig, whatsappConfig, type MetaChannel } from './meta.config';
+import { INSTAGRAM_WEBHOOK_FIELDS, instagramConfig, instagramLogin, whatsappConfig, type MetaChannel } from './meta.config';
 import { graphRequest, MetaApiError, tokenFingerprint } from './meta.http';
 
 /**
@@ -79,6 +79,10 @@ export class MetaTokensService {
   async refreshInstagramToken(now = new Date()): Promise<'refreshed' | 'skipped' | 'disabled' | 'failed'> {
     const cfg = instagramConfig();
     if (!cfg.enabled) return 'disabled';
+    // Единый вход: ключ системного пользователя бессрочный, продлевать нечего.
+    // Запрос продления на graph.instagram.com он не пройдёт и был бы ошибочно
+    // отмечен «ключ не действует».
+    if (instagramLogin() === 'unified') return 'skipped';
     const fp = tokenFingerprint(cfg.accessToken);
     const st = await this.getState<{ token: string; fingerprint: string; expiresAt?: string; attemptAt?: string }>('instagramToken');
     const sameEnv = st?.fingerprint === fp;
@@ -115,7 +119,11 @@ export class MetaTokensService {
   }
 }
 
-/** Запросы к Instagram API (вход через Instagram). */
+/**
+ * Запросы к Instagram API. Два способа подключения (meta.config, instagramLogin):
+ * единый вход — graph.facebook.com и id аккаунта в адресе; вход через
+ * Instagram — graph.instagram.com и `/me`.
+ */
 @Injectable()
 export class InstagramApi {
   constructor(private tokens: MetaTokensService) {}
@@ -124,8 +132,27 @@ export class InstagramApi {
     return graphRequest<T>('INSTAGRAM', `${instagramConfig().apiUrl}${pathAndQuery}`, { ...init, token: await this.tokens.instagramToken() });
   }
 
-  me() {
-    return this.call<{ user_id?: string; id?: string; username?: string }>('/me?fields=user_id,username');
+  /** Узел аккаунта: при едином входе `/me` — системный пользователь, поэтому id из INSTAGRAM_ACCOUNT_ID. */
+  private accountNode(): string {
+    return instagramLogin() === 'unified' ? `/${encodeURIComponent(instagramConfig().accountId)}` : '/me';
+  }
+
+  /** Аккаунт, от имени которого работает CRM: id и @имя. */
+  async account(): Promise<{ id: string | null; username: string | null }> {
+    if (instagramLogin() === 'unified') {
+      const r = await this.call<{ id?: string; username?: string }>(`${this.accountNode()}?fields=id,username`);
+      return { id: r.id ?? null, username: r.username ?? null };
+    }
+    const r = await this.call<{ user_id?: string; id?: string; username?: string }>('/me?fields=user_id,username');
+    return { id: r.user_id ?? r.id ?? null, username: r.username ?? null };
+  }
+
+  /**
+   * Единый вход: аккаунты Instagram, выданные ключу. Нужны, когда в
+   * INSTAGRAM_ACCOUNT_ID записан не тот id, — CRM подскажет правильный.
+   */
+  assignedAccounts() {
+    return this.call<{ data?: Array<{ id: string; username?: string }> }>('/me/assigned_instagram_accounts?fields=id,username');
   }
 
   profile(contactId: string) {
@@ -133,14 +160,34 @@ export class InstagramApi {
   }
 
   sendText(contactId: string, text: string) {
-    return this.call<{ message_id?: string }>('/me/messages', { method: 'POST', body: { recipient: { id: contactId }, message: { text } } });
+    return this.call<{ message_id?: string }>(`${this.accountNode()}/messages`, { method: 'POST', body: { recipient: { id: contactId }, message: { text } } });
   }
 
   sendAttachment(contactId: string, type: 'image' | 'audio' | 'video' | 'file', url: string) {
-    return this.call<{ message_id?: string }>('/me/messages', {
+    return this.call<{ message_id?: string }>(`${this.accountNode()}/messages`, {
       method: 'POST',
       body: { recipient: { id: contactId }, message: { attachment: { type, payload: { url } } } },
     });
+  }
+
+  /**
+   * Единый вход: сам аккаунт уведомлений не шлёт, пока его не подписали на
+   * приложение (POST /<id>/subscribed_apps). Повтор безвреден, поэтому
+   * проверяем при запуске и раз в 6 часов (джоба instagram-token). Если Meta
+   * не примет часть полей — подписываем хотя бы на сообщения.
+   */
+  async ensureSubscribed(): Promise<'subscribed' | 'already' | 'not-needed'> {
+    if (instagramLogin() !== 'unified') return 'not-needed';
+    const node = `${this.accountNode()}/subscribed_apps`;
+    const current = await this.call<{ data?: Array<{ subscribed_fields?: string[] }> }>(node);
+    if (current.data?.some((app) => app.subscribed_fields?.includes('messages'))) return 'already';
+    try {
+      await this.call(node, { method: 'POST', body: { subscribed_fields: INSTAGRAM_WEBHOOK_FIELDS.join(',') } });
+    } catch (e) {
+      if (!(e instanceof MetaApiError) || e.reason === 'TOKEN_INVALID' || e.reason === 'NETWORK') throw e;
+      await this.call(node, { method: 'POST', body: { subscribed_fields: 'messages' } });
+    }
+    return 'subscribed';
   }
 }
 

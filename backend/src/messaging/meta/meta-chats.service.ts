@@ -12,6 +12,7 @@ import { claimFirstTouch } from '../../common/lead-touch';
 import {
   configFor,
   instagramConfig,
+  instagramLogin,
   isMetaChannel,
   OUTGOING_LIMITS,
   publicApiUrl,
@@ -140,6 +141,8 @@ export const MESSAGE_INCLUDE = {
 export class MetaChatsService {
   private readonly logger = new Logger(MetaChatsService.name);
   private statusCache = new Map<MetaChannel, { until: number; account: string | null }>();
+  /** Чужие id аккаунтов, о которых уже написали в журнал (раз на id за жизнь процесса). */
+  private foreignLogged = new Set<string>();
 
   constructor(
     private prisma: PrismaService,
@@ -167,6 +170,14 @@ export class MetaChatsService {
     for (const ev of events) {
       if (ev.accountId !== cfg.accountId) {
         // Чужой аккаунт (в т.ч. id «0» от кнопки «Тестировать») — пропускаем без текста в журнале.
+        // 09.11.2026: настоящий чужой id пишем в журнал один раз — так видно, что
+        // INSTAGRAM_ACCOUNT_ID/WHATSAPP_PHONE_NUMBER_ID записан неверно и сообщения
+        // клиентов отбрасываются. Только id, без текстов.
+        const key = `${channel}:${ev.accountId}`;
+        if (ev.accountId && ev.accountId !== '0' && !this.foreignLogged.has(key)) {
+          this.foreignLogged.add(key);
+          this.logger.warn(`${channel}: уведомление для аккаунта ${ev.accountId}, а в настройках ${cfg.accountId || '—'} — пропущено`);
+        }
         foreign++;
         continue;
       }
@@ -885,10 +896,9 @@ export class MetaChatsService {
         let ok = false;
         try {
           if (channel === 'INSTAGRAM') {
-            const me = await this.ig.me();
+            const me = await this.ig.account();
             account = me.username ? `@${me.username}` : null;
-            const id = me.user_id ?? me.id;
-            if (id && id !== cfg.accountId) account = `${account ?? ''} (id ${id} не совпадает с INSTAGRAM_ACCOUNT_ID)`.trim();
+            if (me.id && me.id !== cfg.accountId) account = `${account ?? ''} (id ${me.id} не совпадает с INSTAGRAM_ACCOUNT_ID)`.trim();
           } else {
             const p = await this.wa.phoneInfo();
             account = [p.display_phone_number, p.verified_name].filter(Boolean).join(' · ') || null;
@@ -897,6 +907,17 @@ export class MetaChatsService {
           ok = true;
         } catch (e) {
           if (e instanceof MetaApiError && e.reason === 'TOKEN_INVALID') await this.tokens.markRefused(channel);
+          // 09.11.2026, единый вход: ключ рабочий, но аккаунта с id из
+          // INSTAGRAM_ACCOUNT_ID ему не выдано — подсказываем, какие выданы.
+          else if (channel === 'INSTAGRAM' && e instanceof MetaApiError && e.reason === 'REJECTED' && instagramLogin() === 'unified') {
+            account = await this.ig
+              .assignedAccounts()
+              .then((r) => {
+                const list = (r.data ?? []).map((a) => `${a.username ? `@${a.username} ` : ''}id ${a.id}`).join(', ');
+                return `INSTAGRAM_ACCOUNT_ID ${cfg.accountId} не найден у ключа${list ? ` — доступны: ${list}` : ' — ключу не выдан ни один аккаунт'}`;
+              })
+              .catch(() => `INSTAGRAM_ACCOUNT_ID ${cfg.accountId} недоступен этому ключу`);
+          }
         }
         // Удачную проверку помним 10 минут, неудачную — минуту (чтобы исправленный ключ было видно сразу).
         this.statusCache.set(channel, { until: Date.now() + (ok ? 10 * 60_000 : 60_000), account });

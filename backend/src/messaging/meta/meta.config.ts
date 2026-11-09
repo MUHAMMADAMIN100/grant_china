@@ -43,11 +43,32 @@ function channelConfig(vars: { account: string; token: string; secret: string },
   };
 }
 
+/**
+ * 09.11.2026 — как подключён Instagram.
+ *
+ * 'unified' (по умолчанию) — «Instagram API с единым входом». С 30.10.2026 Meta
+ * даёт новым приложениям только его: запросы идут на graph.facebook.com, ключ —
+ * бессрочный ключ системного пользователя (продлевать не нужно), объект запросов —
+ * id аккаунта Instagram (`/me` здесь — системный пользователь, а не аккаунт),
+ * уведомления подписаны секретом самого приложения Meta (он и кладётся в
+ * INSTAGRAM_APP_SECRET), аккаунт подписывают на уведомления запросом
+ * POST /<id аккаунта>/subscribed_apps.
+ *
+ * 'instagram' — прежний «вход через Instagram» (graph.instagram.com, ключ на
+ * 60 дней с ежедневным продлением, `/me`). Остался для приложений, созданных до
+ * 30.10.2026: INSTAGRAM_LOGIN=instagram.
+ */
+export type InstagramLogin = 'unified' | 'instagram';
+export const instagramLogin = (): InstagramLogin => (env('INSTAGRAM_LOGIN').toLowerCase() === 'instagram' ? 'instagram' : 'unified');
+
+/** Поля уведомлений, на которые подписываем аккаунт при едином входе. */
+export const INSTAGRAM_WEBHOOK_FIELDS = ['messages', 'messaging_seen', 'message_reactions', 'messaging_postbacks'];
+
 export function instagramConfig(): ChannelConfig {
   return channelConfig(
     { account: 'INSTAGRAM_ACCOUNT_ID', token: 'INSTAGRAM_ACCESS_TOKEN', secret: 'INSTAGRAM_APP_SECRET' },
     'INSTAGRAM_API_URL',
-    'https://graph.instagram.com/v26.0',
+    instagramLogin() === 'unified' ? 'https://graph.facebook.com/v26.0' : 'https://graph.instagram.com/v26.0',
   );
 }
 
