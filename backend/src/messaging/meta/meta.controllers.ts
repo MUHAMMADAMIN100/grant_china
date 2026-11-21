@@ -8,6 +8,7 @@ import {
   Logger,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   RawBodyRequest,
@@ -24,7 +25,7 @@ import { memoryStorage } from 'multer';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { Request, Response } from 'express';
 import { Direction } from '@prisma/client';
-import { IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../auth/roles.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -42,6 +43,16 @@ export class SendLocationDto {
 
 export class RetryMessageDto {
   @IsOptional() @IsString() @MaxLength(20000) text?: string;
+}
+
+export class ReactDto {
+  // null — снять реакцию. Доступна только ❤️ (как двойной тап в Instagram).
+  @IsOptional() @IsIn(['❤️']) emoji?: string | null;
+}
+
+export class ChatAiDto {
+  @IsOptional() @IsBoolean() off?: boolean;
+  @IsOptional() @IsBoolean() clearHandoff?: boolean;
 }
 
 export class ChatApplicationDto {
@@ -149,6 +160,25 @@ export class MetaChatsController {
   @Post('messages/:id/retry')
   retry(@Param('id') id: string, @Body() dto: RetryMessageDto, @CurrentUser() user: any) {
     return this.chats.retry(id, dto.text, user);
+  }
+
+  /** 21.11.2026 — ❤️ на сообщение клиента. */
+  @Post('messages/:id/react')
+  react(@Param('id') id: string, @Body() dto: ReactDto, @CurrentUser() user: any) {
+    return this.chats.react(id, dto.emoji ?? null, user);
+  }
+
+  /** 21.11.2026 — клиент видит «печатает…». Зовётся часто — без ограничения частоты, сервер сам шлёт не чаще раза в 4 с. */
+  @SkipThrottle()
+  @Post('conversations/:id/typing')
+  typing(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.chats.typing(id, user);
+  }
+
+  /** 21.11.2026 — ИИ в этом чате: выключить/включить, снять просьбу «нужен менеджер». */
+  @Patch('conversations/:id/ai')
+  setAi(@Param('id') id: string, @Body() dto: ChatAiDto, @CurrentUser() user: any) {
+    return this.chats.setAi(id, dto, user);
   }
 
   @Post('conversations/:id/take')

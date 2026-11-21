@@ -112,7 +112,9 @@ export type ActivityAction =
   | 'KNOWLEDGE_DELETE'
   // ТЗ 6.4 (волна 8) — единое окно диалогов.
   | 'CONVERSATION_LINK'
-  | 'MESSAGE_SENT';
+  | 'MESSAGE_SENT'
+  // 21.11.2026 — ИИ-помощник в Instagram: настройки и выключатель в чате.
+  | 'AI_CHAT_SETTINGS';
 
 export interface ActivityEntry {
   id: string;
@@ -218,6 +220,7 @@ export const ACTIVITY_LABEL: Record<ActivityAction, string> = {
   KNOWLEDGE_DELETE: 'Удалена статья базы знаний',
   CONVERSATION_LINK: 'Диалог привязан к карточке',
   MESSAGE_SENT: 'Отправлено сообщение клиенту',
+  AI_CHAT_SETTINGS: 'Настройки ИИ-помощника в Instagram',
 };
 
 // Группировка пунктов фильтра по доменам — при ~35 значениях плоский список
@@ -264,7 +267,7 @@ export const ACTIVITY_GROUPS: { label: string; actions: ActivityAction[] }[] = [
   { label: 'Виза', actions: ['VISA_CLAIM', 'VISA_CLAIM_APPROVE', 'VISA_CLAIM_REJECT'] },
   { label: 'Сервер', actions: ['STORAGE_PURGE'] },
   { label: 'Комментарии', actions: ['COMMENT_CREATE', 'COMMENT_UPDATE', 'COMMENT_DELETE'] },
-  { label: 'Звонки и переписка', actions: ['CALL_LOGGED', 'CONVERSATION_LINK', 'MESSAGE_SENT'] },
+  { label: 'Звонки и переписка', actions: ['CALL_LOGGED', 'CONVERSATION_LINK', 'MESSAGE_SENT', 'AI_CHAT_SETTINGS'] },
   {
     label: 'Зарплата',
     actions: [

@@ -169,6 +169,30 @@ export class MetaMediaService {
   }
 
   /**
+   * 21.11.2026 — голосовое клиента для ИИ: WAV 16 кГц моно, не длиннее 3 минут
+   * (≈6 МБ). WAV Gemini принимает гарантированно, в отличие от .m4a. Файл
+   * пишется во временную папку системы и сразу удаляется — в uploads не копится.
+   */
+  async audioForAi(inputName: string): Promise<Buffer | null> {
+    const bin = ffmpegBinary();
+    if (!bin) return null;
+    const out = path.join(os.tmpdir(), `gc-ai-${randomUUID()}.wav`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        execFile(bin, ['-y', '-i', this.filePath(inputName), '-t', '180', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', out], { timeout: 60_000, windowsHide: true }, (err) =>
+          err ? reject(err) : resolve(),
+        );
+      });
+      return await fs.promises.readFile(out);
+    } catch (e) {
+      this.logger.warn(`Голосовое для ИИ не подготовлено: ${(e as Error).message}`);
+      return null;
+    } finally {
+      await fs.promises.unlink(out).catch(() => undefined);
+    }
+  }
+
+  /**
    * 09.11.2026 — видео сотрудника для Instagram: перепаковка в MP4 без
    * перекодирования (секунды, а не минуты) и moov в начале файла — ролик
    * начинает играть до полной загрузки. Нет видеодорожки — ошибка: значит,

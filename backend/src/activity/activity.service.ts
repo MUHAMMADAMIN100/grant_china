@@ -45,6 +45,8 @@ export type ActivityAction =
   | 'APPLICATION_UNARCHIVE'
   | 'APPLICATION_SOURCE_CHANGE'
   // 08.09.2026 — справочник своих источников привлечения.
+  // 21.11.2026 — ИИ-помощник в Instagram: настройки и выключатель в чате.
+  | 'AI_CHAT_SETTINGS'
   | 'LEAD_SOURCE_CREATE'
   | 'LEAD_SOURCE_UPDATE'
   | 'APPLICATION_CLEAR_REPEAT'

@@ -36,7 +36,8 @@ export type ChatEvent =
       contactPhone?: string | null;
     }
   | { type: 'deleted'; channel: MetaChannel; accountId: string; contactId: string; externalId: string }
-  | { type: 'reaction'; channel: MetaChannel; accountId: string; contactId: string; externalId: string; emoji: string | null }
+  // fromUs — 21.11.2026: наша же реакция (❤️ из CRM), Instagram присылает её эхом.
+  | { type: 'reaction'; channel: MetaChannel; accountId: string; contactId: string; externalId: string; emoji: string | null; fromUs?: boolean }
   | { type: 'read'; channel: MetaChannel; accountId: string; contactId: string; at: Date }
   | { type: 'status'; channel: 'WHATSAPP'; accountId: string; externalId: string; status: 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'; errorCode: number | null };
 
@@ -96,7 +97,7 @@ function parseInstagramItem(m: any, accountId: string): ChatEvent | null {
     const mid = str(m.reaction.mid);
     if (!mid) return null;
     const emoji = m.reaction.action === 'unreact' ? null : str(m.reaction.emoji) ?? str(m.reaction.reaction);
-    return { type: 'reaction', channel: 'INSTAGRAM', accountId, contactId, externalId: mid, emoji };
+    return { type: 'reaction', channel: 'INSTAGRAM', accountId, contactId, externalId: mid, emoji, fromUs: sender === accountId };
   }
   if (m?.read) return { type: 'read', channel: 'INSTAGRAM', accountId, contactId, at: sentAt };
   if (m?.postback) {

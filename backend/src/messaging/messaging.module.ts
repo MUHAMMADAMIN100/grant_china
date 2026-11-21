@@ -8,6 +8,8 @@ import { logMetaConfig, MetaChatsService } from './meta/meta-chats.service';
 import { MetaChatsController, MetaWebhooksController, PublicChatFilesController } from './meta/meta.controllers';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { instagramConfig, instagramLogin } from './meta/meta.config';
+import { ChatAiService } from './ai/chat-ai.service';
+import { ChatAiController, QuickRepliesController, QuickRepliesService } from './ai/chat-ai.controller';
 
 /**
  * ТЗ 6.4 — единое окно диалогов из мессенджеров.
@@ -24,8 +26,19 @@ import { instagramConfig, instagramLogin } from './meta/meta.config';
 @Module({
   imports: [NotificationsModule],
   // 29.10.2026 — Instagram и WhatsApp через приложения Meta (папка meta/).
-  controllers: [MessagingController, MetaWebhooksController, MetaChatsController, PublicChatFilesController],
-  providers: [MessagingService, TelegramClientBotService, MetaTokensService, InstagramApi, WhatsAppApi, MetaMediaService, MetaChatsService],
+  // 21.11.2026 — ИИ-помощник в Instagram и быстрые ответы (папка ai/).
+  controllers: [MessagingController, MetaWebhooksController, MetaChatsController, PublicChatFilesController, ChatAiController, QuickRepliesController],
+  providers: [
+    MessagingService,
+    TelegramClientBotService,
+    MetaTokensService,
+    InstagramApi,
+    WhatsAppApi,
+    MetaMediaService,
+    MetaChatsService,
+    ChatAiService,
+    QuickRepliesService,
+  ],
   // MetaTokensService и InstagramApi — наружу ради джобы instagram-token
   // (продление ключа / подписка аккаунта на уведомления).
   exports: [MessagingService, MetaTokensService, InstagramApi],

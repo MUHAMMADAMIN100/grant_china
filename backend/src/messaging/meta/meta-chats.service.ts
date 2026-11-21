@@ -109,6 +109,16 @@ const CONV_SELECT = {
 } satisfies Prisma.ConversationSelect;
 type ConvRow = Prisma.ConversationGetPayload<{ select: typeof CONV_SELECT }>;
 
+/** 21.11.2026 — то, на что ответили цитатой (см. MetaChatsService.withReplies). */
+export interface ReplyPreview {
+  id: string;
+  direction: MessageDirection;
+  byAi: boolean;
+  text: string | null;
+  kind: string | null;
+  deleted: boolean;
+}
+
 export const MESSAGE_INCLUDE = {
   author: { select: { id: true, fullName: true } },
   chatAttachments: {
@@ -148,6 +158,14 @@ export class MetaChatsService {
   private statusCache = new Map<MetaChannel, { until: number; account: string | null }>();
   /** Чужие id аккаунтов, о которых уже написали в журнал (раз на id за жизнь процесса). */
   private foreignLogged = new Set<string>();
+  /**
+   * 21.11.2026 — кому сообщить о новом сообщении клиента. Сюда подписывается
+   * ИИ-помощник (ChatAiService): обратная зависимость через подписку, а не
+   * через конструктор — иначе два сервиса требовали бы друг друга.
+   */
+  private inboundListeners: Array<(conversationId: string, channel: MetaChannel) => void> = [];
+  /** «печатает…» уходит клиенту не чаще раза в 4 секунды на чат. */
+  private typingSentAt = new Map<string, number>();
 
   constructor(
     private prisma: PrismaService,
@@ -313,6 +331,13 @@ export class MetaChatsService {
       void this.notifyAllStaff({ type: 'MESSAGE_INBOUND', title: `Новый чат в ${label}`, message: `${who}: ${text}`, payload: { conversationId: conv.id } });
     }
     this.emit(conv.id, { inbound: true, assignedToId: conv.assignedToId }, [result.messageId]);
+    for (const fn of this.inboundListeners) {
+      try {
+        fn(conv.id, channel);
+      } catch (e) {
+        this.logger.warn(`Подписчик входящих: ${(e as Error).message}`);
+      }
+    }
 
     for (const attId of result.attachmentIds) background.push(() => this.downloadAttachment(channel, attId, conv.id));
     if (channel === 'INSTAGRAM') {
@@ -387,10 +412,16 @@ export class MetaChatsService {
           externalId: ev.externalId,
           sentAt: ev.sentAt,
           status: 'SENT',
+          replyToExternalId: ev.replyToExternalId ?? null,
           chatAttachments: { create: ev.attachments.map((a) => this.attachmentData(a)) },
         },
         select: { id: true, chatAttachments: { select: { id: true } } },
       });
+      // 21.11.2026 — сотрудник ответил прямо из приложения Instagram: человек
+      // ведёт разговор, ИИ в этом чате замолкает (включить обратно — кнопкой в CRM).
+      await this.prisma.conversation
+        .updateMany({ where: { id: conv.id, aiOff: false }, data: { aiOff: true, aiOffReason: 'APP', aiHandoffAt: null, aiHandoffReason: null } })
+        .catch(() => undefined);
       await this.prisma.$executeRaw`
         UPDATE "Conversation" SET
           "lastMessageText" = CASE WHEN ${ev.sentAt} >= "lastMessageAt" THEN ${previewOf(ev.text, kinds)} ELSE "lastMessageText" END,
@@ -425,7 +456,9 @@ export class MetaChatsService {
   private async handleReaction(channel: MetaChannel, ev: Extract<ChatEvent, { type: 'reaction' }>) {
     const msg = await this.findMessage(channel, ev.externalId);
     if (!msg) return;
-    await this.prisma.channelMessage.update({ where: { id: msg.id }, data: { contactReaction: ev.emoji } });
+    // 21.11.2026 — эхо нашей же реакции (❤️ из CRM) — это наша реакция, не клиента.
+    const data = ev.fromUs ? { ourReaction: ev.emoji ? '❤️' : null } : { contactReaction: ev.emoji };
+    await this.prisma.channelMessage.update({ where: { id: msg.id }, data });
     this.emit(msg.conversationId, {}, [msg.id]);
   }
 
@@ -534,9 +567,67 @@ export class MetaChatsService {
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { applicationId: apps[0].id, studentId: apps[0].studentId } }).catch(() => undefined);
   }
 
-  private async notifyAllStaff(data: { type: string; title: string; message: string; payload?: any }) {
+  async notifyAllStaff(data: { type: string; title: string; message: string; payload?: any }) {
     const users = await this.prisma.user.findMany({ where: { deletedAt: null }, select: { id: true } });
     for (const u of users) await this.notifications.notifyUser(u.id, data).catch(() => undefined);
+  }
+
+  /** 21.11.2026 — подписка на новые сообщения клиентов (ИИ-помощник). */
+  onInbound(fn: (conversationId: string, channel: MetaChannel) => void) {
+    this.inboundListeners.push(fn);
+  }
+
+  /** Разослать CRM свежую строку чата (после изменений вне этого сервиса). */
+  touch(conversationId: string) {
+    this.emit(conversationId, {});
+  }
+
+  /** 21.11.2026 — «ИИ печатает…» в CRM, пока помощник готовит ответ. */
+  emitTyping(conversationId: string, on: boolean) {
+    this.realtime.emitAllStaff('conversation:typing', { id: conversationId, ai: true, on });
+  }
+
+  /**
+   * 21.11.2026 — к сообщениям-ответам цитатой добавляем то, на что ответили:
+   * кто писал и начало текста (или вид вложения). Ищем в том же чате по id
+   * сообщения у Meta; не нашли (старое, не загружено к нам) — replyTo null,
+   * CRM покажет «ответ на сообщение».
+   */
+  async withReplies<T extends { conversationId: string; replyToExternalId?: string | null }>(msgs: T[]): Promise<Array<T & { replyTo: ReplyPreview | null }>> {
+    const wanted = msgs.filter((m) => m.replyToExternalId);
+    if (!wanted.length) return msgs.map((m) => ({ ...m, replyTo: null }));
+    const rows = await this.prisma.channelMessage.findMany({
+      where: {
+        OR: wanted.map((m) => ({ conversationId: m.conversationId, externalId: m.replyToExternalId! })),
+      },
+      select: {
+        id: true,
+        conversationId: true,
+        externalId: true,
+        direction: true,
+        text: true,
+        byAi: true,
+        deletedByContactAt: true,
+        chatAttachments: { select: { kind: true }, take: 1, orderBy: { createdAt: 'asc' } },
+      },
+    });
+    const byKey = new Map(rows.map((r) => [`${r.conversationId}:${r.externalId}`, r]));
+    return msgs.map((m) => {
+      const r = m.replyToExternalId ? byKey.get(`${m.conversationId}:${m.replyToExternalId}`) : undefined;
+      return {
+        ...m,
+        replyTo: r
+          ? {
+              id: r.id,
+              direction: r.direction,
+              byAi: r.byAi,
+              text: r.deletedByContactAt ? null : r.text ? (r.text.length > 140 ? `${r.text.slice(0, 140)}…` : r.text) : null,
+              kind: r.chatAttachments[0]?.kind ?? null,
+              deleted: !!r.deletedByContactAt,
+            }
+          : null,
+      };
+    });
   }
 
   /**
@@ -558,7 +649,9 @@ export class MetaChatsService {
         const [conversation, messages] = await Promise.all([
           this.prisma.conversation.findUnique({ where: { id: conversationId }, include: CONVERSATION_INCLUDE }),
           messageIds.length
-            ? this.prisma.channelMessage.findMany({ where: { id: { in: messageIds } }, include: MESSAGE_INCLUDE, orderBy: { sentAt: 'asc' } })
+            ? this.prisma.channelMessage
+                .findMany({ where: { id: { in: messageIds } }, include: MESSAGE_INCLUDE, orderBy: { sentAt: 'asc' } })
+                .then((list) => this.withReplies(list))
             : Promise.resolve(null),
         ]);
         this.realtime.emitAllStaff('conversation:updated', {
@@ -613,7 +706,11 @@ export class MetaChatsService {
   private async afterSend(conv: ConvRow, previewText: string, user: CurrentUser) {
     const now = new Date();
     await this.takeIfFree(conv, user);
-    await this.prisma.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: now, lastMessageText: preview(previewText), unreadCount: 0 } });
+    // 21.11.2026 — сотрудник ответил: просьба ИИ «нужен менеджер» выполнена.
+    await this.prisma.conversation.update({
+      where: { id: conv.id },
+      data: { lastMessageAt: now, lastMessageText: preview(previewText), unreadCount: 0, aiHandoffAt: null, aiHandoffReason: null },
+    });
     this.activity
       .log({
         actorId: user.id,
@@ -651,7 +748,7 @@ export class MetaChatsService {
           const type = att.kind === 'IMAGE' ? 'image' : att.kind === 'AUDIO' ? 'audio' : att.kind === 'VIDEO' ? 'video' : 'file';
           externalId = (await this.ig.sendAttachment(to, type, this.publicUrl(att.storedName!))).message_id;
         } else {
-          externalId = (await this.ig.sendText(to, msg.text ?? '')).message_id;
+          externalId = await this.withQuote(messageId, msg.replyToExternalId, (mid) => this.ig.sendText(to, msg.text ?? '', mid).then((r) => r.message_id));
         }
       } else if (att?.kind === 'LOCATION') {
         externalId = (await this.wa.sendLocation(to, att.latitude!, att.longitude!, att.name, att.address)).messages?.[0]?.id;
@@ -664,7 +761,7 @@ export class MetaChatsService {
       } else if (att?.kind === 'AUDIO') {
         externalId = (await this.wa.sendVoice(to, this.publicUrl(att.deliveryName ?? att.storedName!))).messages?.[0]?.id;
       } else {
-        externalId = (await this.wa.sendText(to, msg.text ?? '')).messages?.[0]?.id;
+        externalId = await this.withQuote(messageId, msg.replyToExternalId, (mid) => this.wa.sendText(to, msg.text ?? '', mid).then((r) => r.messages?.[0]?.id));
       }
       const fresh = await this.prisma.channelMessage.findUniqueOrThrow({ where: { id: messageId }, select: { status: true, externalId: true } });
       await this.prisma.channelMessage
@@ -693,23 +790,58 @@ export class MetaChatsService {
     }
   }
 
-  private async messageOut(id: string) {
-    return this.prisma.channelMessage.findUniqueOrThrow({ where: { id }, include: MESSAGE_INCLUDE });
+  /**
+   * 21.11.2026 — отправка текста цитатой. Если Meta цитату не приняла (старое
+   * или недоступное сообщение), текст уходит без неё, а метка цитаты у нас
+   * снимается — CRM не должна показывать цитату, которой клиент не видит.
+   */
+  private async withQuote(messageId: string, mid: string | null, send: (mid: string | null) => Promise<string | undefined>): Promise<string | undefined> {
+    if (!mid) return send(null);
+    try {
+      return await send(mid);
+    } catch (e) {
+      if (!(e instanceof MetaApiError) || e.reason !== 'REJECTED') throw e;
+      this.logger.warn(`Цитата не принята Meta (${e.detail ?? ''}) — сообщение ${messageId} уходит без неё`);
+      await this.prisma.channelMessage.update({ where: { id: messageId }, data: { replyToExternalId: null } }).catch(() => undefined);
+      return send(null);
+    }
   }
 
-  async sendText(conversationId: string, rawText: string, user: CurrentUser, clientId?: string) {
+  private async messageOut(id: string) {
+    const m = await this.prisma.channelMessage.findUniqueOrThrow({ where: { id }, include: MESSAGE_INCLUDE });
+    return (await this.withReplies([m]))[0];
+  }
+
+  async sendText(conversationId: string, rawText: string, user: CurrentUser, clientId?: string, replyToId?: string) {
     const conv = await this.loadConv(conversationId);
     this.assertEnabled(conv.channel as MetaChannel);
     this.assertCanReply(conv, user);
     this.assertWindow(conv);
     const text = rawText.trim();
     if (!text) throw new BadRequestException('Пустое сообщение');
+    // 21.11.2026 — ответ цитатой: на какое сообщение (у Meta — его id).
+    let replyToExternalId: string | null = null;
+    if (replyToId) {
+      const target = await this.prisma.channelMessage.findFirst({ where: { id: replyToId, conversationId, deletedAt: null }, select: { externalId: true } });
+      if (!target) throw new NotFoundException('Сообщение, на которое вы отвечаете, не найдено');
+      replyToExternalId = target.externalId;
+    }
     const parts = splitByBytes(text, TEXT_LIMIT_BYTES[conv.channel as MetaChannel]);
     const ids: string[] = [];
-    for (const part of parts) {
+    for (const [i, part] of parts.entries()) {
       const m = await this.prisma.channelMessage.create({
         // clientId у всех частей один: CRM заменяет своё временное сообщение всеми частями сразу.
-        data: { conversationId, direction: MessageDirection.OUTBOUND, text: part, status: 'SENDING', authorId: user.id, sentAt: new Date(), clientId: clientId ?? null },
+        data: {
+          conversationId,
+          direction: MessageDirection.OUTBOUND,
+          text: part,
+          status: 'SENDING',
+          authorId: user.id,
+          sentAt: new Date(),
+          clientId: clientId ?? null,
+          // Цитата — только у первой части длинного ответа.
+          replyToExternalId: i === 0 ? replyToExternalId : null,
+        },
         select: { id: true },
       });
       ids.push(m.id);
@@ -900,6 +1032,136 @@ export class MetaChatsService {
     await this.deliver(messageId);
     this.emit(conv.id, {}, [messageId]);
     return this.messageOut(messageId);
+  }
+
+  /**
+   * 21.11.2026 — ответ ИИ-помощника. Чат НЕ берётся (он остаётся свободным —
+   * в этом и смысл), непрочитанные НЕ гасятся: сотрудники должны увидеть,
+   * о чём клиент писал. Окно 24 часа и «свободен ли чат» проверяет ChatAiService.
+   */
+  async sendAsAi(conversationId: string, rawText: string): Promise<string[]> {
+    const conv = await this.loadConv(conversationId);
+    const channel = conv.channel as MetaChannel;
+    if (!configFor(channel).enabled) return [];
+    const text = rawText.trim();
+    if (!text) return [];
+    const ids: string[] = [];
+    for (const part of splitByBytes(text, TEXT_LIMIT_BYTES[channel])) {
+      const m = await this.prisma.channelMessage.create({
+        data: { conversationId, direction: MessageDirection.OUTBOUND, text: part, status: 'SENDING', byAi: true, sentAt: new Date() },
+        select: { id: true },
+      });
+      ids.push(m.id);
+      this.emit(conversationId, {}, [m.id]);
+      await this.deliver(m.id);
+    }
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessageText: preview(text) } });
+    this.emit(conversationId, {}, ids);
+    return ids;
+  }
+
+  /**
+   * 21.11.2026 — ❤️ на сообщение клиента (двойной щелчок, как в Instagram).
+   * emoji = null снимает реакцию. Только на сообщения клиента и только в окне
+   * 24 часа — те же правила, что у ответа.
+   */
+  async react(messageId: string, emoji: string | null, user: CurrentUser) {
+    const msg = await this.prisma.channelMessage.findFirst({
+      where: { id: messageId, deletedAt: null },
+      select: { id: true, conversationId: true, direction: true, externalId: true, deletedByContactAt: true },
+    });
+    if (!msg) throw new NotFoundException('Сообщение не найдено');
+    const conv = await this.loadConv(msg.conversationId);
+    const channel = conv.channel as MetaChannel;
+    this.assertEnabled(channel);
+    this.assertCanReply(conv, user);
+    this.assertWindow(conv);
+    if (msg.direction !== MessageDirection.INBOUND || !msg.externalId || msg.deletedByContactAt) {
+      throw new BadRequestException('Реакцию можно поставить только на сообщение клиента');
+    }
+    if (emoji !== null && emoji !== '❤️') throw new BadRequestException('Доступна реакция ❤️');
+    try {
+      if (channel === 'INSTAGRAM') await this.ig.react(conv.externalId, msg.externalId, !!emoji);
+      else await this.wa.sendReaction(conv.externalId, msg.externalId, emoji ?? '');
+    } catch (e) {
+      const err = e instanceof MetaApiError ? e : new MetaApiError('NETWORK', null, null, (e as Error).message);
+      if (err.reason === 'TOKEN_INVALID') await this.tokens.markRefused(channel);
+      throw new BadRequestException({ statusCode: 400, error: err.reason, message: FAILURE_TEXT[err.reason] });
+    }
+    await this.prisma.channelMessage.update({ where: { id: msg.id }, data: { ourReaction: emoji } });
+    this.emit(conv.id, {}, [msg.id]);
+    return this.messageOut(msg.id);
+  }
+
+  /**
+   * 21.11.2026 — клиент видит «печатает…», пока сотрудник набирает ответ.
+   * Только Instagram (у WhatsApp такого действия без «прочитано» нет), не чаще
+   * раза в 4 секунды на чат; ошибка Meta здесь не важна — это украшение.
+   */
+  async typing(conversationId: string, user: CurrentUser) {
+    const conv = await this.loadConv(conversationId);
+    if (conv.channel !== 'INSTAGRAM' || !configFor('INSTAGRAM').enabled) return { ok: false };
+    this.assertCanReply(conv, user);
+    if (!conv.lastIncomingAt || Date.now() - conv.lastIncomingAt.getTime() > REPLY_WINDOW_MS) return { ok: false };
+    this.sendTyping(conv.id, conv.externalId);
+    return { ok: true };
+  }
+
+  /** То же для ИИ-помощника — без проверки прав сотрудника. */
+  sendTyping(conversationId: string, contactId: string) {
+    const last = this.typingSentAt.get(conversationId) ?? 0;
+    if (Date.now() - last < 4000) return;
+    this.typingSentAt.set(conversationId, Date.now());
+    this.ig.senderAction(contactId, 'typing_on').catch((e) => this.logger.debug?.(`typing_on: ${(e as Error).message}`));
+  }
+
+  /**
+   * 21.11.2026 — сотрудник открыл чат с непрочитанными: у клиента в Instagram
+   * появляется «Просмотрено», как при ответе из приложения. Фоном.
+   */
+  markSeen(conversationId: string) {
+    void (async () => {
+      const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, deletedAt: null }, select: { channel: true, externalId: true, lastIncomingAt: true } });
+      if (!conv || conv.channel !== 'INSTAGRAM' || !configFor('INSTAGRAM').enabled) return;
+      if (!conv.lastIncomingAt || Date.now() - conv.lastIncomingAt.getTime() > REPLY_WINDOW_MS) return;
+      await this.ig.senderAction(conv.externalId, 'mark_seen');
+    })().catch((e) => this.logger.debug?.(`mark_seen: ${(e as Error).message}`));
+  }
+
+  /**
+   * 21.11.2026 — выключатель ИИ в этом чате и «Понятно» на просьбу ИИ о
+   * менеджере. Права — как у ответа: свободный чат — любой сотрудник, занятый —
+   * ответственный и руководство.
+   */
+  async setAi(conversationId: string, dto: { off?: boolean; clearHandoff?: boolean }, user: CurrentUser) {
+    const conv = await this.loadConv(conversationId);
+    if (conv.assignedToId && conv.assignedToId !== user.id && !isPrivileged(user.role)) {
+      throw new ForbiddenException(`Чат ведёт ${conv.assignedTo?.fullName ?? 'другой сотрудник'} — менять его могут ответственный и руководство.`);
+    }
+    const data: Prisma.ConversationUpdateInput = {};
+    if (dto.off !== undefined) {
+      data.aiOff = dto.off;
+      data.aiOffReason = dto.off ? 'STAFF' : null;
+    }
+    if (dto.clearHandoff) {
+      data.aiHandoffAt = null;
+      data.aiHandoffReason = null;
+    }
+    await this.prisma.conversation.update({ where: { id: conv.id }, data });
+    if (dto.off !== undefined) {
+      this.activity
+        .log({
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'AI_CHAT_SETTINGS',
+          studentId: conv.studentId,
+          studentName: conv.title ?? null,
+          details: `${dto.off ? 'Выключен' : 'Включён'} ИИ-помощник в чате ${conv.channel === 'INSTAGRAM' ? 'Instagram' : 'WhatsApp'}${conv.username ? ` @${conv.username}` : ''}`,
+        })
+        .catch(() => undefined);
+    }
+    this.emit(conv.id, {});
+    return this.prisma.conversation.findUniqueOrThrow({ where: { id: conv.id }, include: CONVERSATION_INCLUDE });
   }
 
   // =================================================================== чат

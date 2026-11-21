@@ -19,6 +19,11 @@ export type GeminiRole = 'user' | 'model';
 export interface GeminiTurn {
   role: GeminiRole;
   text: string;
+  /**
+   * 21.11.2026 — фото и голосовые клиента для ИИ в Instagram: файл целиком в
+   * запросе (inline_data, base64). Gemini сам слушает аудио и смотрит фото.
+   */
+  media?: Array<{ mimeType: string; data: string }>;
 }
 
 export interface GeminiRequest {
@@ -43,6 +48,14 @@ export interface GeminiRequest {
   thinkingBudget?: number;
   /** Секунды до отказа. Без него зависший запрос держал бы воркер бесконечно. */
   timeoutSec?: number;
+  /**
+   * 21.11.2026 — ответ строго в JSON по схеме (responseSchema Gemini). Нужен
+   * ИИ в Instagram: кроме текста ответа он отдаёт данные клиента и признак
+   * «нужен менеджер», и разбирать их из свободного текста было бы ненадёжно.
+   */
+  responseSchema?: Record<string, unknown>;
+  /** По умолчанию 0.2 — помощнику по регламентам творчество не нужно. */
+  temperature?: number;
 }
 
 export interface GeminiResult {
@@ -66,10 +79,16 @@ export class GeminiError extends Error {
   }
 }
 
-const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
+const DEFAULT_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta';
+
+/**
+ * GEMINI_API_URL — только для проверок: подменный сервер вместо Google, чтобы
+ * прогонять сценарии ИИ без расходов и без живого ключа. В бою не задаётся.
+ */
+const endpoint = () => `${(process.env.GEMINI_API_URL || DEFAULT_ENDPOINT).trim().replace(/\/+$/, '')}/models`;
 
 export async function callGemini(req: GeminiRequest): Promise<GeminiResult> {
-  const url = `${ENDPOINT}/${encodeURIComponent(req.model)}:generateContent`;
+  const url = `${endpoint()}/${encodeURIComponent(req.model)}:generateContent`;
 
   // AbortController, а не опция таймаута fetch: последней в Node нет, а без
   // ограничения по времени зависший запрос к внешнему сервису держал бы
@@ -100,16 +119,23 @@ export async function callGemini(req: GeminiRequest): Promise<GeminiResult> {
       signal: controller.signal,
       body: JSON.stringify({
         system_instruction: { parts: [{ text: req.system }] },
-        contents: req.turns.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
+        contents: req.turns.map((t) => ({
+          role: t.role,
+          parts: [
+            ...(t.media ?? []).map((m) => ({ inline_data: { mime_type: m.mimeType, data: m.data } })),
+            ...(t.text || !t.media?.length ? [{ text: t.text }] : []),
+          ],
+        })),
         generationConfig: {
           maxOutputTokens: req.maxOutputTokens,
+          ...(req.responseSchema ? { responseMimeType: 'application/json', responseSchema: req.responseSchema } : {}),
           // thinkingConfig, а не thinkingLevel: последнего в v1beta нет, запрос
           // с ним отлетает с 400 «Unknown name thinkingLevel» (проверено).
           ...(req.thinkingBudget ? { thinkingConfig: { thinkingBudget: req.thinkingBudget } } : {}),
           // Низкая температура намеренно: помощник обязан пересказывать
           // регламент, а не сочинять вариации. Творчество здесь — это
           // выдуманный порядок действий, за которым сотрудник пойдёт в работу.
-          temperature: 0.2,
+          temperature: req.temperature ?? 0.2,
         },
       }),
     });

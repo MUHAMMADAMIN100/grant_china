@@ -2173,6 +2173,17 @@ model Conversation {
   contactPicture   String?
   profileCheckedAt DateTime?
 
+  // 21.11.2026 — ИИ-помощник в Instagram. Он отвечает сам, пока чат свободный
+  // (assignedToId = null). aiOff — ИИ выключен в ЭТОМ чате: сотрудник нажал
+  // выключатель (aiOffReason = 'STAFF') или ответил клиенту прямо из
+  // приложения Instagram ('APP'). aiHandoff* — ИИ попросил менеджера:
+  // вопрос вне памятки, клиент просит человека, ошибка. Снимается, когда
+  // сотрудник ответил или нажал «Понятно».
+  aiOff           Boolean   @default(false)
+  aiOffReason     String?
+  aiHandoffAt     DateTime?
+  aiHandoffReason String?
+
   messages ChannelMessage[]
 
   createdAt DateTime  @default(now())
@@ -2241,6 +2252,10 @@ model ChannelMessage {
   replyToExternalId String?
   // Реакция клиента на это сообщение (эмодзи); null — реакции нет.
   contactReaction   String?
+  // 21.11.2026 — наша реакция (❤️ двойным щелчком) на сообщение клиента.
+  ourReaction       String?
+  // 21.11.2026 — сообщение написал ИИ-помощник (authorId при этом null).
+  byAi              Boolean   @default(false)
   // Клиент удалил сообщение у себя. Строку не удаляем (правило проекта),
   // интерфейс показывает «Сообщение удалено клиентом» без текста.
   deletedByContactAt DateTime?
@@ -2295,6 +2310,22 @@ model ChatAttachment {
   createdAt DateTime @default(now())
 
   @@index([messageId])
+}
+
+// 21.11.2026 — быстрые ответы в «Диалогах»: менеджер набирает «/» и выбирает
+// готовую фразу. Список ведёт руководство; удаление — только deletedAt.
+model ChatQuickReply {
+  id          String    @id @default(uuid())
+  // Короткое имя, по которому ищут после «/»: «привет», «адрес».
+  title       String
+  text        String
+  sortOrder   Int       @default(0)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([deletedAt, sortOrder])
 }
 
 // 29.10.2026 — состояние интеграций «ключ → JSON»: продлённый ключ Instagram,

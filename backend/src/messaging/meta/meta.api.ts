@@ -159,8 +159,30 @@ export class InstagramApi {
     return this.call<{ name?: string; username?: string; profile_pic?: string }>(`/${encodeURIComponent(contactId)}?fields=name,username,profile_pic`);
   }
 
-  sendText(contactId: string, text: string) {
-    return this.call<{ message_id?: string }>(`${this.accountNode()}/messages`, { method: 'POST', body: { recipient: { id: contactId }, message: { text } } });
+  /** replyToMid — 21.11.2026: ответ цитатой на сообщение (у клиента видно, на что ответили). */
+  sendText(contactId: string, text: string, replyToMid?: string | null) {
+    return this.call<{ message_id?: string }>(`${this.accountNode()}/messages`, {
+      method: 'POST',
+      body: { recipient: { id: contactId }, message: { text }, ...(replyToMid ? { reply_to: { mid: replyToMid } } : {}) },
+    });
+  }
+
+  /**
+   * 21.11.2026 — действия без сообщения: «печатает…» (typing_on), «просмотрено»
+   * (mark_seen), реакция ❤️ на сообщение клиента (react / unreact).
+   */
+  senderAction(contactId: string, action: 'typing_on' | 'typing_off' | 'mark_seen') {
+    return this.call<{ recipient_id?: string }>(`${this.accountNode()}/messages`, {
+      method: 'POST',
+      body: { recipient: { id: contactId }, sender_action: action },
+    });
+  }
+
+  react(contactId: string, mid: string, on: boolean) {
+    return this.call<{ recipient_id?: string }>(`${this.accountNode()}/messages`, {
+      method: 'POST',
+      body: { recipient: { id: contactId }, sender_action: on ? 'react' : 'unreact', payload: on ? { message_id: mid, reaction: 'love' } : { message_id: mid } },
+    });
   }
 
   sendAttachment(contactId: string, type: 'image' | 'audio' | 'video' | 'file', url: string) {
@@ -213,8 +235,12 @@ export class WhatsAppApi {
     });
   }
 
-  sendText(to: string, body: string) {
-    return this.send(to, { type: 'text', text: { body, preview_url: false } });
+  sendText(to: string, body: string, replyToId?: string | null) {
+    return this.send(to, { type: 'text', text: { body, preview_url: false }, ...(replyToId ? { context: { message_id: replyToId } } : {}) });
+  }
+  /** 21.11.2026 — реакция на сообщение клиента; пустой emoji снимает её. */
+  sendReaction(to: string, messageId: string, emoji: string) {
+    return this.send(to, { type: 'reaction', reaction: { message_id: messageId, emoji } });
   }
   sendImage(to: string, link: string) {
     return this.send(to, { type: 'image', image: { link } });

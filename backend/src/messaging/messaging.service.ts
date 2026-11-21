@@ -189,7 +189,8 @@ export class MessagingService {
       }),
       this.prisma.channelMessage.count({ where }),
     ]);
-    return { items: items.reverse(), total, page, pageSize };
+    // 21.11.2026 — у ответов цитатой — то, на что ответили.
+    return { items: await this.meta.withReplies(items.reverse()), total, page, pageSize };
   }
 
   // ------------------------------------------------------------------
@@ -205,6 +206,8 @@ export class MessagingService {
       return { ok: true, unreadCount: conversation.unreadCount };
     }
     await this.prisma.conversation.update({ where: { id }, data: { unreadCount: 0 } });
+    // 21.11.2026 — у клиента в Instagram появляется «Просмотрено».
+    if (conversation.unreadCount > 0 && isMetaChannel(conversation.channel)) this.meta.markSeen(id);
     return { ok: true, unreadCount: 0 };
   }
 
@@ -288,7 +291,7 @@ export class MessagingService {
     const conversation = await this.loadForMutation(id, user);
     // 29.10.2026 — Instagram / WhatsApp: длинный текст режется по байтам на
     // несколько сообщений, поэтому в ответе массив; CRM понимает оба вида.
-    if (isMetaChannel(conversation.channel)) return this.meta.sendText(id, dto.text, user, dto.clientId);
+    if (isMetaChannel(conversation.channel)) return this.meta.sendText(id, dto.text, user, dto.clientId, dto.replyToId);
     if (!canSendTo(conversation.channel)) {
       throw new BadRequestException(
         `Отправка в канал «${conversation.channel}» пока не подключена — ответьте клиенту в самом мессенджере.`,

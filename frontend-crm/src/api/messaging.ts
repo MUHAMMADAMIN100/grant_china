@@ -40,6 +40,12 @@ export interface Conversation {
   accountId?: string | null;
   lastIncomingAt?: string | null;
   contactPicture?: string | null;
+  /** 21.11.2026 — ИИ выключен в этом чате ('STAFF' — сотрудником, 'APP' — ответили из приложения Instagram). */
+  aiOff?: boolean;
+  aiOffReason?: string | null;
+  /** ИИ попросил менеджера: когда и почему. */
+  aiHandoffAt?: string | null;
+  aiHandoffReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -98,6 +104,21 @@ export interface ChannelMessage {
   chatAttachments?: ChatAttachment[];
   /** 09.11.2026 — метка временного сообщения: по ней оно заменяется настоящим, без дубля. */
   clientId?: string | null;
+  /** 21.11.2026 — наша ❤️ на сообщение клиента; сообщение написал ИИ; ответ цитатой. */
+  ourReaction?: string | null;
+  byAi?: boolean;
+  replyToExternalId?: string | null;
+  replyTo?: ReplyPreview | null;
+}
+
+/** 21.11.2026 — то, на что ответили цитатой. */
+export interface ReplyPreview {
+  id: string;
+  direction: 'INBOUND' | 'OUTBOUND';
+  byAi: boolean;
+  text: string | null;
+  kind: string | null;
+  deleted: boolean;
 }
 
 /**
@@ -168,10 +189,95 @@ export async function listConversationMessages(id: string, params: { page?: numb
   return data;
 }
 
-/** Instagram / WhatsApp режут длинный текст на части — тогда сервер вернёт массив. */
-export async function sendConversationMessage(id: string, text: string, clientId?: string) {
-  const { data } = await api.post<ChannelMessage | ChannelMessage[]>(`/messaging/conversations/${id}/messages`, { text, clientId });
+/** Instagram / WhatsApp режут длинный текст на части — тогда сервер вернёт массив. replyToId — ответ цитатой. */
+export async function sendConversationMessage(id: string, text: string, clientId?: string, replyToId?: string) {
+  const { data } = await api.post<ChannelMessage | ChannelMessage[]>(`/messaging/conversations/${id}/messages`, { text, clientId, ...(replyToId ? { replyToId } : {}) });
   return Array.isArray(data) ? data : [data];
+}
+
+// ---------------------------------------------------------------- 21.11.2026 — как в Instagram
+
+/** ❤️ на сообщение клиента; null — снять. */
+export async function reactToMessage(messageId: string, emoji: '❤️' | null) {
+  const { data } = await api.post<ChannelMessage>(`/messaging/messages/${messageId}/react`, { emoji });
+  return data;
+}
+
+/** Клиент видит «печатает…». Сервер сам шлёт не чаще раза в 4 секунды. */
+export async function sendTyping(id: string) {
+  await api.post(`/messaging/conversations/${id}/typing`);
+}
+
+/** ИИ в этом чате: выключить/включить; clearHandoff — снять «нужен менеджер». */
+export async function setConversationAi(id: string, payload: { off?: boolean; clearHandoff?: boolean }) {
+  const { data } = await api.patch<Conversation>(`/messaging/conversations/${id}/ai`, payload);
+  return data;
+}
+
+export interface AiChatSettings {
+  enabled: boolean;
+  notes: string;
+  updatedAt: string | null;
+  updatedByName: string | null;
+  /** Ключ Gemini на сервере задан. */
+  available: boolean;
+  /** Instagram подключён. */
+  instagram: boolean;
+  model: string;
+  /** Шаблон памятки для кнопки «Вставить шаблон». */
+  template: string;
+}
+
+export async function getAiSettings() {
+  const { data } = await api.get<AiChatSettings>('/messaging/ai/settings');
+  return data;
+}
+
+export async function saveAiSettings(payload: { enabled?: boolean; notes?: string }) {
+  const { data } = await api.put<AiChatSettings>('/messaging/ai/settings', payload);
+  return data;
+}
+
+export interface AiTestResult {
+  reply: string;
+  handoff: boolean;
+  handoffReason: string | null;
+  lead: { fullName?: string; phone?: string; age?: string; interest?: string; direction?: string } | null;
+  ms: number;
+  model: string;
+}
+
+/** «Проверить ИИ»: ничего не уходит в Instagram и не пишется в базу. */
+export async function testAi(messages: Array<{ from: 'client' | 'ai'; text: string }>, notes?: string) {
+  const { data } = await api.post<AiTestResult>('/messaging/ai/test', { messages, notes }, { timeout: 90_000 });
+  return data;
+}
+
+export interface QuickReply {
+  id: string;
+  title: string;
+  text: string;
+  sortOrder: number;
+  updatedAt: string;
+}
+
+export async function listQuickReplies() {
+  const { data } = await api.get<QuickReply[]>('/messaging/quick-replies');
+  return data;
+}
+
+export async function createQuickReply(payload: { title: string; text: string }) {
+  const { data } = await api.post<QuickReply>('/messaging/quick-replies', payload);
+  return data;
+}
+
+export async function updateQuickReply(id: string, payload: { title?: string; text?: string; sortOrder?: number }) {
+  const { data } = await api.patch<QuickReply>(`/messaging/quick-replies/${id}`, payload);
+  return data;
+}
+
+export async function deleteQuickReply(id: string) {
+  await api.delete(`/messaging/quick-replies/${id}`);
 }
 
 // ---------------------------------------------------------------- 29.10.2026 — Instagram / WhatsApp

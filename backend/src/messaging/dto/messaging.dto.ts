@@ -17,6 +17,12 @@ export class SendMessageDto {
   @IsString()
   @MaxLength(64)
   clientId?: string;
+
+  // 21.11.2026 — ответ цитатой: id нашего сообщения (ChannelMessage.id), на которое отвечают.
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  replyToId?: string;
 }
 
 /**

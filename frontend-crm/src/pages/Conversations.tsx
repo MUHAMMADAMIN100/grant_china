@@ -1,29 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   assignConversation,
+  attachmentUrl,
   conversationPictureUrl,
+  getAiSettings,
   getConversation,
   linkConversation,
   listChannels,
   listConversationMessages,
   listConversations,
+  listQuickReplies,
   markConversationRead,
+  reactToMessage,
   releaseConversation,
   retryChatMessage,
   sendChatFile,
   sendChatLocation,
   sendChatVoice,
   sendConversationMessage,
+  sendTyping,
+  setConversationAi,
   takeConversation,
+  type AiChatSettings,
   type ChannelMessage,
   type ChannelOption,
   type Conversation,
   type ConversationUpdatedEvent,
   type MetaChannelStatus,
+  type QuickReply,
 } from '../api/messaging';
-import { listApplications } from '../api/applications';
 import { listUsers } from '../api/users';
 import type { Application, User } from '../api/types';
 import { isPrivileged } from '../api/types';
@@ -34,13 +41,21 @@ import { useUrlFilter } from '../hooks/useUrlFilter';
 import { formatDateTimeRu } from '../utils/datetime';
 import { isTempId, removeById, replaceById, runOptimistic, tempId } from '../utils/optimistic';
 import { FAILURE_TEXT, isMetaChannel, windowOpen } from '../utils/chatLimits';
-import ChatMessageBubble from '../components/chat/ChatMessageBubble';
+import ChatMessageList from '../components/chat/ChatMessageList';
+import { isViewable, isVideoAtt } from '../components/chat/ChatMessageBubble';
 import ChatComposer, { type ComposerEdit } from '../components/chat/ChatComposer';
 import ChatApplicationModal from '../components/chat/ChatApplicationModal';
+import ChatInfoPanel from '../components/chat/ChatInfoPanel';
+import ChatLightbox, { type LightboxItem } from '../components/chat/ChatLightbox';
+import AiSettingsModal from '../components/chat/AiSettingsModal';
+import QuickRepliesModal from '../components/chat/QuickRepliesModal';
 import Icon from '../Icon';
+import '../chat-dm.css';
 
 const PAGE_SIZE = 30;
 const MESSAGES_PAGE_SIZE = 100;
+/** Панель «Сведения» открыта или нет — помнит браузер сотрудника. */
+const INFO_KEY = 'gc.chat.info';
 
 const errText = (e: any, fallback: string) => {
   const m = e?.response?.data?.message;
@@ -54,8 +69,11 @@ const STATUS_RANK: Record<string, number> = { SENDING: 0, SENT: 1, DELIVERED: 2,
 function newerOf(prev: ChannelMessage, next: ChannelMessage): ChannelMessage {
   const a = prev.status;
   const b = next.status;
-  if (a && b && a !== 'FAILED' && b !== 'FAILED' && (STATUS_RANK[b] ?? 0) < (STATUS_RANK[a] ?? 0)) return { ...next, status: a };
-  return next;
+  let out = next;
+  if (a && b && a !== 'FAILED' && b !== 'FAILED' && (STATUS_RANK[b] ?? 0) < (STATUS_RANK[a] ?? 0)) out = { ...next, status: a };
+  // Событие без превью цитаты (старая копия) не стирает уже известное.
+  if (out.replyTo === undefined && prev.replyTo !== undefined) out = { ...out, replyTo: prev.replyTo };
+  return out;
 }
 
 /**
@@ -88,6 +106,17 @@ const byLastMessage = (list: Conversation[]) => [...list].sort((a, b) => b.lastM
 const newClientId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `c-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
+/** «сейчас», «5 мин», «3 ч», «2 дн», «4 нед» — как в списке чатов Instagram. */
+function ago(iso: string, now: number): string {
+  const s = Math.max(0, (now - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'сейчас';
+  if (s < 3600) return `${Math.floor(s / 60)} мин`;
+  if (s < 86400) return `${Math.floor(s / 3600)} ч`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)} дн`;
+  if (s < 365 * 86400) return `${Math.floor(s / (7 * 86400))} нед`;
+  return `${Math.floor(s / (365 * 86400))} г`;
+}
+
 /** Короткий сигнал о сообщении клиента (без файла-звука). */
 function beep() {
   try {
@@ -114,9 +143,23 @@ const META_STATE_TEXT: Record<MetaChannelStatus['state'], string> = {
   CONNECTED: 'подключён',
 };
 
+const readInfoOpen = () => {
+  try {
+    return localStorage.getItem(INFO_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
 /**
  * ТЗ 6.4 — «единое окно» переписки с клиентами: Telegram, а с 29.10.2026 —
  * Instagram Direct и WhatsApp через приложения Meta.
+ *
+ * 21.11.2026 — по виду и удобству как Instagram Direct: список чатов с
+ * аватарками слева, переписка с пузырями посередине, «Сведения» о чате
+ * справа по кнопке ⓘ (туда переехали ответственный, привязка, «Создать
+ * заявку», «Отпустить»); ответ цитатой, ❤️, фото на весь экран, смайлы,
+ * быстрые ответы, «Просмотрено» и «печатает…». Плюс ИИ-помощник в Instagram.
  *
  * Instagram / WhatsApp (решения владельца): все видят все чаты; свободный чат
  * берёт тот, кто ответил первым или нажал «Взять себе»; в занятом чате
@@ -151,29 +194,76 @@ export default function Conversations() {
   const [loadingThread, setLoadingThread] = useState(false);
   const messagesRef = useRef<ChannelMessage[]>([]);
   const itemsRef = useRef<Conversation[]>([]);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { itemsRef.current = items; }, [items]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const [users, setUsers] = useState<User[]>([]);
-  const [linkQuery, setLinkQuery] = useState('');
-  const [linkOptions, setLinkOptions] = useState<Application[]>([]);
-  const [linking, setLinking] = useState(false);
   const [edit, setEdit] = useState<ComposerEdit | null>(null);
+  const [replyTo, setReplyTo] = useState<ChannelMessage | null>(null);
   const [appModal, setAppModal] = useState(false);
+  const [aiModal, setAiModal] = useState(false);
+  const [qrModal, setQrModal] = useState(false);
   const [busyHead, setBusyHead] = useState(false);
-  // Окно 24 часа закрывается само — пересчитываем раз в минуту.
+  const [infoOpen, setInfoOpen] = useState(readInfoOpen);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [aiSettings, setAiSettings] = useState<Pick<AiChatSettings, 'enabled' | 'available'> | null>(null);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  /** Чаты, где ИИ сейчас готовит ответ («ИИ печатает…»). */
+  const [aiTyping, setAiTyping] = useState<Set<string>>(() => new Set());
+  // Окно 24 часа закрывается само, «5 мин» в списке растут — пересчитываем раз в минуту.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(INFO_KEY, infoOpen ? '1' : '0');
+    } catch {
+      /* не запоминаем — не страшно */
+    }
+  }, [infoOpen]);
+
   const threadRef = useRef<HTMLDivElement>(null);
   /** Лента следует за новыми сообщениями, только когда сотрудник внизу: читающего историю не дёргаем. */
   const stickRef = useRef(true);
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  // Планшет и телефон: «Диалоги» ровно до низа экрана. Высота меню и шапки
+  // там разная (меню сверху с подписями), поэтому меряем, а не угадываем
+  // в CSS — иначе поле ответа уезжало под край экрана.
+  useLayoutEffect(() => {
+    const fit = () => {
+      const el = pageRef.current;
+      if (!el) return;
+      if (window.innerWidth > 900) {
+        el.style.height = '';
+        return;
+      }
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      // Нижние отступы области раздела и основной колонки — из их стилей.
+      const pad = (node: Element | null) => (node ? parseFloat(getComputedStyle(node).paddingBottom) || 0 : 0);
+      const gap = pad(el.closest('.content')) + pad(el.closest('.main'));
+      el.style.height = `${Math.max(420, Math.floor(window.innerHeight - top - gap))}px`;
+    };
+    fit();
+    // Ещё раз — когда закончится входная анимация страницы (она сдвигает её на 10px).
+    const t = setTimeout(fit, 400);
+    window.addEventListener('resize', fit);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', fit);
+    };
+  }, []);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
 
-  // 09.11.2026 — ссылка «открыть переписку» из воронки: /conversations?c=<id>.
+  // 09.11.2026 — ссылка «открыть переписку» из воронки и из уведомлений: /conversations?c=<id>.
   // Открываем один раз и убираем параметр, чтобы «назад» к списку не открывал чат снова.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
@@ -191,19 +281,22 @@ export default function Conversations() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const loadList = useCallback((opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true);
-    listConversations({ search: search || undefined, channel: channel || undefined, mine, unread, page: 1, pageSize: PAGE_SIZE })
-      .then((res) => {
-        setItems(res.items);
-        setTotal(res.total);
-      })
-      .catch(() => {
-        setItems([]);
-        setTotal(0);
-      })
-      .finally(() => setLoading(false));
-  }, [search, channel, mine, unread]);
+  const loadList = useCallback(
+    (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) setLoading(true);
+      listConversations({ search: search || undefined, channel: channel || undefined, mine, unread, page: 1, pageSize: PAGE_SIZE })
+        .then((res) => {
+          setItems(res.items);
+          setTotal(res.total);
+        })
+        .catch(() => {
+          setItems([]);
+          setTotal(0);
+        })
+        .finally(() => setLoading(false));
+    },
+    [search, channel, mine, unread],
+  );
 
   useEffect(() => {
     const t = setTimeout(() => loadList(), 300);
@@ -221,9 +314,25 @@ export default function Conversations() {
   }, []);
   useEffect(loadChannels, [loadChannels]);
 
+  const loadAi = useCallback(() => {
+    getAiSettings()
+      .then((r) => setAiSettings({ enabled: r.enabled, available: r.available }))
+      .catch(() => setAiSettings(null));
+  }, []);
+  useEffect(loadAi, [loadAi]);
+
+  const loadQuick = useCallback(() => {
+    listQuickReplies()
+      .then(setQuickReplies)
+      .catch(() => {});
+  }, []);
+  useEffect(loadQuick, [loadQuick]);
+
   useEffect(() => {
     if (!isAdmin) return;
-    listUsers().then(setUsers).catch(() => {});
+    listUsers()
+      .then(setUsers)
+      .catch(() => {});
   }, [isAdmin]);
 
   /** Полная загрузка переписки (смена диалога). */
@@ -276,8 +385,14 @@ export default function Conversations() {
       .catch(() => {});
   }, []);
 
+  /** Когда открыли чат: касание по строке списка не должно «доходить» до шапки переписки. */
+  const openedAtRef = useRef(0);
   useEffect(() => {
+    openedAtRef.current = Date.now();
     setEdit(null);
+    setReplyTo(null);
+    setLightbox(null);
+    setHighlightId(null);
     if (!activeId) {
       setActive(null);
       setMessages([]);
@@ -292,7 +407,23 @@ export default function Conversations() {
   useEffect(() => {
     const el = threadRef.current;
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, aiTyping]);
+
+  // Фото и видео догружаются после прокрутки вниз и раздвигают ленту —
+  // если сотрудник был внизу, остаёмся внизу.
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    const onLoad = () => {
+      if (stickRef.current) el.scrollTop = el.scrollHeight;
+    };
+    el.addEventListener('load', onLoad, true);
+    el.addEventListener('loadedmetadata', onLoad, true);
+    return () => {
+      el.removeEventListener('load', onLoad, true);
+      el.removeEventListener('loadedmetadata', onLoad, true);
+    };
+  }, [active?.id]);
 
   const onThreadScroll = () => {
     const el = threadRef.current;
@@ -335,8 +466,14 @@ export default function Conversations() {
         if (isActive && activeTouchedRef.current < Date.now() - 1500) setActive(conv);
       }
       if (isActive && payload.messages?.length) {
-        touch(payload.messages);
-        setMessages((prev) => mergeMessages(prev, payload.messages!));
+        // ❤️ в очереди на отправку — на экране остаётся последнее желание сотрудника,
+        // промежуточные события сервера его не перещёлкивают.
+        const incoming = payload.messages.map((pm) => {
+          const w = reactWanted(pm.id);
+          return w === null ? pm : { ...pm, ourReaction: w ? '❤️' : null };
+        });
+        touch(incoming);
+        setMessages((prev) => mergeMessages(prev, incoming));
         if (payload.inbound && !document.hidden) {
           markConversationRead(activeNow!)
             .then((r) => setItems((prev) => prev.map((c) => (c.id === activeNow ? { ...c, unreadCount: r.unreadCount ?? 0 } : c))))
@@ -347,23 +484,41 @@ export default function Conversations() {
       // Список сверяем с сервером фоном: новый диалог, фильтры, счётчик.
       // Строку, которая уже на экране, событие обновило выше — это не мигнёт.
       if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
-      reloadTimerRef.current = setTimeout(() => {
-        reloadTimerRef.current = null;
-        loadList({ silent: true });
-      }, conv ? 1200 : 400);
+      reloadTimerRef.current = setTimeout(
+        () => {
+          reloadTimerRef.current = null;
+          loadList({ silent: true });
+        },
+        conv ? 1200 : 400,
+      );
 
       // Событие без сообщений (Telegram, назначение, «взять себе») — ленту перезапрашиваем.
       if (isActive && !payload.messages) {
         if (threadTimerRef.current) clearTimeout(threadTimerRef.current);
-        threadTimerRef.current = setTimeout(() => {
-          threadTimerRef.current = null;
-          const id = activeIdRef.current;
-          if (!id || id !== payload.id) return;
-          refreshThread(id);
-          if (!document.hidden) markConversationRead(id).catch(() => {});
-        }, conv ? 0 : 300);
+        threadTimerRef.current = setTimeout(
+          () => {
+            threadTimerRef.current = null;
+            const id = activeIdRef.current;
+            if (!id || id !== payload.id) return;
+            refreshThread(id);
+            if (!document.hidden) markConversationRead(id).catch(() => {});
+          },
+          conv ? 0 : 300,
+        );
       }
     },
+    // 21.11.2026 — «ИИ печатает…».
+    'conversation:typing': (p: { id?: string; ai?: boolean; on?: boolean }) => {
+      if (!p?.id) return;
+      setAiTyping((prev) => {
+        const next = new Set(prev);
+        if (p.on) next.add(p.id!);
+        else next.delete(p.id!);
+        return next;
+      });
+    },
+    'ai-chat:settings': () => loadAi(),
+    'quick-replies:updated': () => loadQuick(),
   });
   useEffect(
     () => () => {
@@ -373,26 +528,12 @@ export default function Conversations() {
     [],
   );
 
-  useEffect(() => {
-    const q = linkQuery.trim();
-    if (q.length < 2) {
-      setLinkOptions([]);
-      return;
-    }
-    const t = setTimeout(() => {
-      listApplications({ search: q })
-        .then((res) => setLinkOptions(res.slice(0, 10)))
-        .catch(() => setLinkOptions([]));
-    }, 300);
-    return () => clearTimeout(t);
-  }, [linkQuery]);
-
-  const channelLabel = (value: string) => channels.find((c) => c.value === value)?.label ?? value;
+  const channelLabel = (value: string) => channels.find((c) => c.value === value)?.label ?? (value === 'INSTAGRAM' ? 'Instagram' : value === 'WHATSAPP' ? 'WhatsApp' : value);
   const channelOutbound = (value: string) => channels.find((c) => c.value === value)?.outbound ?? false;
   const meta = active ? isMetaChannel(active.channel) : false;
   const takenByOther = !!active && meta && !!active.assignedToId && active.assignedToId !== me?.id;
   const canReplyMeta = !!active && meta && (!takenByOther || isAdmin);
-  /** Привязать к карточке, создать заявку: в занятом чате Instagram/WhatsApp — ответственный и руководство. */
+  /** Привязать к карточке, создать заявку, ИИ в чате: в занятом чате Instagram/WhatsApp — ответственный и руководство. */
   const canChangeChat = !meta || !takenByOther || isAdmin;
 
   /** Почему нельзя ответить (null — можно). */
@@ -407,6 +548,10 @@ export default function Conversations() {
     if (meta && !windowOpen(active.lastIncomingAt, now)) return `${FAILURE_TEXT.WINDOW_CLOSED} Ответить можно, когда клиент напишет снова.`;
     return null;
   })();
+
+  /** ИИ сейчас отвечает в этом чате сам. */
+  const aiActive = (c: Conversation) =>
+    c.channel === 'INSTAGRAM' && !!aiSettings?.enabled && !!aiSettings.available && !c.aiOff && !c.assignedToId && windowOpen(c.lastIncomingAt, now);
 
   type ConvPair = { items: Conversation[]; total: number; active: Conversation | null };
   const commitPairFor = (conversationId: string) => (next: ConvPair) => {
@@ -427,7 +572,7 @@ export default function Conversations() {
   const markTakenLocally = (id: string) => {
     if (!active || active.id !== id || !meta || active.assignedToId || !me) return;
     activeTouchedRef.current = Date.now();
-    const patch = { assignedToId: me.id, assignedTo: { id: me.id, fullName: me.fullName } };
+    const patch = { assignedToId: me.id, assignedTo: { id: me.id, fullName: me.fullName }, aiHandoffAt: null, aiHandoffReason: null };
     setActive((a) => (a && a.id === id ? { ...a, ...patch } : a));
     setItems((prev) => replaceById(prev, id, patch));
   };
@@ -440,7 +585,7 @@ export default function Conversations() {
   };
 
   /** Текст: оптимистично в ленту, ответ сервера подменяет временное сообщение (может вернуть несколько частей). */
-  const onSendText = async (text: string, editCtx: ComposerEdit | null): Promise<boolean> => {
+  const onSendText = async (text: string, editCtx: ComposerEdit | null, replyCtx: ChannelMessage | null): Promise<boolean> => {
     if (!activeId) return false;
     const id = activeId;
     if (editCtx?.retry) {
@@ -458,9 +603,8 @@ export default function Conversations() {
     const sentAt = new Date().toISOString();
     // 09.11.2026 — у временного сообщения метка clientId: настоящее приходит с
     // ней же (в ответе или раньше — событием вебсокета) и встаёт на его место.
-    // Раньше настоящее подтягивалось по сигналу, пока временное ещё висело, —
-    // сообщение задваивалось, а через миг одна копия пропадала.
     const clientId = newClientId();
+    const quote = replyCtx && !editCtx ? replyCtx : null;
     const pending: ChannelMessage = {
       id: tempId(),
       conversationId: id,
@@ -474,12 +618,26 @@ export default function Conversations() {
       createdAt: sentAt,
       status: meta ? 'SENDING' : null,
       clientId,
+      ...(quote
+        ? {
+            replyToExternalId: quote.externalId,
+            replyTo: {
+              id: quote.id,
+              direction: quote.direction,
+              byAi: !!quote.byAi,
+              text: quote.text,
+              kind: quote.chatAttachments?.[0]?.kind ?? null,
+              deleted: !!quote.deletedByContactAt,
+            },
+          }
+        : {}),
     };
     stickRef.current = true;
     if (activeIdRef.current === id) setMessages((prev) => [...prev, pending]);
     setItems((prev) => byLastMessage(replaceById(prev, id, { lastMessageText: text, lastMessageAt: sentAt })));
+    setReplyTo(null);
     try {
-      const msgs = await sendConversationMessage(id, text, clientId);
+      const msgs = await sendConversationMessage(id, text, clientId, quote?.id);
       touch(msgs);
       if (activeIdRef.current === id) setMessages((prev) => mergeMessages(prev.filter((m) => m.id !== pending.id), msgs));
       const last = msgs[msgs.length - 1];
@@ -494,6 +652,7 @@ export default function Conversations() {
       // Убираем только своё временное сообщение: всё, что за это время пришло
       // по вебсокету, остаётся на месте (раньше лента откатывалась к снимку).
       if (activeIdRef.current === id) setMessages((prev) => prev.filter((m) => m.id !== pending.id));
+      if (quote && activeIdRef.current === id) setReplyTo(quote);
       loadList({ silent: true });
       toast(errText(e, 'Не удалось отправить'), 'error');
       return false;
@@ -525,7 +684,74 @@ export default function Conversations() {
     }
   };
 
-  const onEdit = (m: ChannelMessage) => setEdit({ messageId: m.id, text: m.text ?? '', retry: m.status === 'FAILED' });
+  const onEdit = (m: ChannelMessage) => {
+    setReplyTo(null);
+    setEdit({ messageId: m.id, text: m.text ?? '', retry: m.status === 'FAILED' });
+  };
+
+  const onReply = (m: ChannelMessage) => {
+    setEdit(null);
+    setReplyTo(m);
+  };
+
+  /**
+   * ❤️ — сразу на экране, сервер подтверждает; не вышло — откат и причина.
+   * Щелчки по одному сообщению уходят СТРОГО по очереди: при быстром «поставил —
+   * снял» ответ на первый запрос приходил после второго щелчка и возвращал
+   * сердечко обратно (а у Meta порядок react/unreact мог перепутаться). Пока
+   * очередь не пуста, на экране — последнее желание сотрудника.
+   */
+  const reactQueueRef = useRef(new Map<string, { busy: boolean; want: boolean }>());
+  const reactWanted = (id: string): boolean | null => {
+    const st = reactQueueRef.current.get(id);
+    return st ? st.want : null;
+  };
+  const onReact = async (m: ChannelMessage, on: boolean) => {
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, ourReaction: on ? '❤️' : null } : x)));
+    const queue = reactQueueRef.current;
+    const st = queue.get(m.id) ?? { busy: false, want: on };
+    st.want = on;
+    queue.set(m.id, st);
+    if (st.busy) return;
+    st.busy = true;
+    let confirmed: boolean = !!m.ourReaction;
+    let last: ChannelMessage | null = null;
+    try {
+      while (confirmed !== st.want) {
+        const want = st.want;
+        last = await reactToMessage(m.id, want ? '❤️' : null);
+        confirmed = want;
+      }
+    } catch (e) {
+      toast(errText(e, 'Реакция не ушла'), 'error');
+    } finally {
+      queue.delete(m.id);
+      const final = last ? { ...last, ourReaction: confirmed ? '❤️' : null } : null;
+      if (final) touch([final]);
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? (final ? { ...x, ...final } : { ...x, ourReaction: confirmed ? '❤️' : null }) : x)));
+    }
+  };
+
+  /** Щелчок по цитате — к исходному сообщению с подсветкой. */
+  const onJump = (messageId: string) => {
+    const el = threadRef.current?.querySelector(`[data-id="${CSS.escape(messageId)}"]`);
+    if (!el) {
+      toast('Это сообщение выше — пролистайте переписку вверх', 'info');
+      return;
+    }
+    stickRef.current = false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightId(messageId);
+    setTimeout(() => setHighlightId((h) => (h === messageId ? null : h)), 1600);
+  };
+
+  const typingRef = useRef(0);
+  const onTyping = () => {
+    if (!activeId || !active || active.channel !== 'INSTAGRAM' || disabledReason) return;
+    if (Date.now() - typingRef.current < 3000) return;
+    typingRef.current = Date.now();
+    sendTyping(activeId).catch(() => {});
+  };
 
   /** Буфер обмена; если браузер его не дал (старый браузер, встроенное окно) — запасной способ. */
   const onCopy = async (text: string) => {
@@ -571,10 +797,7 @@ export default function Conversations() {
   const onLink = async (app: Application) => {
     if (!activeId) return;
     const id = activeId;
-    const label = `${app.fullName} · ${app.phone}`;
-    setLinking(true);
-    setLinkQuery('');
-    setLinkOptions([]);
+    setBusyHead(true);
     const saved = await runOptimistic<ConvPair, Conversation>({
       current: { items, total, active },
       optimistic: (prev) =>
@@ -585,19 +808,16 @@ export default function Conversations() {
       commit: commitPairFor(id),
       request: () => linkConversation(id, { applicationId: app.id }),
       reconcile: (prev, updated) => patchPair(prev, id, updated),
-      onError: (message) => {
-        setLinkQuery(label);
-        toast(message, 'error');
-      },
+      onError: (message) => toast(message, 'error'),
     });
-    setLinking(false);
+    setBusyHead(false);
     if (saved) toast('Диалог привязан к заявке', 'success');
   };
 
   const onUnlink = async () => {
     if (!activeId) return;
     const id = activeId;
-    setLinking(true);
+    setBusyHead(true);
     const saved = await runOptimistic<ConvPair, Conversation>({
       current: { items, total, active },
       optimistic: (prev) => patchPair(prev, id, { studentId: null, student: null, applicationId: null, application: null }),
@@ -606,7 +826,7 @@ export default function Conversations() {
       reconcile: (prev, updated) => patchPair(prev, id, updated),
       onError: (message) => toast(message, 'error'),
     });
-    setLinking(false);
+    setBusyHead(false);
     if (saved) toast('Привязка снята', 'success');
   };
 
@@ -628,212 +848,304 @@ export default function Conversations() {
     if (saved) toast(userId ? 'Ответственный назначен' : 'Ответственный снят', 'success');
   };
 
+  /** ИИ в этом чате: выключить/включить или «Понятно» на просьбу о менеджере. */
+  const onAi = async (payload: { off?: boolean; clearHandoff?: boolean }, okText: string) => {
+    if (!activeId) return;
+    const id = activeId;
+    const patch: Partial<Conversation> = {
+      ...(payload.off !== undefined ? { aiOff: payload.off, aiOffReason: payload.off ? 'STAFF' : null } : {}),
+      ...(payload.clearHandoff ? { aiHandoffAt: null, aiHandoffReason: null } : {}),
+    };
+    setBusyHead(true);
+    const saved = await runOptimistic<ConvPair, Conversation>({
+      current: { items, total, active },
+      optimistic: (prev) => patchPair(prev, id, patch),
+      commit: commitPairFor(id),
+      request: () => setConversationAi(id, payload),
+      reconcile: (prev, updated) => patchPair(prev, id, updated),
+      onError: (message) => toast(message, 'error'),
+    });
+    setBusyHead(false);
+    if (saved) toast(okText, 'success');
+  };
+
   const displayName = (c: Conversation) => c.title || (c.username ? `@${c.username}` : '') || (c.phone ? `+${c.phone.replace(/^\+/, '')}` : '') || 'Без имени';
-  const initials = (c: Conversation) => displayName(c).replace(/[^\p{L}\p{N} ]/gu, '').split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase() || '?';
+  const initials = (c: Conversation) =>
+    displayName(c)
+      .replace(/[^\p{L}\p{N} ]/gu, '')
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0])
+      .join('')
+      .toUpperCase() || '?';
+  const avatar = (c: Conversation, size: number, extra?: string) => (
+    <span className={`dm-avatar ch-${c.channel.toLowerCase()}${extra ? ` ${extra}` : ''}`} style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}>
+      {c.contactPicture ? <img src={conversationPictureUrl(c.id)} alt="" loading="lazy" /> : initials(c)}
+    </span>
+  );
   const metaProblems = metaStatus.filter((m) => m.state === 'MISCONFIGURED' || m.state === 'TOKEN_REFUSED');
+  const igStatus = metaStatus.find((m) => m.value === 'INSTAGRAM');
+  const accountTitle = igStatus?.account && igStatus.state === 'CONNECTED' ? igStatus.account.replace(/^@/, '') : 'Диалоги';
+
+  /** Все фото и видео загруженной переписки — для просмотра на весь экран. */
+  const mediaItems: LightboxItem[] = useMemo(() => {
+    const list: LightboxItem[] = [];
+    for (const m of messages) {
+      if (m.deletedByContactAt) continue;
+      for (const a of m.chatAttachments ?? []) {
+        if (!isViewable(a)) continue;
+        const who = m.direction === 'INBOUND' ? active ? displayName(active) : 'Клиент' : m.byAi ? 'ИИ-помощник' : m.author?.fullName ?? 'Вы';
+        list.push({ id: a.id, src: attachmentUrl(a.id), kind: isVideoAtt(a) ? 'video' : 'image', caption: `${who} · ${formatDateTimeRu(m.sentAt)}` });
+      }
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, active?.id]);
+
+  const statusLine = (c: Conversation): { text: string; cls: string } | null => {
+    if (isMetaChannel(c.channel)) {
+      if (c.aiHandoffAt) return { text: 'Нужен менеджер', cls: 'warn' };
+      if (c.assignedTo) return { text: c.assignedToId === me?.id ? 'Ведёте вы' : `Ведёт ${c.assignedTo.fullName}`, cls: '' };
+      if (aiActive(c)) return { text: 'ИИ отвечает', cls: 'ai' };
+      return null;
+    }
+    if (!c.studentId && !c.applicationId) return { text: 'Не привязан к карточке', cls: '' };
+    return null;
+  };
+
+  const showInfo = infoOpen && !!active;
 
   return (
-    <motion.div className="card conv-page" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="card-header">
-        <h2 className="card-title">Диалоги</h2>
-        <div className="conv-count">{total > 0 ? `${total} диалогов` : ''}</div>
-      </div>
-
-      {isAdmin && metaStatus.length > 0 && (
-        <div className="card-body" style={{ paddingBottom: 0 }}>
-          <div className={`chat-meta-status${metaProblems.length ? ' warn' : ''}`} data-testid="meta-status">
-            {metaStatus.map((m) => (
-              <span key={m.value} className={`chat-meta-chip ${m.state.toLowerCase()}`} title={m.missing.length ? `Не хватает: ${m.missing.join(', ')}` : undefined}>
-                <strong>{m.value === 'INSTAGRAM' ? 'Instagram' : 'WhatsApp'}</strong>: {META_STATE_TEXT[m.state]}
-                {m.account ? ` · ${m.account}` : ''}
-                {m.missing.length ? ` (не хватает ${m.missing.join(', ')})` : ''}
-                {m.tokenExpiresAt ? ` · ключ до ${new Date(m.tokenExpiresAt).toLocaleDateString('ru-RU')}` : ''}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {isAdmin && telegramMisconfigured && (
-        <div className="card-body" style={{ paddingBottom: 0 }}>
-          <div className="kb-hint">
-            <Icon name="info" size={18} />
-            <div>
-              Клиентский Telegram-бот настроен не полностью — задайте <code>TELEGRAM_CLIENT_WEBHOOK_SECRET</code> в переменных окружения бэкенда.
+    <motion.div ref={pageRef} className="dm-page" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} data-testid="dm-page">
+      <div className={`dm-layout${activeId ? ' has-active' : ''}${showInfo ? ' has-info' : ''}`}>
+        {/* ------------------------- Список чатов ------------------------ */}
+        <div className="dm-list">
+          <div className="dm-list-head">
+            <div className="dm-list-title" title={total ? `${total} диалогов` : undefined}>
+              <span>{accountTitle}</span>
+              {igStatus?.state === 'CONNECTED' && <span className="dm-online" title="Instagram подключён" />}
             </div>
+            {isAdmin && (
+              <div className="dm-list-tools">
+                <button type="button" className="dm-icon-btn" onClick={() => setQrModal(true)} title="Быстрые ответы" aria-label="Быстрые ответы" data-testid="qr-open">
+                  <Icon name="bolt" size={22} />
+                </button>
+                <button
+                  type="button"
+                  className={`dm-icon-btn${aiSettings?.enabled ? ' ai-on' : ''}`}
+                  onClick={() => setAiModal(true)}
+                  title={aiSettings?.enabled ? 'ИИ-помощник включён — настройки' : 'ИИ-помощник выключен — настройки'}
+                  aria-label="ИИ-помощник"
+                  data-testid="ai-open"
+                >
+                  <Icon name="auto_awesome" size={22} />
+                </button>
+              </div>
+            )}
           </div>
-        </div>
-      )}
 
-      <div className={`conv-layout${activeId ? ' has-active' : ''}`}>
-        {/* ------------------------- Список диалогов ------------------------ */}
-        <div className="conv-list">
-          <div className="conv-filters">
-            <input placeholder="Имя, телефон, текст..." value={search} onChange={(e) => setFilters({ search: e.target.value })} />
-            <select value={channel} onChange={(e) => setFilters({ channel: e.target.value })}>
-              <option value="">Все каналы</option>
-              {channels.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
+          {isAdmin && metaProblems.length > 0 && (
+            <div className="dm-warn" data-testid="meta-status">
+              {metaProblems.map((m) => (
+                <div key={m.value}>
+                  <Icon name="warning" size={16} />
+                  <span>
+                    <strong>{m.value === 'INSTAGRAM' ? 'Instagram' : 'WhatsApp'}</strong>: {META_STATE_TEXT[m.state]}
+                    {m.account ? ` · ${m.account}` : ''}
+                    {m.missing.length ? ` (не хватает ${m.missing.join(', ')})` : ''}
+                  </span>
+                </div>
               ))}
-            </select>
-            <div className="conv-chips">
-              <button className={`conv-chip${mine ? ' active' : ''}`} onClick={() => setFilters({ mine: mine ? '' : '1' })}>Мои</button>
-              <button className={`conv-chip${unread ? ' active' : ''}`} onClick={() => setFilters({ unread: unread ? '' : '1' })}>Непрочитанные</button>
             </div>
+          )}
+          {isAdmin && telegramMisconfigured && (
+            <div className="dm-warn">
+              <div>
+                <Icon name="info" size={16} />
+                <span>
+                  Клиентский Telegram-бот настроен не полностью — задайте <code>TELEGRAM_CLIENT_WEBHOOK_SECRET</code>.
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="dm-search">
+            <Icon name="search" size={18} />
+            <input placeholder="Поиск: имя, ник, телефон" value={search} onChange={(e) => setFilters({ search: e.target.value })} data-testid="conv-search" />
+            {search && (
+              <button type="button" onClick={() => setFilters({ search: '' })} aria-label="Очистить поиск">
+                <Icon name="cancel" size={16} />
+              </button>
+            )}
           </div>
 
-          <div className="conv-items">
+          <div className="dm-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={!mine && !unread} className={`dm-tab${!mine && !unread ? ' active' : ''}`} onClick={() => setFilters({ mine: '', unread: '' })}>
+              Все
+            </button>
+            <button type="button" role="tab" aria-selected={mine} className={`dm-tab${mine ? ' active' : ''}`} onClick={() => setFilters({ mine: mine ? '' : '1' })} data-testid="tab-mine">
+              Мои
+            </button>
+            <button type="button" role="tab" aria-selected={unread} className={`dm-tab${unread ? ' active' : ''}`} onClick={() => setFilters({ unread: unread ? '' : '1' })} data-testid="tab-unread">
+              Непрочитанные
+            </button>
+            {channels.length > 1 && (
+              <select className="dm-channel-select" value={channel} onChange={(e) => setFilters({ channel: e.target.value })} aria-label="Канал" data-testid="channel-select">
+                <option value="">Все каналы</option>
+                {channels.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div className="dm-items">
             {loading ? (
-              <div className="empty">Загрузка...</div>
+              <div className="dm-empty">Загрузка…</div>
             ) : items.length === 0 ? (
-              <div className="empty">
-                <div className="empty-icon"><Icon name="forum" size={40} /></div>
-                Диалогов нет
+              <div className="dm-empty">
+                <Icon name="forum" size={40} />
+                <div>{search || mine || unread || channel ? 'Ничего не найдено' : 'Диалогов пока нет'}</div>
               </div>
             ) : (
-              items.map((c) => (
-                <button
-                  key={c.id}
-                  className={`conv-item${c.id === activeId ? ' active' : ''}${c.unreadCount > 0 ? ' unread' : ''}`}
-                  onClick={() => setActiveId(c.id)}
-                  data-testid="conv-item"
-                >
-                  <div className="conv-item-row">
-                    <span className={`chat-avatar ch-${c.channel.toLowerCase()}`}>
-                      {c.contactPicture ? <img src={conversationPictureUrl(c.id)} alt="" loading="lazy" /> : initials(c)}
+              items.map((c) => {
+                const st = statusLine(c);
+                const unreadNow = c.unreadCount > 0;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`dm-item${c.id === activeId ? ' active' : ''}${unreadNow ? ' unread' : ''}`}
+                    onClick={() => setActiveId(c.id)}
+                    title={displayName(c)}
+                    data-testid="conv-item"
+                  >
+                    <span className="dm-item-avatar">
+                      {avatar(c, 56)}
+                      {c.channel !== 'INSTAGRAM' && <span className={`dm-ch-mark ch-${c.channel.toLowerCase()}`} title={channelLabel(c.channel)} />}
                     </span>
-                    <div className="conv-item-body">
-                      <div className="conv-item-top">
-                        <span className="conv-item-name">{displayName(c)}</span>
-                        {c.unreadCount > 0 && <span className="conv-badge">{c.unreadCount}</span>}
-                      </div>
-                      <div className="conv-item-preview">{c.lastMessageText || '—'}</div>
-                      <div className="conv-item-meta">
-                        <span className={`badge chat-ch-badge ch-${c.channel.toLowerCase()}`}>{channelLabel(c.channel)}</span>
-                        {isMetaChannel(c.channel) ? (
-                          c.assignedTo ? <span className="chat-owner">Ведёт: {c.assignedTo.fullName}</span> : <span className="badge badge-warning">Свободный</span>
-                        ) : (
-                          !c.studentId && !c.applicationId && <span className="badge badge-warning" title="Диалог ещё не привязан к карточке">Не привязан</span>
-                        )}
-                        <span>{formatDateTimeRu(c.lastMessageAt)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))
+                    <span className="dm-item-body">
+                      <span className="dm-item-name">{displayName(c)}</span>
+                      <span className="dm-item-preview">
+                        <span className="dm-item-text">{c.lastMessageText || '—'}</span>
+                        <span className="dm-item-dot">·</span>
+                        <span className="dm-item-ago">{ago(c.lastMessageAt, now)}</span>
+                      </span>
+                      {st && (
+                        <span className={`dm-item-status ${st.cls}`} data-testid="conv-status">
+                          {st.cls === 'ai' && <Icon name="auto_awesome" size={12} />}
+                          {st.cls === 'warn' && <Icon name="support_agent" size={13} />}
+                          {st.text}
+                        </span>
+                      )}
+                    </span>
+                    {unreadNow && <span className="dm-unread-dot" title={`Непрочитанных: ${c.unreadCount}`} data-testid="unread-dot" />}
+                  </button>
+                );
+              })
             )}
-            {!loading && total > items.length && <div className="conv-more">Показаны последние {items.length} из {total} — уточните поиск</div>}
+            {!loading && total > items.length && (
+              <div className="dm-more">
+                Показаны последние {items.length} из {total} — уточните поиск
+              </div>
+            )}
           </div>
         </div>
 
         {/* --------------------------- Переписка ---------------------------- */}
-        <div className="conv-thread">
+        <div className="dm-thread">
           {!activeId ? (
-            <div className="empty">
-              <div className="empty-icon"><Icon name="chat" size={48} /></div>
-              Выберите диалог слева
+            <div className="dm-empty dm-empty-thread">
+              <span className="dm-empty-ring">
+                <Icon name="send" size={40} />
+              </span>
+              <div className="dm-empty-title">Ваши сообщения</div>
+              <div>Выберите чат слева, чтобы начать переписку.</div>
             </div>
           ) : loadingThread && !active ? (
-            <div className="empty">Загрузка...</div>
+            <div className="dm-empty">Загрузка…</div>
           ) : !active ? (
-            <div className="empty">Диалог недоступен</div>
+            <div className="dm-empty">Диалог недоступен</div>
           ) : (
             <>
-              <div className="conv-thread-head">
-                <button type="button" className="conv-back" onClick={() => setActiveId(null)} aria-label="К списку диалогов">
-                  <Icon name="arrow_back" size={20} />
+              <div className="dm-thread-head">
+                <button type="button" className="dm-icon-btn dm-back" onClick={() => setActiveId(null)} aria-label="К списку диалогов">
+                  <Icon name="arrow_back" size={24} />
                 </button>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="conv-thread-name">{displayName(active)}</div>
-                  <div className="conv-thread-sub">
-                    {channelLabel(active.channel)}
-                    {active.username && ` · @${active.username}`}
-                    {active.phone && ` · +${active.phone.replace(/^\+/, '')}`}
-                    {meta && (active.assignedTo ? ` · ведёт ${active.assignedTo.fullName}` : ' · свободный чат')}
-                  </div>
-                </div>
-                <div className="conv-thread-links">
+                <button
+                  type="button"
+                  className="dm-thread-who"
+                  onClick={() => {
+                    // На телефоне то же касание, что открыло чат из списка, приходит
+                    // и сюда (шапка оказывается под пальцем) — «Сведения» открывались сами.
+                    if (Date.now() - openedAtRef.current < 600) return;
+                    setInfoOpen(true);
+                  }}
+                  title="Сведения о чате"
+                >
+                  {avatar(active, 44)}
+                  <span className="dm-thread-names">
+                    <span className="dm-thread-name">{displayName(active)}</span>
+                    <span className="dm-thread-sub">
+                      {[
+                        active.username ? `@${active.username}` : channelLabel(active.channel),
+                        meta ? (active.assignedTo ? (active.assignedToId === me?.id ? 'ведёте вы' : `ведёт ${active.assignedTo.fullName}`) : aiActive(active) ? 'отвечает ИИ' : 'свободный чат') : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </span>
+                </button>
+                <div className="dm-thread-actions">
+                  {active.aiHandoffAt && (
+                    <button type="button" className="dm-pill warn" onClick={() => setInfoOpen(true)} title={active.aiHandoffReason ?? undefined} data-testid="handoff-pill">
+                      <Icon name="support_agent" size={16} /> <span className="dm-pill-text">Нужен менеджер</span>
+                    </button>
+                  )}
                   {meta && !active.assignedToId && (
-                    <button className="btn btn-sm btn-primary" disabled={busyHead} onClick={() => headAction(() => takeConversation(active.id), 'Чат теперь ваш')} data-testid="take-btn">
+                    <button type="button" className="dm-btn-primary" disabled={busyHead} onClick={() => headAction(() => takeConversation(active.id), 'Чат теперь ваш')} data-testid="head-take-btn">
                       Взять себе
                     </button>
                   )}
-                  {meta && active.assignedToId && (active.assignedToId === me?.id || isAdmin) && (
-                    <button className="btn btn-sm btn-secondary" disabled={busyHead} onClick={() => headAction(() => releaseConversation(active.id), 'Чат снова свободен')} data-testid="release-btn">
-                      Отпустить
-                    </button>
-                  )}
-                  {meta && canChangeChat && !active.student && !active.application && (
-                    <button className="btn btn-sm btn-secondary" onClick={() => setAppModal(true)} data-testid="create-app-btn">
-                      <Icon name="note_add" size={16} /> Создать заявку
-                    </button>
-                  )}
-                  {active.student && (
-                    <Link to={`/students/${active.student.id}`} className="btn btn-sm btn-secondary">
-                      <Icon name="person" size={16} />
-                      {active.student.fullName}
-                    </Link>
-                  )}
-                  {!active.student && active.application && (
-                    <Link to={`/applications/${active.application.id}`} className="btn btn-sm btn-secondary" data-testid="app-link">
-                      <Icon name="description" size={16} />
-                      {active.application.fullName}
-                    </Link>
-                  )}
-                  {canChangeChat && (active.student || active.application) && (
-                    <button className="btn btn-sm btn-secondary" onClick={onUnlink} disabled={linking} title="Снять привязку">
-                      <Icon name="link_off" size={16} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className={`dm-icon-btn${showInfo ? ' on' : ''}`}
+                    onClick={() => setInfoOpen((v) => !v)}
+                    title="Сведения"
+                    aria-label="Сведения"
+                    aria-pressed={showInfo}
+                    data-testid="info-toggle"
+                  >
+                    <Icon name="info" size={26} />
+                  </button>
                 </div>
               </div>
 
-              {canChangeChat && !active.student && !active.application && (
-                <div className="conv-link-bar">
-                  <Icon name="link" size={16} />
-                  <input
-                    list="conv-link-options"
-                    value={linkQuery}
-                    onChange={(e) => setLinkQuery(e.target.value)}
-                    placeholder="Привязать к заявке: начните вводить ФИО..."
-                    disabled={linking}
-                  />
-                  <datalist id="conv-link-options">
-                    {linkOptions.map((a) => (
-                      <option key={a.id} value={`${a.fullName} · ${a.phone}`} />
-                    ))}
-                  </datalist>
-                  <button
-                    className="btn btn-sm btn-primary"
-                    disabled={linking || !linkOptions.some((a) => `${a.fullName} · ${a.phone}` === linkQuery.trim())}
-                    onClick={() => {
-                      const found = linkOptions.find((a) => `${a.fullName} · ${a.phone}` === linkQuery.trim());
-                      if (found) onLink(found);
-                    }}
-                  >
-                    Привязать
-                  </button>
-                </div>
-              )}
-
-              {isAdmin && (
-                <div className="conv-assign-bar">
-                  <label>Ответственный</label>
-                  <select value={active.assignedToId ?? ''} onChange={(e) => onAssign(e.target.value)} data-testid="assign-select">
-                    <option value="">Не назначен</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>{u.fullName}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="conv-messages" ref={threadRef} onScroll={onThreadScroll} data-testid="thread">
-                {loadingOlder && <div className="conv-more">Загружаем ранние сообщения…</div>}
-                {messages.map((m) => (
-                  <ChatMessageBubble key={m.id} m={m} canAct={canReplyMeta && !disabledReason} onRetry={onRetry} onEdit={onEdit} onCopy={onCopy} />
-                ))}
-                {messages.length === 0 && !loadingThread && <div className="empty">Сообщений пока нет</div>}
+              <div className="dm-messages" ref={threadRef} onScroll={onThreadScroll} data-testid="thread">
+                {loadingOlder && <div className="dm-more">Загружаем ранние сообщения…</div>}
+                <ChatMessageList
+                  messages={messages}
+                  conversation={active}
+                  avatar={(size) => avatar(active, size)}
+                  showIntro={!hasMore && !loadingThread}
+                  profileUrl={active.channel === 'INSTAGRAM' && active.username ? `https://www.instagram.com/${encodeURIComponent(active.username)}/` : null}
+                  aiTyping={aiTyping.has(active.id)}
+                  highlightId={highlightId}
+                  canAct={meta ? canReplyMeta && !disabledReason : !disabledReason}
+                  canReact={meta}
+                  canQuote={meta}
+                  onReply={onReply}
+                  onReact={onReact}
+                  onRetry={onRetry}
+                  onEdit={onEdit}
+                  onCopy={onCopy}
+                  onOpenMedia={(attId) => setLightbox(attId)}
+                  onJump={onJump}
+                />
+                {messages.length === 0 && !loadingThread && <div className="dm-empty small">Сообщений пока нет</div>}
               </div>
 
               <ChatComposer
@@ -842,6 +1154,12 @@ export default function Conversations() {
                 disabledReason={disabledReason}
                 edit={edit}
                 onCancelEdit={() => setEdit(null)}
+                replyTo={replyTo}
+                onCancelReply={() => setReplyTo(null)}
+                quickReplies={quickReplies}
+                canManageQuickReplies={isAdmin}
+                onManageQuickReplies={() => setQrModal(true)}
+                onTyping={onTyping}
                 onSendText={onSendText}
                 onSendFile={(file) => sendWith(() => sendChatFile(active.id, file), 'Файл не отправлен')}
                 onSendVoice={(blob) => sendWith(() => sendChatVoice(active.id, blob), 'Голосовое не отправлено')}
@@ -850,6 +1168,31 @@ export default function Conversations() {
             </>
           )}
         </div>
+
+        {/* --------------------------- Сведения ---------------------------- */}
+        {showInfo && active && (
+          <ChatInfoPanel
+            conversation={active}
+            meId={me?.id ?? null}
+            isAdmin={isAdmin}
+            users={users}
+            channelLabel={channelLabel(active.channel)}
+            canChangeChat={canChangeChat}
+            ai={aiSettings}
+            busy={busyHead}
+            avatar={avatar(active, 88)}
+            now={now}
+            onClose={() => setInfoOpen(false)}
+            onTake={() => headAction(() => takeConversation(active.id), 'Чат теперь ваш')}
+            onRelease={() => headAction(() => releaseConversation(active.id), 'Чат снова свободен')}
+            onAssign={onAssign}
+            onLink={onLink}
+            onUnlink={onUnlink}
+            onCreateApp={() => setAppModal(true)}
+            onToggleAi={(off) => onAi({ off }, off ? 'ИИ в этом чате выключен' : 'ИИ в этом чате включён')}
+            onClearHandoff={() => onAi({ clearHandoff: true }, 'Отметка снята')}
+          />
+        )}
       </div>
 
       <AnimatePresence>
@@ -866,8 +1209,10 @@ export default function Conversations() {
             }}
           />
         )}
+        {aiModal && <AiSettingsModal key="ai" onClose={() => setAiModal(false)} onSaved={(s) => setAiSettings({ enabled: s.enabled, available: s.available })} />}
+        {qrModal && <QuickRepliesModal key="qr" items={quickReplies} onClose={() => setQrModal(false)} onChanged={setQuickReplies} />}
+        {lightbox && mediaItems.length > 0 && <ChatLightbox key="lb" items={mediaItems} startId={lightbox} onClose={() => setLightbox(null)} />}
       </AnimatePresence>
     </motion.div>
   );
 }
-

@@ -93,6 +93,7 @@ const ACTION_BADGE: Partial<Record<ActivityAction, string>> = {
   KNOWLEDGE_DELETE: 'badge-gray',
   CONVERSATION_LINK: 'badge-info',
   MESSAGE_SENT: 'badge-info',
+  AI_CHAT_SETTINGS: 'badge-info',
 };
 
 export default function Activity() {
@@ -207,7 +208,7 @@ export default function Activity() {
                   <span className="activity-time">{new Date(e.createdAt).toLocaleString('ru-RU')}</span>
                 </div>
                 <div className="activity-actor">
-                  <Icon name="person" size={14} /> {e.actorName} <span className="activity-role">({ROLE_LABEL[e.actorRole as Role] || e.actorRole})</span>
+                  <Icon name="person" size={14} /> {e.actorName} <span className="activity-role">({e.actorRole === 'AI' ? 'ИИ' : ROLE_LABEL[e.actorRole as Role] || e.actorRole})</span>
                 </div>
                 {e.studentName && (
                   <div className="activity-student">
