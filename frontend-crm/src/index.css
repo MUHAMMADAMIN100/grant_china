@@ -147,6 +147,41 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .logout-btn:hover { color: white; }
 
+/* 21.11.2026 — сворачиваемое меню: кнопка «‹‹» сужает его до значков,
+   название раздела — подсказкой при наведении. Положение помнит браузер. */
+.sidebar { transition: width .22s cubic-bezier(.22, 1, .36, 1); }
+.sidebar-logo { position: relative; gap: 8px; }
+.brand-short { display: none; }
+.sidebar-toggle {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  width: 30px; height: 30px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.5); transition: background .15s, color .15s;
+}
+.sidebar-toggle:hover, .sidebar-toggle:focus-visible { background: var(--bg-sidebar-hover); color: #fff; }
+.sidebar-nav-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 901px) {
+  .sidebar.collapsed { width: 72px; }
+  .sidebar.collapsed .brand-full, .sidebar.collapsed .sidebar-nav-label, .sidebar.collapsed .user-info { display: none; }
+  .sidebar.collapsed .brand-short { display: inline-flex; }
+  .sidebar.collapsed .sidebar-logo { flex-direction: column; padding: 14px 8px 10px; }
+  .sidebar.collapsed .sidebar-toggle { position: static; transform: none; }
+  .sidebar.collapsed .sidebar-nav { padding: 12px 10px; }
+  .sidebar.collapsed .sidebar-nav a { justify-content: center; padding: 11px 0; position: relative; }
+  .sidebar.collapsed .sidebar-nav-badge { position: absolute; top: 3px; right: 3px; margin: 0; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
+  .sidebar.collapsed .sidebar-user { flex-direction: column; padding: 12px 8px; gap: 8px; }
+}
+.sidebar-tip {
+  position: fixed; z-index: 1000; transform: translateY(-50%);
+  background: #111827; color: #fff; font-size: 13px; font-weight: 500;
+  padding: 6px 10px; border-radius: 8px; white-space: nowrap; pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0,0,0,.25);
+}
+.sidebar-tip::before {
+  content: ''; position: absolute; left: -4px; top: 50%; width: 8px; height: 8px;
+  background: #111827; transform: translateY(-50%) rotate(45deg);
+}
+
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .topbar {
   height: 64px; background: var(--bg-card);
@@ -1017,12 +1052,20 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 
 /* ===== TABLET (481–900) ===== */
 @media (max-width: 900px) {
+  /* 21.11.2026: раньше здесь стояло `.sidebar-nav a span:not(.sidebar-nav-icon)` —
+     правило прятало и подпись, и САМ значок (он тоже span внутри .sidebar-nav-icon),
+     поэтому на планшете в меню была только красная плашка без значков. Теперь
+     подпись — отдельный класс .sidebar-nav-label. */
   .sidebar { width: 72px; }
-  .sidebar-logo span:not(.sidebar-logo-mark), .sidebar-nav a span:not(.sidebar-nav-icon),
-  .user-info { display: none; }
+  .sidebar-nav-label, .brand-full, .user-info { display: none; }
+  .brand-short { display: inline-flex; }
+  .sidebar-toggle { display: none !important; }
   .sidebar-logo { padding: 12px 8px; }
   .sidebar-logo-image { height: 40px; }
-  .sidebar-nav a { justify-content: center; padding: 12px 10px; }
+  .sidebar-nav { padding: 12px 10px; }
+  .sidebar-nav a { justify-content: center; padding: 12px 10px; position: relative; }
+  .sidebar-nav a .sidebar-nav-badge { position: absolute; top: 3px; right: 3px; margin: 0; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
+  .sidebar-user { flex-direction: column; padding: 12px 8px; gap: 8px; }
   .form-grid-2 { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
   .content { padding: 18px; }
@@ -1102,7 +1145,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  .sidebar-logo, .sidebar-user { display: none; }
+  .sidebar-logo, .sidebar-user, .sidebar-tip { display: none; }
   .sidebar-nav {
     flex: 1; padding: 6px 4px;
     display: flex; justify-content: space-around;
@@ -1114,7 +1157,9 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
     padding: 8px 4px; font-size: 10px; border-radius: 6px;
     text-align: center; margin-bottom: 0; min-width: 60px;
   }
-  .sidebar-nav a span:not(.sidebar-nav-icon) {
+  .sidebar-nav a { position: static; }
+  .sidebar-nav a .sidebar-nav-badge { position: static; }
+  .sidebar-nav-label {
     display: block !important; font-size: 10px; line-height: 1.1;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }
@@ -1537,7 +1582,7 @@ select.input-error {
 
 /* ===== SMALL PHONES (до 380) ===== */
 @media (max-width: 380px) {
-  .sidebar-nav a span:not(.sidebar-nav-icon) { font-size: 9px; }
+  .sidebar-nav-label { font-size: 9px; }
   .content { padding: 10px; }
   .card-body { padding: 12px; }
   .btn.btn-large { padding: 10px 16px; }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../store/auth';
@@ -9,8 +10,49 @@ import { useRealtime } from '../realtime';
 import Icon from '../Icon';
 import UserActions from './UserActions';
 
+/** 21.11.2026 — положение меню (свёрнуто/развёрнуто) помнит браузер сотрудника. */
+const COLLAPSED_KEY = 'gc.sidebar.collapsed';
+const readCollapsed = () => {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+/** Планшет (721–900px): меню и так узкое — только значки, без кнопки. */
+const TABLET = '(min-width: 721px) and (max-width: 900px)';
+
 export default function Sidebar() {
   const user = useAuth((s) => s.user);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [tablet, setTablet] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(TABLET).matches);
+  // Подсказка с названием раздела у значка, когда подписи скрыты. Своя, а не
+  // title: системная появляется через секунду и выглядит чужеродно.
+  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
+  const iconsOnly = collapsed || tablet;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {
+      /* приватный режим — просто не запоминаем */
+    }
+    setTip(null);
+  }, [collapsed]);
+
+  useEffect(() => {
+    const mq = window.matchMedia?.(TABLET);
+    if (!mq) return;
+    const on = () => setTablet(mq.matches);
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
+
+  const showTip = (e: React.MouseEvent<HTMLElement>, label: string) => {
+    if (!iconsOnly) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    setTip({ label, top: r.top + r.height / 2, left: r.right + 10 });
+  };
   const [pendingCount, setPendingCount] = useState(0);
   const [unreadChats, setUnreadChats] = useState(0);
   const initials = user?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
@@ -95,21 +137,33 @@ export default function Sidebar() {
 
   return (
     <motion.aside
-      className="sidebar"
+      className={`sidebar${collapsed ? ' collapsed' : ''}`}
       initial={{ x: -80, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      data-testid="sidebar"
     >
-      <motion.div
-        className="sidebar-logo"
-        whileHover={{ scale: 1.03 }}
-        transition={{ type: 'spring', stiffness: 300 }}
-      >
-        <span className="brand-text">
+      <div className="sidebar-logo">
+        <span className="brand-text brand-full">
           <span className="brand-grant">GRANT</span>
           <span className="brand-china">CHINA</span>
         </span>
-      </motion.div>
+        <span className="brand-text brand-short" aria-hidden="true">
+          <span className="brand-grant">G</span>
+          <span className="brand-china">C</span>
+        </span>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={() => setCollapsed((v) => !v)}
+          title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+          aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+          aria-expanded={!collapsed}
+          data-testid="sidebar-toggle"
+        >
+          <Icon name={collapsed ? 'keyboard_double_arrow_right' : 'keyboard_double_arrow_left'} size={20} />
+        </button>
+      </div>
       <motion.nav
         className="sidebar-nav"
         initial="hidden"
@@ -127,7 +181,15 @@ export default function Sidebar() {
               show: { opacity: 1, x: 0, transition: { duration: 0.3 } },
             }}
           >
-            <NavLink to={l.to}>
+            <NavLink
+              to={l.to}
+              aria-label={l.label}
+              onMouseEnter={(e) => showTip(e, l.label)}
+              onMouseLeave={() => setTip(null)}
+              onFocus={(e) => showTip(e as unknown as React.MouseEvent<HTMLElement>, l.label)}
+              onBlur={() => setTip(null)}
+              onClick={() => setTip(null)}
+            >
               <motion.span
                 className="sidebar-nav-icon"
                 whileHover={{ scale: 1.2, rotate: 8 }}
@@ -135,7 +197,7 @@ export default function Sidebar() {
               >
                 <Icon name={l.icon} size={22} />
               </motion.span>
-              <span>{l.label}</span>
+              <span className="sidebar-nav-label">{l.label}</span>
               {!!l.badge && <span className="sidebar-nav-badge">{l.badge > 99 ? '99+' : l.badge}</span>}
             </NavLink>
           </motion.div>
@@ -162,6 +224,13 @@ export default function Sidebar() {
             блок скрыт, и те же кнопки стоят в шапке (см. Layout). */}
         <UserActions variant="sidebar" />
       </motion.div>
+      {tip &&
+        createPortal(
+          <div className="sidebar-tip" style={{ top: tip.top, left: tip.left }} role="tooltip">
+            {tip.label}
+          </div>,
+          document.body,
+        )}
     </motion.aside>
   );
 }
