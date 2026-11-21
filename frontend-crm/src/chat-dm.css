@@ -297,8 +297,10 @@ button.dm-reaction { cursor: pointer; }
   background: var(--dm-hover); border: 1px solid var(--dm-line); font-size: 13px; color: var(--dm-soft); text-align: center;
 }
 .dm-composer-disabled .material-symbols-rounded { flex-shrink: 0; }
-.dm-composer-bar { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; margin-bottom: 6px; border-left: 3px solid var(--dm-blue); background: var(--dm-hover); border-radius: 8px; }
-.dm-composer-bar.edit { border-left-color: #f5a623; }
+/* «Ответ клиенту» / «Исправление» над полем — как в Instagram: строка над полем
+   с тонким разделителем, без цветной полосы сбоку. */
+.dm-composer-bar { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; margin-bottom: 4px; border-top: 1px solid var(--dm-line); }
+.dm-composer-bar.edit .dm-composer-bar-title { color: #b45309; }
 .dm-composer-bar-body { flex: 1; min-width: 0; }
 .dm-composer-bar-title { display: flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; }
 .dm-composer-bar-text { font-size: 13px; color: var(--dm-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
