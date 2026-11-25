@@ -11,7 +11,10 @@ import { findRepeatOfId } from '../../common/application-repeat';
 import { claimFirstTouch } from '../../common/lead-touch';
 import {
   configFor,
+  instagramAccount,
+  instagramAccounts,
   instagramConfig,
+  type InstagramAccount,
   instagramLogin,
   isMetaChannel,
   OUTGOING_LIMITS,
@@ -98,6 +101,7 @@ const CONV_SELECT = {
   id: true,
   channel: true,
   externalId: true,
+  accountId: true,
   title: true,
   username: true,
   phone: true,
@@ -155,7 +159,10 @@ export const MESSAGE_INCLUDE = {
 @Injectable()
 export class MetaChatsService {
   private readonly logger = new Logger(MetaChatsService.name);
-  private statusCache = new Map<MetaChannel, { until: number; account: string | null }>();
+  /** Проверка состояния: ключ — канал ('WHATSAPP') или 'INSTAGRAM:<id аккаунта>'. */
+  private statusCache = new Map<string, { until: number; account: string | null }>();
+  /** 25.11.2026 — @имена наших аккаунтов Instagram (id → username) для подписей и уведомлений. */
+  private accountNames = new Map<string, string>();
   /** Чужие id аккаунтов, о которых уже написали в журнал (раз на id за жизнь процесса). */
   private foreignLogged = new Set<string>();
   /**
@@ -191,7 +198,9 @@ export class MetaChatsService {
     let processed = 0;
     let foreign = 0;
     for (const ev of events) {
-      if (ev.accountId !== cfg.accountId) {
+      // 25.11.2026 — Instagram: уведомление может быть для любого из подключённых аккаунтов.
+      const ours = channel === 'INSTAGRAM' ? instagramAccounts().some((a) => a.accountId === ev.accountId) : ev.accountId === cfg.accountId;
+      if (!ours) {
         // Чужой аккаунт (в т.ч. id «0» от кнопки «Тестировать») — пропускаем без текста в журнале.
         // 09.11.2026: настоящий чужой id пишем в журнал один раз — так видно, что
         // INSTAGRAM_ACCOUNT_ID/WHATSAPP_PHONE_NUMBER_ID записан неверно и сообщения
@@ -317,7 +326,7 @@ export class MetaChatsService {
 
     // Уведомления: новый чат — всем; сообщение в занятом — ответственному.
     const who = conv.title ?? conv.username ?? conv.phone ?? 'Клиент';
-    const label = channel === 'INSTAGRAM' ? 'Instagram' : 'WhatsApp';
+    const label = channel === 'INSTAGRAM' ? this.igLabel(conv.accountId ?? ev.accountId) : 'WhatsApp';
     if (conv.assignedToId) {
       this.notifications
         .notifyUser(conv.assignedToId, {
@@ -343,7 +352,7 @@ export class MetaChatsService {
     if (channel === 'INSTAGRAM') {
       const fresh = await this.prisma.conversation.findUnique({ where: { id: conv.id }, select: { profileCheckedAt: true } });
       const stale = !fresh?.profileCheckedAt || Date.now() - fresh.profileCheckedAt.getTime() > 7 * 86400_000;
-      if (stale) background.push(() => this.refreshInstagramProfile(conv.id, ev.contactId));
+      if (stale) background.push(() => this.refreshInstagramProfile(conv.id, ev.contactId, ev.accountId));
     }
   }
 
@@ -362,7 +371,7 @@ export class MetaChatsService {
       conv = await this.prisma.conversation
         .create({ data: { channel, externalId: ev.contactId, accountId: ev.accountId, lastMessageAt: ev.sentAt, unreadCount: 0 }, select: { id: true } })
         .catch(async () => this.prisma.conversation.findUniqueOrThrow({ where: { channel_externalId: { channel, externalId: ev.contactId } }, select: { id: true } }));
-      background.push(() => this.refreshInstagramProfile(conv!.id, ev.contactId));
+      background.push(() => this.refreshInstagramProfile(conv!.id, ev.contactId, ev.accountId));
     }
     // 09.11.2026 — место в Instagram уходит двумя сообщениями: картинка карты и
     // текст со ссылкой. Эхо картинки — часть нашего же «места», отдельным
@@ -534,10 +543,10 @@ export class MetaChatsService {
   }
 
   /** Имени в уведомлении Instagram нет — спрашиваем профиль; фото храним у себя. */
-  private async refreshInstagramProfile(conversationId: string, contactId: string) {
+  private async refreshInstagramProfile(conversationId: string, contactId: string, accountId?: string | null) {
     const data: Prisma.ConversationUpdateInput = { profileCheckedAt: new Date() };
     try {
-      const p = await this.ig.profile(contactId);
+      const p = await this.ig.profile(contactId, accountId);
       if (p.name || p.username) data.title = p.name || p.username;
       if (p.username) data.username = p.username;
       if (p.profile_pic) {
@@ -549,7 +558,7 @@ export class MetaChatsService {
         }
       }
     } catch (e) {
-      if (e instanceof MetaApiError && e.reason === 'TOKEN_INVALID') await this.tokens.markRefused('INSTAGRAM');
+      if (e instanceof MetaApiError && e.reason === 'TOKEN_INVALID') await this.tokens.markRefused('INSTAGRAM', accountId);
       this.logger.warn(`Instagram: профиль не получен: ${(e as MetaApiError).reason ?? (e as Error).message}`);
     }
     await this.prisma.conversation.update({ where: { id: conversationId }, data }).catch(() => undefined);
@@ -727,10 +736,12 @@ export class MetaChatsService {
   private async deliver(messageId: string) {
     const msg = await this.prisma.channelMessage.findUniqueOrThrow({
       where: { id: messageId },
-      include: { conversation: { select: { channel: true, externalId: true } }, chatAttachments: true },
+      include: { conversation: { select: { channel: true, externalId: true, accountId: true } }, chatAttachments: true },
     });
     const channel = msg.conversation.channel as MetaChannel;
     const to = msg.conversation.externalId;
+    // 25.11.2026 — ответ уходит из того аккаунта Instagram, в который написал клиент.
+    const acc = msg.conversation.accountId;
     const att = msg.chatAttachments[0];
     try {
       let externalId: string | undefined;
@@ -740,15 +751,15 @@ export class MetaChatsService {
           // потом текст с названием и ссылкой. id картинки запоминаем, чтобы её
           // эхо не стало отдельным сообщением в ленте (handleEcho).
           if (att.storedName) {
-            const img = await this.ig.sendAttachment(to, 'image', this.publicUrl(att.storedName));
+            const img = await this.ig.sendAttachment(to, 'image', this.publicUrl(att.storedName), acc);
             if (img.message_id) await this.prisma.chatAttachment.update({ where: { id: att.id }, data: { mediaId: img.message_id } }).catch(() => undefined);
           }
-          externalId = (await this.ig.sendText(to, msg.text ?? '')).message_id;
+          externalId = (await this.ig.sendText(to, msg.text ?? '', null, acc)).message_id;
         } else if (att) {
           const type = att.kind === 'IMAGE' ? 'image' : att.kind === 'AUDIO' ? 'audio' : att.kind === 'VIDEO' ? 'video' : 'file';
-          externalId = (await this.ig.sendAttachment(to, type, this.publicUrl(att.storedName!))).message_id;
+          externalId = (await this.ig.sendAttachment(to, type, this.publicUrl(att.storedName!), acc)).message_id;
         } else {
-          externalId = await this.withQuote(messageId, msg.replyToExternalId, (mid) => this.ig.sendText(to, msg.text ?? '', mid).then((r) => r.message_id));
+          externalId = await this.withQuote(messageId, msg.replyToExternalId, (mid) => this.ig.sendText(to, msg.text ?? '', mid, acc).then((r) => r.message_id));
         }
       } else if (att?.kind === 'LOCATION') {
         externalId = (await this.wa.sendLocation(to, att.latitude!, att.longitude!, att.name, att.address)).messages?.[0]?.id;
@@ -781,11 +792,11 @@ export class MetaChatsService {
           } else throw e;
         });
       // Ключ снова работает — состояние канала перепроверим сразу, а не через 10 минут.
-      if (await this.tokens.clearRefused(channel)) this.statusCache.delete(channel);
+      if (await this.tokens.clearRefused(channel, acc)) this.statusCache.delete(this.statusKey(channel, acc));
     } catch (e) {
       const err = e instanceof MetaApiError ? e : new MetaApiError('NETWORK', null, null, (e as Error).message);
       await this.prisma.channelMessage.update({ where: { id: messageId }, data: { status: 'FAILED', error: err.reason, errorDetail: err.detail } });
-      if (err.reason === 'TOKEN_INVALID') await this.tokens.markRefused(channel);
+      if (err.reason === 'TOKEN_INVALID') await this.tokens.markRefused(channel, acc);
       this.logger.warn(`${channel}: сообщение ${messageId} не ушло: ${err.reason} ${err.detail ?? ''}`.trim());
     }
   }
@@ -1081,11 +1092,11 @@ export class MetaChatsService {
     }
     if (emoji !== null && emoji !== '❤️') throw new BadRequestException('Доступна реакция ❤️');
     try {
-      if (channel === 'INSTAGRAM') await this.ig.react(conv.externalId, msg.externalId, !!emoji);
+      if (channel === 'INSTAGRAM') await this.ig.react(conv.externalId, msg.externalId, !!emoji, conv.accountId);
       else await this.wa.sendReaction(conv.externalId, msg.externalId, emoji ?? '');
     } catch (e) {
       const err = e instanceof MetaApiError ? e : new MetaApiError('NETWORK', null, null, (e as Error).message);
-      if (err.reason === 'TOKEN_INVALID') await this.tokens.markRefused(channel);
+      if (err.reason === 'TOKEN_INVALID') await this.tokens.markRefused(channel, conv.accountId);
       throw new BadRequestException({ statusCode: 400, error: err.reason, message: FAILURE_TEXT[err.reason] });
     }
     await this.prisma.channelMessage.update({ where: { id: msg.id }, data: { ourReaction: emoji } });
@@ -1103,16 +1114,16 @@ export class MetaChatsService {
     if (conv.channel !== 'INSTAGRAM' || !configFor('INSTAGRAM').enabled) return { ok: false };
     this.assertCanReply(conv, user);
     if (!conv.lastIncomingAt || Date.now() - conv.lastIncomingAt.getTime() > REPLY_WINDOW_MS) return { ok: false };
-    this.sendTyping(conv.id, conv.externalId);
+    this.sendTyping(conv.id, conv.externalId, conv.accountId);
     return { ok: true };
   }
 
   /** То же для ИИ-помощника — без проверки прав сотрудника. */
-  sendTyping(conversationId: string, contactId: string) {
+  sendTyping(conversationId: string, contactId: string, accountId?: string | null) {
     const last = this.typingSentAt.get(conversationId) ?? 0;
     if (Date.now() - last < 4000) return;
     this.typingSentAt.set(conversationId, Date.now());
-    this.ig.senderAction(contactId, 'typing_on').catch((e) => this.logger.debug?.(`typing_on: ${(e as Error).message}`));
+    this.ig.senderAction(contactId, 'typing_on', accountId).catch((e) => this.logger.debug?.(`typing_on: ${(e as Error).message}`));
   }
 
   /**
@@ -1121,10 +1132,10 @@ export class MetaChatsService {
    */
   markSeen(conversationId: string) {
     void (async () => {
-      const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, deletedAt: null }, select: { channel: true, externalId: true, lastIncomingAt: true } });
+      const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, deletedAt: null }, select: { channel: true, externalId: true, lastIncomingAt: true, accountId: true } });
       if (!conv || conv.channel !== 'INSTAGRAM' || !configFor('INSTAGRAM').enabled) return;
       if (!conv.lastIncomingAt || Date.now() - conv.lastIncomingAt.getTime() > REPLY_WINDOW_MS) return;
-      await this.ig.senderAction(conv.externalId, 'mark_seen');
+      await this.ig.senderAction(conv.externalId, 'mark_seen', conv.accountId);
     })().catch((e) => this.logger.debug?.(`mark_seen: ${(e as Error).message}`));
   }
 
@@ -1208,7 +1219,7 @@ export class MetaChatsService {
         direction: dto.direction,
         comment: dto.comment?.trim() || null,
         source: conv.channel,
-        sourceDetail: conv.username ? `@${conv.username}` : conv.channel === 'WHATSAPP' ? conv.phone : null,
+        sourceDetail: conv.channel === 'INSTAGRAM' ? this.sourceDetailFor(conv.username, conv.accountId) : conv.username ? `@${conv.username}` : conv.phone,
         [field]: owner.id,
         repeatOfId,
       },
@@ -1262,57 +1273,141 @@ export class MetaChatsService {
 
   // =================================================================== состояние
 
+  /** Ключ кэша проверки состояния: WhatsApp — один, Instagram — на каждый аккаунт. */
+  private statusKey(channel: MetaChannel, accountId?: string | null): string {
+    if (channel !== 'INSTAGRAM') return channel;
+    return `INSTAGRAM:${instagramAccount(accountId)?.accountId ?? accountId ?? ''}`;
+  }
+
+  /** «Instagram» или, когда аккаунтов несколько, «Instagram @grant_china_tj». */
+  igLabel(accountId?: string | null): string {
+    if (instagramAccounts().length < 2) return 'Instagram';
+    const id = instagramAccount(accountId)?.accountId ?? accountId ?? '';
+    const name = this.accountNames.get(id);
+    return name ? `Instagram @${name}` : 'Instagram';
+  }
+
+  /** Уточнение источника заявки: «@ник_клиента → @grant_china_tj» (решение владельца 25.11.2026). */
+  sourceDetailFor(clientUsername: string | null, accountId?: string | null): string | null {
+    const id = instagramAccount(accountId)?.accountId ?? accountId ?? '';
+    const ours = this.accountNames.get(id);
+    const client = clientUsername ? `@${clientUsername}` : null;
+    if (!ours) return client;
+    return client ? `${client} → @${ours}` : `→ @${ours}`;
+  }
+
+  /** Наши аккаунты Instagram для CRM (вкладки «Диалогов», галочки ИИ). */
+  instagramAccountsInfo(): Array<{ id: string; username: string | null; primary: boolean }> {
+    return instagramAccounts().map((a) => ({ id: a.accountId, username: this.accountNames.get(a.accountId) ?? null, primary: a.primary }));
+  }
+
+  /**
+   * При запуске: каждый аккаунт подписываем на уведомления (единый вход) и
+   * узнаём его @имя — оно нужно в уведомлениях и в уточнении источника заявки.
+   * В фоне: старт сервера от ответа Meta не зависит.
+   */
+  async warmUp() {
+    for (const acc of instagramAccounts()) {
+      await this.ig
+        .ensureSubscribed(acc.accountId)
+        .then((r) => r !== 'not-needed' && this.logger.log(`Instagram ${acc.accountId}: подписка на уведомления — ${r === 'already' ? 'уже есть' : 'оформлена'}`))
+        .catch((e) => this.logger.warn(`Instagram ${acc.accountId}: подписать на уведомления не удалось: ${e?.reason ?? ''} ${e?.detail ?? e?.message ?? ''}`.trim()));
+      await this.igAccountStatus(acc).catch(() => undefined);
+    }
+  }
+
+  /** Состояние одного аккаунта Instagram (проверка у Meta кэшируется: удачная — 10 мин, неудачная — 1 мин). */
+  private async igAccountStatus(acc: InstagramAccount) {
+    const key = this.statusKey('INSTAGRAM', acc.accountId);
+    const varName = acc.primary ? 'INSTAGRAM_ACCOUNT_ID' : 'id второго аккаунта (INSTAGRAM_ACCOUNT_ID_2…)';
+    let display: string | null = null;
+    const cached = this.statusCache.get(key);
+    if (cached && Date.now() < cached.until) display = cached.account;
+    else {
+      let ok = false;
+      try {
+        const me = await this.ig.account(acc.accountId);
+        if (me.username) this.accountNames.set(acc.accountId, me.username);
+        display = me.username ? `@${me.username}` : null;
+        if (me.id && me.id !== acc.accountId) display = `${display ?? ''} (id ${me.id} не совпадает с ${varName})`.trim();
+        await this.tokens.clearRefused('INSTAGRAM', acc.accountId);
+        ok = true;
+      } catch (e) {
+        if (e instanceof MetaApiError && e.reason === 'TOKEN_INVALID') await this.tokens.markRefused('INSTAGRAM', acc.accountId);
+        // 09.11.2026, единый вход: ключ рабочий, но аккаунта с таким id ему не
+        // выдано — подсказываем, какие выданы (25.11.2026 — для каждого аккаунта).
+        else if (e instanceof MetaApiError && e.reason === 'REJECTED' && instagramLogin() === 'unified') {
+          display = await this.ig
+            .assignedAccounts(acc.accountId)
+            .then((r) => {
+              const list = (r.data ?? []).map((a) => `${a.username ? `@${a.username} ` : ''}id ${a.id}`).join(', ');
+              return `${varName} ${acc.accountId} не найден у ключа${list ? ` — доступны: ${list}` : ' — ключу не выдан ни один аккаунт'}`;
+            })
+            .catch(() => `${varName} ${acc.accountId} недоступен этому ключу`);
+        }
+      }
+      this.statusCache.set(key, { until: Date.now() + (ok ? 10 * 60_000 : 60_000), account: display });
+    }
+    const refused = await this.tokens.isRefused('INSTAGRAM', acc.accountId);
+    return {
+      id: acc.accountId,
+      primary: acc.primary,
+      username: this.accountNames.get(acc.accountId) ?? null,
+      account: display,
+      state: (refused ? 'TOKEN_REFUSED' : 'CONNECTED') as 'TOKEN_REFUSED' | 'CONNECTED',
+    };
+  }
+
   /** Для «Диалогов»: не настроен / настроен не полностью / подключён / ключ отказан. */
   async channelStatus() {
-    const out: Array<{ value: MetaChannel; enabled: boolean; state: 'NOT_CONFIGURED' | 'MISCONFIGURED' | 'TOKEN_REFUSED' | 'CONNECTED'; account: string | null; missing: string[]; tokenExpiresAt: string | null }> = [];
+    type AccountStatus = Awaited<ReturnType<MetaChatsService['igAccountStatus']>>;
+    const out: Array<{
+      value: MetaChannel;
+      enabled: boolean;
+      state: 'NOT_CONFIGURED' | 'MISCONFIGURED' | 'TOKEN_REFUSED' | 'CONNECTED';
+      account: string | null;
+      missing: string[];
+      tokenExpiresAt: string | null;
+      /** 25.11.2026 — Instagram: каждый подключённый аккаунт отдельно. */
+      accounts?: AccountStatus[];
+    }> = [];
     for (const channel of ['INSTAGRAM', 'WHATSAPP'] as const) {
       const cfg = configFor(channel);
       if (!cfg.enabled) {
         out.push({ value: channel, enabled: false, state: cfg.missing.length ? 'MISCONFIGURED' : 'NOT_CONFIGURED', account: null, missing: cfg.missing, tokenExpiresAt: null });
         continue;
       }
+      if (channel === 'INSTAGRAM') {
+        const accounts = await Promise.all(instagramAccounts().map((a) => this.igAccountStatus(a)));
+        out.push({
+          value: channel,
+          enabled: true,
+          state: accounts.some((a) => a.state === 'TOKEN_REFUSED') ? 'TOKEN_REFUSED' : 'CONNECTED',
+          account: accounts.map((a) => a.account).filter(Boolean).join(' · ') || null,
+          missing: [],
+          tokenExpiresAt: await this.tokens.instagramTokenExpiresAt(),
+          accounts,
+        });
+        continue;
+      }
       let account: string | null = null;
-      const cached = this.statusCache.get(channel);
+      const key = this.statusKey(channel);
+      const cached = this.statusCache.get(key);
       if (cached && Date.now() < cached.until) account = cached.account;
       else {
         let ok = false;
         try {
-          if (channel === 'INSTAGRAM') {
-            const me = await this.ig.account();
-            account = me.username ? `@${me.username}` : null;
-            if (me.id && me.id !== cfg.accountId) account = `${account ?? ''} (id ${me.id} не совпадает с INSTAGRAM_ACCOUNT_ID)`.trim();
-          } else {
-            const p = await this.wa.phoneInfo();
-            account = [p.display_phone_number, p.verified_name].filter(Boolean).join(' · ') || null;
-          }
+          const p = await this.wa.phoneInfo();
+          account = [p.display_phone_number, p.verified_name].filter(Boolean).join(' · ') || null;
           await this.tokens.clearRefused(channel);
           ok = true;
         } catch (e) {
           if (e instanceof MetaApiError && e.reason === 'TOKEN_INVALID') await this.tokens.markRefused(channel);
-          // 09.11.2026, единый вход: ключ рабочий, но аккаунта с id из
-          // INSTAGRAM_ACCOUNT_ID ему не выдано — подсказываем, какие выданы.
-          else if (channel === 'INSTAGRAM' && e instanceof MetaApiError && e.reason === 'REJECTED' && instagramLogin() === 'unified') {
-            account = await this.ig
-              .assignedAccounts()
-              .then((r) => {
-                const list = (r.data ?? []).map((a) => `${a.username ? `@${a.username} ` : ''}id ${a.id}`).join(', ');
-                return `INSTAGRAM_ACCOUNT_ID ${cfg.accountId} не найден у ключа${list ? ` — доступны: ${list}` : ' — ключу не выдан ни один аккаунт'}`;
-              })
-              .catch(() => `INSTAGRAM_ACCOUNT_ID ${cfg.accountId} недоступен этому ключу`);
-          }
         }
-        // Удачную проверку помним 10 минут, неудачную — минуту (чтобы исправленный ключ было видно сразу).
-        this.statusCache.set(channel, { until: Date.now() + (ok ? 10 * 60_000 : 60_000), account });
+        this.statusCache.set(key, { until: Date.now() + (ok ? 10 * 60_000 : 60_000), account });
       }
       const refused = await this.tokens.isRefused(channel);
-      out.push({
-        value: channel,
-        enabled: true,
-        state: refused ? 'TOKEN_REFUSED' : 'CONNECTED',
-        account,
-        missing: [],
-        tokenExpiresAt: channel === 'INSTAGRAM' ? await this.tokens.instagramTokenExpiresAt() : null,
-      });
+      out.push({ value: channel, enabled: true, state: refused ? 'TOKEN_REFUSED' : 'CONNECTED', account, missing: [], tokenExpiresAt: null });
     }
     return out;
   }
@@ -1322,6 +1417,6 @@ export class MetaChatsService {
 export function logMetaConfig(logger: Logger) {
   for (const [label, cfg] of [['Instagram', instagramConfig()], ['WhatsApp', whatsappConfig()]] as const) {
     if (cfg.missing.length) logger.error(`${label}: настроено не полностью, не хватает ${cfg.missing.join(', ')}`);
-    else if (cfg.enabled) logger.log(`${label}: подключён (аккаунт ${cfg.accountId})`);
+    else if (cfg.enabled) logger.log(`${label}: подключён (аккаунт ${label === 'Instagram' ? instagramAccounts().map((a) => a.accountId).join(', ') : cfg.accountId})`);
   }
 }

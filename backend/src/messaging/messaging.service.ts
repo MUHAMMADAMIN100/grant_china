@@ -10,7 +10,7 @@ import { assignedToUserFilter, canAccessStudentRecord } from '../common/access';
 import { normalizePhone } from '../common/phone';
 import { canSendTo } from './channels';
 import { TelegramClientBotService } from './telegram-client.service';
-import { META_CHANNELS, isMetaChannel } from './meta/meta.config';
+import { META_CHANNELS, instagramAccount, isMetaChannel } from './meta/meta.config';
 import { MESSAGE_INCLUDE, MetaChatsService } from './meta/meta-chats.service';
 import { AssignConversationDto, LinkConversationDto, SendMessageDto } from './dto/messaging.dto';
 
@@ -112,10 +112,12 @@ export class MessagingService {
   // ------------------------------------------------------------------
 
   async listConversations(
-    filters: { mine?: boolean; unread?: boolean; channel?: string; search?: string; page?: number; pageSize?: number },
+    filters: { mine?: boolean; unread?: boolean; channel?: string; account?: string; search?: string; page?: number; pageSize?: number },
     user: CurrentUser,
   ) {
     const and: Prisma.ConversationWhereInput[] = [this.scopeWhere(user)];
+    // 25.11.2026 — вкладка аккаунта Instagram (решение владельца: отдельные вкладки).
+    if (filters.account) and.push(this.accountWhere(filters.account));
     if (filters.mine) and.push({ assignedToId: user.id });
     if (filters.unread) and.push({ unreadCount: { gt: 0 } });
     if (filters.channel) and.push({ channel: filters.channel });
@@ -148,6 +150,17 @@ export class MessagingService {
     return { items, total, page, pageSize };
   }
 
+  /**
+   * 25.11.2026 — чаты одной вкладки: id нашего аккаунта Instagram или 'other'
+   * (Telegram, WhatsApp). Старые чаты без accountId — у первого аккаунта.
+   */
+  private accountWhere(account: string): Prisma.ConversationWhereInput {
+    if (account === 'other') return { channel: { not: 'INSTAGRAM' } };
+    const acc = instagramAccount(account);
+    if (acc?.primary) return { channel: 'INSTAGRAM', OR: [{ accountId: account }, { accountId: null }] };
+    return { channel: 'INSTAGRAM', accountId: account };
+  }
+
   /** Счётчик для бейджа в меню — считает ровно то, что сотрудник увидит в списке. */
   async unreadCount(user: CurrentUser) {
     // Instagram / WhatsApp: «ждут ответа» — свободные чаты и мои. Чаты коллег
@@ -156,10 +169,20 @@ export class MessagingService {
     const notColleagues: Prisma.ConversationWhereInput = isPrivileged(user.role)
       ? {}
       : { OR: [{ channel: { notIn: [...META_CHANNELS] } }, { assignedToId: null }, { assignedToId: user.id }] };
-    const count = await this.prisma.conversation.count({
-      where: { deletedAt: null, unreadCount: { gt: 0 }, AND: [this.scopeWhere(user), notColleagues] },
-    });
-    return { count };
+    const where: Prisma.ConversationWhereInput = { deletedAt: null, unreadCount: { gt: 0 }, AND: [this.scopeWhere(user), notColleagues] };
+    // 25.11.2026 — счётчики вкладок «Диалогов»: по аккаунтам Instagram и «другие».
+    const [count, groups, hasOther] = await Promise.all([
+      this.prisma.conversation.count({ where }),
+      this.prisma.conversation.groupBy({ by: ['channel', 'accountId'], where, _count: { _all: true } }),
+      this.prisma.conversation.count({ where: { deletedAt: null, channel: { not: 'INSTAGRAM' }, AND: [this.scopeWhere(user)] } }).then((n) => n > 0),
+    ]);
+    const byAccount: Record<string, number> = {};
+    const primaryId = instagramAccount(null)?.accountId ?? '';
+    for (const g of groups) {
+      const key = g.channel === 'INSTAGRAM' ? g.accountId ?? primaryId : 'other';
+      byAccount[key] = (byAccount[key] ?? 0) + g._count._all;
+    }
+    return { count, byAccount, hasOther };
   }
 
   async findOne(id: string, user: CurrentUser) {

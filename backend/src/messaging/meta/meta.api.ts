@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { INSTAGRAM_WEBHOOK_FIELDS, instagramConfig, instagramLogin, whatsappConfig, type MetaChannel } from './meta.config';
+import { INSTAGRAM_WEBHOOK_FIELDS, instagramAccount, instagramConfig, instagramLogin, whatsappConfig, type MetaChannel } from './meta.config';
 import { graphRequest, MetaApiError, tokenFingerprint } from './meta.http';
 
 /**
@@ -46,28 +46,48 @@ export class MetaTokensService {
     return whatsappConfig().accessToken;
   }
 
-  async markRefused(channel: MetaChannel) {
-    const envToken = channel === 'INSTAGRAM' ? instagramConfig().accessToken : whatsappConfig().accessToken;
-    await this.setState(channel === 'INSTAGRAM' ? 'instagramStatus' : 'whatsappStatus', {
+  /**
+   * 25.11.2026 — отметка «ключ отказан» у каждого аккаунта Instagram своя:
+   * у первого — прежний ключ instagramStatus, у остальных — instagramStatus:<id>.
+   */
+  private statusKey(channel: MetaChannel, accountId?: string | null): string {
+    if (channel !== 'INSTAGRAM') return 'whatsappStatus';
+    const acc = instagramAccount(accountId);
+    return !acc || acc.primary ? 'instagramStatus' : `instagramStatus:${acc.accountId}`;
+  }
+
+  private envTokenOf(channel: MetaChannel, accountId?: string | null): string {
+    if (channel !== 'INSTAGRAM') return whatsappConfig().accessToken;
+    return instagramAccount(accountId)?.accessToken ?? instagramConfig().accessToken;
+  }
+
+  async markRefused(channel: MetaChannel, accountId?: string | null) {
+    await this.setState(this.statusKey(channel, accountId), {
       refused: true,
-      fingerprint: tokenFingerprint(envToken),
+      fingerprint: tokenFingerprint(this.envTokenOf(channel, accountId)),
       at: new Date().toISOString(),
     });
   }
 
   /** true — отметка «ключ отказан» стояла и снята (ключ снова работает). */
-  async clearRefused(channel: MetaChannel): Promise<boolean> {
-    const key = channel === 'INSTAGRAM' ? 'instagramStatus' : 'whatsappStatus';
+  async clearRefused(channel: MetaChannel, accountId?: string | null): Promise<boolean> {
+    const key = this.statusKey(channel, accountId);
     const st = await this.getState<{ refused?: boolean }>(key);
     if (!st?.refused) return false;
     await this.setState(key, { refused: false, at: new Date().toISOString() });
     return true;
   }
 
-  async isRefused(channel: MetaChannel): Promise<boolean> {
-    const envToken = channel === 'INSTAGRAM' ? instagramConfig().accessToken : whatsappConfig().accessToken;
-    const st = await this.getState<{ refused?: boolean; fingerprint?: string }>(channel === 'INSTAGRAM' ? 'instagramStatus' : 'whatsappStatus');
-    return !!st?.refused && st.fingerprint === tokenFingerprint(envToken);
+  async isRefused(channel: MetaChannel, accountId?: string | null): Promise<boolean> {
+    const st = await this.getState<{ refused?: boolean; fingerprint?: string }>(this.statusKey(channel, accountId));
+    return !!st?.refused && st.fingerprint === tokenFingerprint(this.envTokenOf(channel, accountId));
+  }
+
+  /** Ключ для запросов от имени аккаунта: у первого — с учётом продления, у остальных — из окружения. */
+  async instagramTokenFor(accountId?: string | null): Promise<string> {
+    const acc = instagramAccount(accountId);
+    if (!acc || acc.primary) return this.instagramToken();
+    return acc.accessToken;
   }
 
   /**
@@ -124,26 +144,34 @@ export class MetaTokensService {
  * единый вход — graph.facebook.com и id аккаунта в адресе; вход через
  * Instagram — graph.instagram.com и `/me`.
  */
+/**
+ * 25.11.2026 — у каждого метода последний параметр `acc`: id НАШЕГО аккаунта
+ * Instagram, от имени которого идёт запрос (Conversation.accountId). Пусто —
+ * первый аккаунт (так было до появления второго).
+ */
 @Injectable()
 export class InstagramApi {
   constructor(private tokens: MetaTokensService) {}
 
-  private async call<T>(pathAndQuery: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<T> {
-    return graphRequest<T>('INSTAGRAM', `${instagramConfig().apiUrl}${pathAndQuery}`, { ...init, token: await this.tokens.instagramToken() });
+  private async call<T>(pathAndQuery: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}, acc?: string | null): Promise<T> {
+    return graphRequest<T>('INSTAGRAM', `${instagramConfig().apiUrl}${pathAndQuery}`, { ...init, token: await this.tokens.instagramTokenFor(acc) });
   }
 
-  /** Узел аккаунта: при едином входе `/me` — системный пользователь, поэтому id из INSTAGRAM_ACCOUNT_ID. */
-  private accountNode(): string {
-    return instagramLogin() === 'unified' ? `/${encodeURIComponent(instagramConfig().accountId)}` : '/me';
+  /** Узел аккаунта: при едином входе `/me` — системный пользователь, поэтому id аккаунта. */
+  private accountNode(acc?: string | null): string {
+    if (instagramLogin() !== 'unified') return '/me';
+    const account = instagramAccount(acc);
+    if (!account) throw new MetaApiError('REJECTED', null, null, `Аккаунт Instagram ${acc} не подключён к CRM`);
+    return `/${encodeURIComponent(account.accountId)}`;
   }
 
   /** Аккаунт, от имени которого работает CRM: id и @имя. */
-  async account(): Promise<{ id: string | null; username: string | null }> {
+  async account(acc?: string | null): Promise<{ id: string | null; username: string | null }> {
     if (instagramLogin() === 'unified') {
-      const r = await this.call<{ id?: string; username?: string }>(`${this.accountNode()}?fields=id,username`);
+      const r = await this.call<{ id?: string; username?: string }>(`${this.accountNode(acc)}?fields=id,username`, {}, acc);
       return { id: r.id ?? null, username: r.username ?? null };
     }
-    const r = await this.call<{ user_id?: string; id?: string; username?: string }>('/me?fields=user_id,username');
+    const r = await this.call<{ user_id?: string; id?: string; username?: string }>('/me?fields=user_id,username', {}, acc);
     return { id: r.user_id ?? r.id ?? null, username: r.username ?? null };
   }
 
@@ -151,45 +179,48 @@ export class InstagramApi {
    * Единый вход: аккаунты Instagram, выданные ключу. Нужны, когда в
    * INSTAGRAM_ACCOUNT_ID записан не тот id, — CRM подскажет правильный.
    */
-  assignedAccounts() {
-    return this.call<{ data?: Array<{ id: string; username?: string }> }>('/me/assigned_instagram_accounts?fields=id,username');
+  assignedAccounts(acc?: string | null) {
+    return this.call<{ data?: Array<{ id: string; username?: string }> }>('/me/assigned_instagram_accounts?fields=id,username', {}, acc);
   }
 
-  profile(contactId: string) {
-    return this.call<{ name?: string; username?: string; profile_pic?: string }>(`/${encodeURIComponent(contactId)}?fields=name,username,profile_pic`);
+  profile(contactId: string, acc?: string | null) {
+    return this.call<{ name?: string; username?: string; profile_pic?: string }>(`/${encodeURIComponent(contactId)}?fields=name,username,profile_pic`, {}, acc);
   }
 
   /** replyToMid — 21.11.2026: ответ цитатой на сообщение (у клиента видно, на что ответили). */
-  sendText(contactId: string, text: string, replyToMid?: string | null) {
-    return this.call<{ message_id?: string }>(`${this.accountNode()}/messages`, {
-      method: 'POST',
-      body: { recipient: { id: contactId }, message: { text }, ...(replyToMid ? { reply_to: { mid: replyToMid } } : {}) },
-    });
+  sendText(contactId: string, text: string, replyToMid?: string | null, acc?: string | null) {
+    return this.call<{ message_id?: string }>(
+      `${this.accountNode(acc)}/messages`,
+      { method: 'POST', body: { recipient: { id: contactId }, message: { text }, ...(replyToMid ? { reply_to: { mid: replyToMid } } : {}) } },
+      acc,
+    );
   }
 
   /**
    * 21.11.2026 — действия без сообщения: «печатает…» (typing_on), «просмотрено»
    * (mark_seen), реакция ❤️ на сообщение клиента (react / unreact).
    */
-  senderAction(contactId: string, action: 'typing_on' | 'typing_off' | 'mark_seen') {
-    return this.call<{ recipient_id?: string }>(`${this.accountNode()}/messages`, {
-      method: 'POST',
-      body: { recipient: { id: contactId }, sender_action: action },
-    });
+  senderAction(contactId: string, action: 'typing_on' | 'typing_off' | 'mark_seen', acc?: string | null) {
+    return this.call<{ recipient_id?: string }>(`${this.accountNode(acc)}/messages`, { method: 'POST', body: { recipient: { id: contactId }, sender_action: action } }, acc);
   }
 
-  react(contactId: string, mid: string, on: boolean) {
-    return this.call<{ recipient_id?: string }>(`${this.accountNode()}/messages`, {
-      method: 'POST',
-      body: { recipient: { id: contactId }, sender_action: on ? 'react' : 'unreact', payload: on ? { message_id: mid, reaction: 'love' } : { message_id: mid } },
-    });
+  react(contactId: string, mid: string, on: boolean, acc?: string | null) {
+    return this.call<{ recipient_id?: string }>(
+      `${this.accountNode(acc)}/messages`,
+      {
+        method: 'POST',
+        body: { recipient: { id: contactId }, sender_action: on ? 'react' : 'unreact', payload: on ? { message_id: mid, reaction: 'love' } : { message_id: mid } },
+      },
+      acc,
+    );
   }
 
-  sendAttachment(contactId: string, type: 'image' | 'audio' | 'video' | 'file', url: string) {
-    return this.call<{ message_id?: string }>(`${this.accountNode()}/messages`, {
-      method: 'POST',
-      body: { recipient: { id: contactId }, message: { attachment: { type, payload: { url } } } },
-    });
+  sendAttachment(contactId: string, type: 'image' | 'audio' | 'video' | 'file', url: string, acc?: string | null) {
+    return this.call<{ message_id?: string }>(
+      `${this.accountNode(acc)}/messages`,
+      { method: 'POST', body: { recipient: { id: contactId }, message: { attachment: { type, payload: { url } } } } },
+      acc,
+    );
   }
 
   /**
@@ -198,16 +229,16 @@ export class InstagramApi {
    * проверяем при запуске и раз в 6 часов (джоба instagram-token). Если Meta
    * не примет часть полей — подписываем хотя бы на сообщения.
    */
-  async ensureSubscribed(): Promise<'subscribed' | 'already' | 'not-needed'> {
+  async ensureSubscribed(acc?: string | null): Promise<'subscribed' | 'already' | 'not-needed'> {
     if (instagramLogin() !== 'unified') return 'not-needed';
-    const node = `${this.accountNode()}/subscribed_apps`;
-    const current = await this.call<{ data?: Array<{ subscribed_fields?: string[] }> }>(node);
+    const node = `${this.accountNode(acc)}/subscribed_apps`;
+    const current = await this.call<{ data?: Array<{ subscribed_fields?: string[] }> }>(node, {}, acc);
     if (current.data?.some((app) => app.subscribed_fields?.includes('messages'))) return 'already';
     try {
-      await this.call(node, { method: 'POST', body: { subscribed_fields: INSTAGRAM_WEBHOOK_FIELDS.join(',') } });
+      await this.call(node, { method: 'POST', body: { subscribed_fields: INSTAGRAM_WEBHOOK_FIELDS.join(',') } }, acc);
     } catch (e) {
       if (!(e instanceof MetaApiError) || e.reason === 'TOKEN_INVALID' || e.reason === 'NETWORK') throw e;
-      await this.call(node, { method: 'POST', body: { subscribed_fields: 'messages' } });
+      await this.call(node, { method: 'POST', body: { subscribed_fields: 'messages' } }, acc);
     }
     return 'subscribed';
   }

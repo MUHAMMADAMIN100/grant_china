@@ -93,6 +93,7 @@ export class MessagingController {
     @Query('unread') unread?: string,
     @Query('channel') channel?: string,
     @Query('search') search?: string,
+    @Query('account') account?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -101,6 +102,7 @@ export class MessagingController {
         mine: mine === 'true',
         unread: unread === 'true',
         channel: channel || undefined,
+        account: account || undefined,
         search: search || undefined,
         page: parsePage(page),
         pageSize: parsePageSize(pageSize),

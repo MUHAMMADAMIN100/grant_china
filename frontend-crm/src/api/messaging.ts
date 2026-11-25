@@ -76,6 +76,17 @@ export interface MetaChannelStatus {
   account: string | null;
   missing: string[];
   tokenExpiresAt: string | null;
+  /** 25.11.2026 — Instagram: каждый подключённый аккаунт (вкладки «Диалогов»). */
+  accounts?: InstagramAccountStatus[];
+}
+
+export interface InstagramAccountStatus {
+  id: string;
+  username: string | null;
+  /** «@имя» или текст ошибки проверки. */
+  account: string | null;
+  state: 'CONNECTED' | 'TOKEN_REFUSED';
+  primary: boolean;
 }
 
 export interface ChannelMessageAttachment {
@@ -154,7 +165,7 @@ export async function listChannels() {
 }
 
 export async function listConversations(
-  filters: { mine?: boolean; unread?: boolean; channel?: string; search?: string; page?: number; pageSize?: number } = {},
+  filters: { mine?: boolean; unread?: boolean; channel?: string; account?: string; search?: string; page?: number; pageSize?: number } = {},
 ) {
   const { data } = await api.get<ConversationsPage>('/messaging/conversations', {
     params: {
@@ -167,7 +178,8 @@ export async function listConversations(
 }
 
 export async function conversationsUnreadCount() {
-  const { data } = await api.get<{ count: number }>('/messaging/conversations/unread-count');
+  // 25.11.2026 — byAccount: непрочитанные по вкладкам (id аккаунта Instagram или 'other'); hasOther — есть чаты других каналов.
+  const { data } = await api.get<{ count: number; byAccount?: Record<string, number>; hasOther?: boolean }>('/messaging/conversations/unread-count');
   return data;
 }
 
@@ -217,6 +229,10 @@ export async function setConversationAi(id: string, payload: { off?: boolean; cl
 export interface AiChatSettings {
   enabled: boolean;
   notes: string;
+  /** 25.11.2026 — в каких аккаунтах Instagram отвечает ИИ (id); null — во всех. */
+  accounts: string[] | null;
+  /** Подключённые аккаунты Instagram. */
+  igAccounts: Array<{ id: string; username: string | null; primary: boolean }>;
   updatedAt: string | null;
   updatedByName: string | null;
   /** Ключ Gemini на сервере задан. */
@@ -233,7 +249,7 @@ export async function getAiSettings() {
   return data;
 }
 
-export async function saveAiSettings(payload: { enabled?: boolean; notes?: string }) {
+export async function saveAiSettings(payload: { enabled?: boolean; notes?: string; accounts?: string[] | null }) {
   const { data } = await api.put<AiChatSettings>('/messaging/ai/settings', payload);
   return data;
 }

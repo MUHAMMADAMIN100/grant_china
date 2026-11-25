@@ -14,6 +14,8 @@ import { ChatAiService } from './chat-ai.service';
 export class AiSettingsDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsString() @MaxLength(30000) notes?: string;
+  // 25.11.2026 — в каких аккаунтах Instagram отвечает ИИ; null — во всех.
+  @IsOptional() @IsArray() @ArrayMaxSize(10) @IsString({ each: true }) accounts?: string[] | null;
 }
 
 export class AiTestMessageDto {

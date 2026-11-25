@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InstagramApi, MetaTokensService } from '../../messaging/meta/meta.api';
-import { instagramConfig, instagramLogin } from '../../messaging/meta/meta.config';
+import { instagramAccounts, instagramConfig, instagramLogin } from '../../messaging/meta/meta.config';
 import { MetaApiError } from '../../messaging/meta/meta.http';
 import { JobContext, JobResult, ScheduledJob } from '../job.contract';
 
@@ -29,16 +29,22 @@ export class InstagramTokenJob implements ScheduledJob {
   async run(ctx: JobContext): Promise<JobResult> {
     if (instagramLogin() === 'unified') {
       if (!instagramConfig().enabled) return { created: 0, skipped: 0, hasMore: false };
-      try {
-        const r = await this.ig.ensureSubscribed();
-        if (r === 'subscribed') ctx.logger.log('Instagram: аккаунт подписан на уведомления');
-        return { created: r === 'subscribed' ? 1 : 0, skipped: 0, hasMore: false };
-      } catch (e) {
-        const err = e as MetaApiError;
-        ctx.logger.warn(`Instagram: подписку на уведомления проверить не удалось: ${err.reason ?? ''} ${err.detail ?? ''}`.trim());
-        if (err.reason === 'TOKEN_INVALID') await this.tokens.markRefused('INSTAGRAM');
-        return { created: 0, skipped: 0, hasMore: false };
+      // 25.11.2026 — каждый подключённый аккаунт (второй — @grant_china_tj).
+      let created = 0;
+      for (const acc of instagramAccounts()) {
+        try {
+          const r = await this.ig.ensureSubscribed(acc.accountId);
+          if (r === 'subscribed') {
+            created++;
+            ctx.logger.log(`Instagram ${acc.accountId}: аккаунт подписан на уведомления`);
+          }
+        } catch (e) {
+          const err = e as MetaApiError;
+          ctx.logger.warn(`Instagram ${acc.accountId}: подписку на уведомления проверить не удалось: ${err.reason ?? ''} ${err.detail ?? ''}`.trim());
+          if (err.reason === 'TOKEN_INVALID') await this.tokens.markRefused('INSTAGRAM', acc.accountId);
+        }
       }
+      return { created, skipped: 0, hasMore: false };
     }
     const r = await this.tokens.refreshInstagramToken(ctx.now);
     if (r !== 'disabled' && r !== 'skipped') ctx.logger.log(`Ключ Instagram: ${r === 'refreshed' ? 'продлён' : 'продлить не удалось'}`);

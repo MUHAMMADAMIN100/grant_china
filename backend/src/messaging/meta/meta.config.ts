@@ -72,6 +72,53 @@ export function instagramConfig(): ChannelConfig {
   );
 }
 
+/**
+ * 25.11.2026 — несколько аккаунтов Instagram (второй — @grant_china_tj).
+ *
+ * Первый — как и раньше INSTAGRAM_ACCOUNT_ID / _ACCESS_TOKEN / _APP_SECRET.
+ * Следующие — INSTAGRAM_ACCOUNT_ID_2 … _5. Ключ и секрет у них необязательны:
+ * если аккаунт выдан тому же системному пользователю (то же бизнес-портфолио)
+ * и тому же приложению Meta, подходят ключ и секрет первого. Аккаунт из
+ * другого портфолио — свой INSTAGRAM_ACCESS_TOKEN_2; из другого приложения
+ * Meta — ещё и свой INSTAGRAM_APP_SECRET_2 (им подписаны его уведомления).
+ */
+export interface InstagramAccount {
+  accountId: string;
+  accessToken: string;
+  appSecret: string;
+  /** Первый аккаунт: его ключ продлевается (прежний вход), к нему относятся старые чаты без accountId. */
+  primary: boolean;
+}
+
+export const MAX_INSTAGRAM_ACCOUNTS = 5;
+
+export function instagramAccounts(): InstagramAccount[] {
+  const main = instagramConfig();
+  if (!main.enabled) return [];
+  const list: InstagramAccount[] = [{ accountId: main.accountId, accessToken: main.accessToken, appSecret: main.appSecret, primary: true }];
+  for (let i = 2; i <= MAX_INSTAGRAM_ACCOUNTS; i++) {
+    const id = env(`INSTAGRAM_ACCOUNT_ID_${i}`);
+    if (!id || list.some((a) => a.accountId === id)) continue;
+    list.push({
+      accountId: id,
+      accessToken: env(`INSTAGRAM_ACCESS_TOKEN_${i}`) || main.accessToken,
+      appSecret: env(`INSTAGRAM_APP_SECRET_${i}`) || main.appSecret,
+      primary: false,
+    });
+  }
+  return list;
+}
+
+/** Аккаунт чата. accountId пустой (чаты до 29.10.2026) — первый аккаунт; неизвестный — null. */
+export function instagramAccount(accountId?: string | null): InstagramAccount | null {
+  const all = instagramAccounts();
+  if (!accountId) return all[0] ?? null;
+  return all.find((a) => a.accountId === accountId) ?? null;
+}
+
+/** Секреты, которыми может быть подписано уведомление Instagram (без повторов). */
+export const instagramAppSecrets = (): string[] => [...new Set(instagramAccounts().map((a) => a.appSecret).filter(Boolean))];
+
 export function whatsappConfig(): ChannelConfig {
   return channelConfig(
     { account: 'WHATSAPP_PHONE_NUMBER_ID', token: 'WHATSAPP_ACCESS_TOKEN', secret: 'WHATSAPP_APP_SECRET' },

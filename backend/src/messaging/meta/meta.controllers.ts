@@ -30,7 +30,7 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../auth/roles.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import { fixFilenameEncoding } from '../../common/upload-utils';
-import { configFor, metaVerifyToken, OUTGOING_LIMITS, type MetaChannel } from './meta.config';
+import { configFor, instagramAppSecrets, metaVerifyToken, OUTGOING_LIMITS, type MetaChannel } from './meta.config';
 import { parseInstagramWebhook, parseWhatsAppWebhook } from './meta.parsers';
 import { MetaChatsService } from './meta-chats.service';
 
@@ -107,7 +107,9 @@ export class MetaWebhooksController {
 
   private async handle(channel: MetaChannel, req: RawBodyRequest<Request>, signature: string | undefined) {
     const cfg = configFor(channel);
-    if (!signedByMeta(req.rawBody, signature, cfg.appSecret)) throw new UnauthorizedException('Неверная подпись');
+    // 25.11.2026 — у аккаунтов Instagram из разных приложений Meta свои секреты.
+    const secrets = channel === 'INSTAGRAM' ? instagramAppSecrets() : [cfg.appSecret];
+    if (!secrets.some((sec) => signedByMeta(req.rawBody, signature, sec))) throw new UnauthorizedException('Неверная подпись');
     const body = req.body;
     const { events, skipped } = channel === 'INSTAGRAM' ? parseInstagramWebhook(body) : parseWhatsAppWebhook(body);
     if (!events.length && skipped) this.logger.warn(`${channel}: ничего не прочиталось, форма: ${JSON.stringify(shapeOf(body))}`);

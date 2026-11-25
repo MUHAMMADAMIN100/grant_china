@@ -82,6 +82,27 @@
 .dm-list-title span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dm-online { width: 9px; height: 9px; border-radius: 50%; background: #2ecc71; flex-shrink: 0; box-shadow: 0 0 0 2px #fff; }
 .dm-list-tools { display: flex; gap: 2px; }
+/* 25.11.2026 — вкладки аккаунтов Instagram (@grant_china_tj | @grantchina.academy). */
+/* Переносятся на вторую строку: скрытая горизонтальная прокрутка прятала третью вкладку. */
+.dm-accounts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px 24px; }
+.dm-account {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  border: 1px solid var(--dm-line); background: #fff; color: var(--dm-text); border-radius: 999px;
+  padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.dm-account:hover { background: var(--dm-hover); }
+.dm-account.active { background: var(--dm-text); border-color: var(--dm-text); color: #fff; }
+.dm-account .material-symbols-rounded { color: #d97706; }
+.dm-account-badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--dm-blue); color: #fff;
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+.dm-info-account { font-size: 13px; color: var(--dm-soft); margin: -2px 0 6px; }
+.dm-ai-accounts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.dm-ai-accounts-title { width: 100%; font-size: 13px; font-weight: 700; }
+.dm-ai-account { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+.dm-ai-account input { width: 16px; height: 16px; accent-color: #0f1419; }
 .dm-warn { margin: 0 16px 10px; padding: 8px 10px; border-radius: 10px; background: #fff4e5; color: #8a4b00; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
 .dm-warn > div { display: flex; gap: 6px; align-items: flex-start; }
 .dm-warn .material-symbols-rounded { flex-shrink: 0; margin-top: 1px; }
@@ -487,7 +508,7 @@ button.dm-reaction { cursor: pointer; }
 @container dm (max-width: 1200px) {
   .dm-layout.has-info { grid-template-columns: 84px minmax(0, 1fr) 320px; }
   .dm-layout.has-info .dm-list-head, .dm-layout.has-info .dm-search, .dm-layout.has-info .dm-tabs,
-  .dm-layout.has-info .dm-warn, .dm-layout.has-info .dm-item-body, .dm-layout.has-info .dm-more { display: none; }
+  .dm-layout.has-info .dm-warn, .dm-layout.has-info .dm-item-body, .dm-layout.has-info .dm-more, .dm-layout.has-info .dm-accounts { display: none; }
   .dm-layout.has-info .dm-items { padding-top: 12px; }
   .dm-layout.has-info .dm-item { justify-content: center; padding: 8px 0; position: relative; }
   .dm-layout.has-info .dm-unread-dot { position: absolute; top: 10px; right: 12px; box-shadow: 0 0 0 2px #fff; }
@@ -527,6 +548,7 @@ button.dm-reaction { cursor: pointer; }
   .dm-list-head { padding: 16px 10px 8px 16px; }
   .dm-list-title { font-size: 18px; }
   .dm-search { margin: 4px 12px 6px; }
+  .dm-accounts { padding: 0 12px 8px 16px; }
   .dm-tabs { padding: 2px 16px 0; gap: 14px; overflow-x: auto; }
   .dm-item { padding: 8px 14px 8px 16px; }
   .dm-thread-head { height: 60px; padding: 0 6px 0 4px; gap: 6px; }

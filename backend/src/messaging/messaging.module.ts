@@ -44,7 +44,7 @@ import { ChatAiController, QuickRepliesController, QuickRepliesService } from '.
   exports: [MessagingService, MetaTokensService, InstagramApi],
 })
 export class MessagingModule implements OnModuleInit {
-  constructor(private ig: InstagramApi) {}
+  constructor(private chats: MetaChatsService) {}
 
   onModuleInit() {
     const logger = new Logger('Meta');
@@ -53,11 +53,8 @@ export class MessagingModule implements OnModuleInit {
     // 09.11.2026, единый вход: ключ в Railway меняют — сервер перезапускается —
     // и сразу подписывает аккаунт на уведомления, не дожидаясь джобы (до 6 часов).
     // В фоне: старт сервера от ответа Meta не зависит.
-    if (instagramConfig().enabled && instagramLogin() === 'unified') {
-      this.ig
-        .ensureSubscribed()
-        .then((r) => logger.log(`Instagram: подписка на уведомления — ${r === 'already' ? 'уже есть' : 'оформлена'}`))
-        .catch((e) => logger.warn(`Instagram: подписать аккаунт на уведомления не удалось: ${e?.reason ?? ''} ${e?.detail ?? e?.message ?? ''}`.trim()));
-    }
+    // 25.11.2026 — каждый аккаунт Instagram подписывается на уведомления и
+    // сообщает своё @имя (нужно в уведомлениях и в источнике заявки).
+    if (instagramConfig().enabled) void this.chats.warmUp();
   }
 }

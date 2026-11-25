@@ -32,6 +32,8 @@ export default function AiSettingsModal({ onClose, onSaved }: { onClose: () => v
   const [s, setS] = useState<AiChatSettings | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [notes, setNotes] = useState('');
+  /** 25.11.2026 — отмеченные аккаунты Instagram, в которых отвечает ИИ. */
+  const [picked, setPicked] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chat, setChat] = useState<TestMsg[]>([]);
@@ -40,20 +42,30 @@ export default function AiSettingsModal({ onClose, onSaved }: { onClose: () => v
   const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Опоздавший ответ (повторная загрузка) не должен затирать то, что сотрудник уже поменял.
+    let cancelled = false;
     getAiSettings()
       .then((r) => {
+        if (cancelled) return;
         setS(r);
         setEnabled(r.enabled);
         setNotes(r.notes);
+        setPicked(r.accounts ?? (r.igAccounts ?? []).map((a) => a.id));
       })
-      .catch((e) => setLoadError(errText(e, 'Не удалось загрузить настройки')));
+      .catch((e) => !cancelled && setLoadError(errText(e, 'Не удалось загрузить настройки')));
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight });
   }, [chat, testing]);
 
-  const dirty = !!s && (enabled !== s.enabled || notes !== s.notes);
+  const allIds = (s?.igAccounts ?? []).map((a) => a.id);
+  const savedPicked = s ? (s.accounts ?? allIds) : [];
+  const samePick = picked.length === savedPicked.length && picked.every((id) => savedPicked.includes(id));
+  const dirty = !!s && (enabled !== s.enabled || notes !== s.notes || !samePick);
 
   const close = async () => {
     if (dirty && !(await confirm({ title: 'Закрыть без сохранения?', message: 'Изменения памятки и выключателя пропадут.', confirmText: 'Закрыть', danger: true }))) return;
@@ -69,10 +81,12 @@ export default function AiSettingsModal({ onClose, onSaved }: { onClose: () => v
   const save = async () => {
     setSaving(true);
     try {
-      const r = await saveAiSettings({ enabled, notes });
+      const accounts = allIds.length > 1 ? (allIds.every((id) => picked.includes(id)) ? null : picked) : undefined;
+      const r = await saveAiSettings({ enabled, notes, ...(accounts !== undefined ? { accounts } : {}) });
       setS(r);
       setEnabled(r.enabled);
       setNotes(r.notes);
+      setPicked(r.accounts ?? (r.igAccounts ?? []).map((a) => a.id));
       onSaved(r);
       toast(r.enabled ? 'Сохранено. ИИ отвечает клиентам в свободных чатах' : 'Сохранено. ИИ выключен', 'success');
     } catch (e) {
@@ -154,6 +168,25 @@ export default function AiSettingsModal({ onClose, onSaved }: { onClose: () => v
                   <small>{enabled ? 'В свободных чатах Instagram, круглосуточно.' : 'Включите, когда памятка заполнена и проверена.'}</small>
                 </span>
               </label>
+
+              {(s.igAccounts ?? []).length > 1 && (
+                <div className="dm-ai-accounts" data-testid="ai-accounts">
+                  <div className="dm-ai-accounts-title">Отвечает в аккаунтах</div>
+                  {(s.igAccounts ?? []).map((a) => (
+                    <label key={a.id} className="dm-ai-account">
+                      <input
+                        type="checkbox"
+                        checked={picked.includes(a.id)}
+                        disabled={saving}
+                        onChange={(e) => setPicked((prev) => (e.target.checked ? [...prev, a.id] : prev.filter((x) => x !== a.id)))}
+                        data-testid="ai-account"
+                        data-account={a.id}
+                      />
+                      <span>{a.username ? `@${a.username}` : `id ${a.id}`}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
 
               <div className="dm-ai-notes-head">
                 <label htmlFor="ai-notes">Памятка для ИИ</label>

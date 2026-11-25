@@ -5,6 +5,7 @@ import {
   assignConversation,
   attachmentUrl,
   conversationPictureUrl,
+  conversationsUnreadCount,
   getAiSettings,
   getConversation,
   linkConversation,
@@ -56,6 +57,15 @@ const PAGE_SIZE = 30;
 const MESSAGES_PAGE_SIZE = 100;
 /** Панель «Сведения» открыта или нет — помнит браузер сотрудника. */
 const INFO_KEY = 'gc.chat.info';
+/** 25.11.2026 — последняя открытая вкладка аккаунта Instagram. */
+const ACCOUNT_KEY = 'gc.chat.account';
+const readAccount = () => {
+  try {
+    return localStorage.getItem(ACCOUNT_KEY) || '';
+  } catch {
+    return '';
+  }
+};
 
 const errText = (e: any, fallback: string) => {
   const m = e?.response?.data?.message;
@@ -171,7 +181,7 @@ export default function Conversations() {
   const { toast } = useUI();
   const isAdmin = isPrivileged(me?.role);
 
-  const defaults = useMemo(() => ({ search: '', channel: '', mine: '', unread: '' }), []);
+  const defaults = useMemo(() => ({ search: '', channel: '', mine: '', unread: '', account: '' }), []);
   const [filters, , setFilters] = useUrlFilter(defaults);
   const search = filters.search;
   const channel = filters.channel;
@@ -179,6 +189,11 @@ export default function Conversations() {
   const unread = filters.unread === '1';
 
   const [channels, setChannels] = useState<ChannelOption[]>([]);
+  /** Каналы и аккаунты загружены — до этого список не грузим (иначе сначала мелькнут чужие вкладки). */
+  const [channelsReady, setChannelsReady] = useState(false);
+  /** 25.11.2026 — непрочитанные по вкладкам аккаунтов. */
+  const [unreadBy, setUnreadBy] = useState<{ byAccount: Record<string, number>; hasOther: boolean }>({ byAccount: {}, hasOther: false });
+  const [rememberedAccount, setRememberedAccount] = useState(readAccount);
   const [metaStatus, setMetaStatus] = useState<MetaChannelStatus[]>([]);
   // 09.11.2026 — плашка про клиентского Telegram-бота только при неполной настройке.
   const [telegramMisconfigured, setTelegramMisconfigured] = useState(false);
@@ -210,7 +225,7 @@ export default function Conversations() {
   const [infoOpen, setInfoOpen] = useState(readInfoOpen);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
-  const [aiSettings, setAiSettings] = useState<Pick<AiChatSettings, 'enabled' | 'available'> | null>(null);
+  const [aiSettings, setAiSettings] = useState<Pick<AiChatSettings, 'enabled' | 'available' | 'accounts'> | null>(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   /** Чаты, где ИИ сейчас готовит ответ («ИИ печатает…»). */
   const [aiTyping, setAiTyping] = useState<Set<string>>(() => new Set());
@@ -281,10 +296,40 @@ export default function Conversations() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  // 25.11.2026 — вкладки аккаунтов Instagram (решение владельца: видны чаты только выбранного).
+  const igAccounts = metaStatus.find((m) => m.value === 'INSTAGRAM')?.accounts ?? [];
+  const showAccountTabs = igAccounts.length > 1;
+  const accountTabs = showAccountTabs
+    ? [
+        ...igAccounts.map((a) => ({ key: a.id, label: a.username ? `@${a.username}` : `id ${a.id}`, refused: a.state === 'TOKEN_REFUSED' })),
+        ...(unreadBy.hasOther ? [{ key: 'other', label: 'Другие каналы', refused: false }] : []),
+      ]
+    : [];
+  const tabKeys = accountTabs.map((t) => t.key);
+  const effectiveAccount = !showAccountTabs
+    ? ''
+    : tabKeys.includes(filters.account)
+      ? filters.account
+      : tabKeys.includes(rememberedAccount)
+        ? rememberedAccount
+        : igAccounts[0].id;
+  const primaryAccountId = igAccounts.find((a) => a.primary)?.id ?? igAccounts[0]?.id ?? null;
+  /** Вкладка, к которой относится чат. */
+  const tabOf = (c: Conversation) => (c.channel === 'INSTAGRAM' ? c.accountId || primaryAccountId || '' : 'other');
+
   const loadList = useCallback(
     (opts?: { silent?: boolean }) => {
+      if (!channelsReady) return;
       if (!opts?.silent) setLoading(true);
-      listConversations({ search: search || undefined, channel: channel || undefined, mine, unread, page: 1, pageSize: PAGE_SIZE })
+      listConversations({
+        search: search || undefined,
+        channel: channel || undefined,
+        account: effectiveAccount || undefined,
+        mine,
+        unread,
+        page: 1,
+        pageSize: PAGE_SIZE,
+      })
         .then((res) => {
           setItems(res.items);
           setTotal(res.total);
@@ -295,8 +340,28 @@ export default function Conversations() {
         })
         .finally(() => setLoading(false));
     },
-    [search, channel, mine, unread],
+    [search, channel, mine, unread, effectiveAccount, channelsReady],
   );
+
+  const loadUnread = useCallback(() => {
+    conversationsUnreadCount()
+      .then((r) => setUnreadBy({ byAccount: r.byAccount ?? {}, hasOther: !!r.hasOther }))
+      .catch(() => {});
+  }, []);
+  useEffect(loadUnread, [loadUnread]);
+
+  /** Переключение вкладки аккаунта: как смена аккаунта в Instagram — открытый чат закрывается. */
+  const selectAccount = (key: string) => {
+    if (key === effectiveAccount) return;
+    try {
+      localStorage.setItem(ACCOUNT_KEY, key);
+    } catch {
+      /* не запоминаем — не страшно */
+    }
+    setRememberedAccount(key);
+    setActiveId(null);
+    setFilters({ account: key });
+  };
 
   useEffect(() => {
     const t = setTimeout(() => loadList(), 300);
@@ -310,13 +375,14 @@ export default function Conversations() {
         setTelegramMisconfigured(!!res.telegramMisconfigured);
         setMetaStatus(res.meta ?? []);
       })
-      .catch(() => setChannels([]));
+      .catch(() => setChannels([]))
+      .finally(() => setChannelsReady(true));
   }, []);
   useEffect(loadChannels, [loadChannels]);
 
   const loadAi = useCallback(() => {
     getAiSettings()
-      .then((r) => setAiSettings({ enabled: r.enabled, available: r.available }))
+      .then((r) => setAiSettings({ enabled: r.enabled, available: r.available, accounts: r.accounts ?? null }))
       .catch(() => setAiSettings(null));
   }, []);
   useEffect(loadAi, [loadAi]);
@@ -400,8 +466,12 @@ export default function Conversations() {
     }
     loadThread(activeId);
     markConversationRead(activeId)
-      .then((r) => setItems((prev) => prev.map((c) => (c.id === activeId ? { ...c, unreadCount: r.unreadCount ?? 0 } : c))))
+      .then((r) => {
+        setItems((prev) => prev.map((c) => (c.id === activeId ? { ...c, unreadCount: r.unreadCount ?? 0 } : c)));
+        loadUnread();
+      })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, loadThread]);
 
   useEffect(() => {
@@ -488,6 +558,7 @@ export default function Conversations() {
         () => {
           reloadTimerRef.current = null;
           loadList({ silent: true });
+          loadUnread();
         },
         conv ? 1200 : 400,
       );
@@ -550,8 +621,32 @@ export default function Conversations() {
   })();
 
   /** ИИ сейчас отвечает в этом чате сам. */
+  /** ИИ выключен для аккаунта этого чата (галочки в настройках ИИ). */
+  const aiAccountOff = (c: Conversation) => c.channel === 'INSTAGRAM' && !!aiSettings?.accounts && !aiSettings.accounts.includes(c.accountId || primaryAccountId || '');
   const aiActive = (c: Conversation) =>
-    c.channel === 'INSTAGRAM' && !!aiSettings?.enabled && !!aiSettings.available && !c.aiOff && !c.assignedToId && windowOpen(c.lastIncomingAt, now);
+    c.channel === 'INSTAGRAM' &&
+    !!aiSettings?.enabled &&
+    !!aiSettings.available &&
+    !aiAccountOff(c) &&
+    !c.aiOff &&
+    !c.assignedToId &&
+    windowOpen(c.lastIncomingAt, now);
+
+  // Чат открыли по ссылке (уведомление, воронка) из другого аккаунта — переключаем вкладку на его.
+  useEffect(() => {
+    if (!showAccountTabs || !active || active.id !== activeId) return;
+    const key = tabOf(active);
+    if (key && key !== effectiveAccount && tabKeys.includes(key)) {
+      try {
+        localStorage.setItem(ACCOUNT_KEY, key);
+      } catch {
+        /* не запоминаем */
+      }
+      setRememberedAccount(key);
+      setFilters({ account: key });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, showAccountTabs]);
 
   type ConvPair = { items: Conversation[]; total: number; active: Conversation | null };
   const commitPairFor = (conversationId: string) => (next: ConvPair) => {
@@ -886,7 +981,18 @@ export default function Conversations() {
   );
   const metaProblems = metaStatus.filter((m) => m.state === 'MISCONFIGURED' || m.state === 'TOKEN_REFUSED');
   const igStatus = metaStatus.find((m) => m.value === 'INSTAGRAM');
-  const accountTitle = igStatus?.account && igStatus.state === 'CONNECTED' ? igStatus.account.replace(/^@/, '') : 'Диалоги';
+  const accountTitle = showAccountTabs
+    ? effectiveAccount === 'other'
+      ? 'Другие каналы'
+      : (accountTabs.find((t) => t.key === effectiveAccount)?.label ?? '').replace(/^@/, '')
+    : igStatus?.account && igStatus.state === 'CONNECTED'
+      ? igStatus.account.replace(/^@/, '')
+      : 'Диалоги';
+  const accountName = (c: Conversation) => {
+    if (!showAccountTabs || c.channel !== 'INSTAGRAM') return null;
+    const a = igAccounts.find((x) => x.id === tabOf(c));
+    return a?.username ? `@${a.username}` : null;
+  };
 
   /** Все фото и видео загруженной переписки — для просмотра на весь экран. */
   const mediaItems: LightboxItem[] = useMemo(() => {
@@ -924,7 +1030,7 @@ export default function Conversations() {
           <div className="dm-list-head">
             <div className="dm-list-title" title={total ? `${total} диалогов` : undefined}>
               <span>{accountTitle}</span>
-              {igStatus?.state === 'CONNECTED' && <span className="dm-online" title="Instagram подключён" />}
+              {igStatus?.state === 'CONNECTED' && effectiveAccount !== 'other' && <span className="dm-online" title="Instagram подключён" />}
             </div>
             {isAdmin && (
               <div className="dm-list-tools">
@@ -944,6 +1050,35 @@ export default function Conversations() {
               </div>
             )}
           </div>
+
+          {showAccountTabs && (
+            <div className="dm-accounts" role="tablist" aria-label="Аккаунты" data-testid="account-tabs">
+              {accountTabs.map((t) => {
+                const n = unreadBy.byAccount[t.key] ?? 0;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={t.key === effectiveAccount}
+                    className={`dm-account${t.key === effectiveAccount ? ' active' : ''}`}
+                    onClick={() => selectAccount(t.key)}
+                    title={t.refused ? 'Ключ доступа этого аккаунта отказан — сообщите руководителю' : undefined}
+                    data-testid="account-tab"
+                    data-account={t.key}
+                  >
+                    {t.refused && <Icon name="warning" size={14} />}
+                    <span>{t.label}</span>
+                    {n > 0 && (
+                      <span className="dm-account-badge" data-testid="account-badge">
+                        {n > 99 ? '99+' : n}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {isAdmin && metaProblems.length > 0 && (
             <div className="dm-warn" data-testid="meta-status">
@@ -990,7 +1125,7 @@ export default function Conversations() {
             <button type="button" role="tab" aria-selected={unread} className={`dm-tab${unread ? ' active' : ''}`} onClick={() => setFilters({ unread: unread ? '' : '1' })} data-testid="tab-unread">
               Непрочитанные
             </button>
-            {channels.length > 1 && (
+            {channels.length > 1 && (!showAccountTabs || effectiveAccount === 'other') && (
               <select className="dm-channel-select" value={channel} onChange={(e) => setFilters({ channel: e.target.value })} aria-label="Канал" data-testid="channel-select">
                 <option value="">Все каналы</option>
                 {channels.map((c) => (
@@ -1178,7 +1313,8 @@ export default function Conversations() {
             users={users}
             channelLabel={channelLabel(active.channel)}
             canChangeChat={canChangeChat}
-            ai={aiSettings}
+            ai={aiSettings ? { enabled: aiSettings.enabled, available: aiSettings.available, accountOff: aiAccountOff(active) } : null}
+            accountLabel={accountName(active)}
             busy={busyHead}
             avatar={avatar(active, 88)}
             now={now}
@@ -1209,7 +1345,7 @@ export default function Conversations() {
             }}
           />
         )}
-        {aiModal && <AiSettingsModal key="ai" onClose={() => setAiModal(false)} onSaved={(s) => setAiSettings({ enabled: s.enabled, available: s.available })} />}
+        {aiModal && <AiSettingsModal key="ai" onClose={() => setAiModal(false)} onSaved={(s) => setAiSettings({ enabled: s.enabled, available: s.available, accounts: s.accounts ?? null })} />}
         {qrModal && <QuickRepliesModal key="qr" items={quickReplies} onClose={() => setQrModal(false)} onChanged={setQuickReplies} />}
         {lightbox && mediaItems.length > 0 && <ChatLightbox key="lb" items={mediaItems} startId={lightbox} onClose={() => setLightbox(null)} />}
       </AnimatePresence>

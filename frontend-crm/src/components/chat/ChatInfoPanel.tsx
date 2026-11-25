@@ -30,6 +30,7 @@ export default function ChatInfoPanel({
   channelLabel,
   canChangeChat,
   ai,
+  accountLabel,
   busy,
   avatar,
   now,
@@ -49,7 +50,9 @@ export default function ChatInfoPanel({
   users: User[];
   channelLabel: string;
   canChangeChat: boolean;
-  ai: { enabled: boolean; available: boolean } | null;
+  ai: { enabled: boolean; available: boolean; accountOff?: boolean } | null;
+  /** 25.11.2026 — в какой из наших аккаунтов Instagram написал клиент (когда их несколько). */
+  accountLabel?: string | null;
   busy: boolean;
   avatar: ReactNode;
   now: number;
@@ -98,6 +101,7 @@ export default function ChatInfoPanel({
     if (!ai) aiState = null;
     else if (!ai.available) aiState = { text: 'Не работает: на сервере не задан ключ Gemini.', tone: 'off' };
     else if (!ai.enabled) aiState = { text: 'Выключен для всех чатов. Включает руководство в настройках ИИ (кнопка ✦ над списком чатов).', tone: 'off' };
+    else if (ai.accountOff) aiState = { text: `Выключен для аккаунта ${accountLabel ?? 'этого чата'} — включает руководство в настройках ИИ.`, tone: 'off' };
     else if (c.aiOff)
       aiState = {
         text: c.aiOffReason === 'APP' ? 'Выключен в этом чате: сотрудник ответил клиенту из приложения Instagram.' : 'Выключен в этом чате.',
@@ -127,6 +131,11 @@ export default function ChatInfoPanel({
           <div className="dm-info-sub">
             {[c.username ? `@${c.username}` : null, channelLabel, c.phone ? `+${c.phone.replace(/^\+/, '')}` : null].filter(Boolean).join(' · ')}
           </div>
+          {accountLabel && (
+            <div className="dm-info-account" data-testid="info-account">
+              Написал(а) в {accountLabel}
+            </div>
+          )}
           {instagram && c.username && (
             <a className="dm-btn-soft" href={`https://www.instagram.com/${encodeURIComponent(c.username)}/`} target="_blank" rel="noreferrer">
               Открыть профиль в Instagram

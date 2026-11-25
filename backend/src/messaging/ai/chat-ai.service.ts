@@ -10,7 +10,7 @@ import { findRepeatOfId } from '../../common/application-repeat';
 import { callGemini, GeminiError, type GeminiTurn } from '../../ai/gemini';
 import { MetaChatsService } from '../meta/meta-chats.service';
 import { MetaMediaService } from '../meta/meta.media';
-import { instagramConfig, REPLY_WINDOW_MS } from '../meta/meta.config';
+import { instagramAccount, instagramAccounts, instagramConfig, REPLY_WINDOW_MS } from '../meta/meta.config';
 import {
   AI_REPLY_SCHEMA,
   buildSystemPrompt,
@@ -30,6 +30,11 @@ const SETTINGS_KEY = 'aiChat';
 export interface AiChatSettings {
   enabled: boolean;
   notes: string;
+  /**
+   * 25.11.2026 — в каких аккаунтах Instagram ИИ отвечает (id). null — во всех
+   * (так по умолчанию: памятка общая, решение владельца).
+   */
+  accounts: string[] | null;
   updatedAt: string | null;
   updatedByName: string | null;
 }
@@ -137,6 +142,7 @@ export class ChatAiService implements OnModuleInit {
     return {
       enabled: v.enabled === true,
       notes: typeof v.notes === 'string' ? v.notes : '',
+      accounts: Array.isArray(v.accounts) ? v.accounts.filter((x): x is string => typeof x === 'string') : null,
       updatedAt: typeof v.updatedAt === 'string' ? v.updatedAt : null,
       updatedByName: typeof v.updatedByName === 'string' ? v.updatedByName : null,
     };
@@ -145,18 +151,38 @@ export class ChatAiService implements OnModuleInit {
   /** Для CRM: настройки + есть ли ключ, подключён ли Instagram, какая модель. */
   async publicSettings() {
     const s = await this.settings();
-    return { ...s, available: this.isAvailable(), instagram: instagramConfig().enabled, model: this.model, template: NOTES_TEMPLATE };
+    return {
+      ...s,
+      available: this.isAvailable(),
+      instagram: instagramConfig().enabled,
+      model: this.model,
+      template: NOTES_TEMPLATE,
+      igAccounts: this.meta.instagramAccountsInfo(),
+    };
   }
 
-  async saveSettings(dto: { enabled?: boolean; notes?: string }, user: CurrentUser) {
+  async saveSettings(dto: { enabled?: boolean; notes?: string; accounts?: string[] | null }, user: CurrentUser) {
     const cur = await this.settings();
     if (dto.enabled === true && !this.isAvailable()) {
       throw new BadRequestException('ИИ нельзя включить: на сервере не задан ключ GEMINI_API_KEY.');
+    }
+    // Галочки — только среди подключённых аккаунтов; отмечены все — значит «во всех» (null).
+    let accounts = cur.accounts;
+    if (dto.accounts !== undefined) {
+      const known = instagramAccounts().map((a) => a.accountId);
+      if (dto.accounts === null) accounts = null;
+      else {
+        const picked = [...new Set(dto.accounts)];
+        const unknown = picked.filter((id) => !known.includes(id));
+        if (unknown.length) throw new BadRequestException(`Аккаунт Instagram ${unknown.join(', ')} не подключён к CRM`);
+        accounts = known.every((id) => picked.includes(id)) ? null : picked;
+      }
     }
     const actor = await this.prisma.user.findUnique({ where: { id: user.id }, select: { fullName: true } });
     const next: AiChatSettings = {
       enabled: dto.enabled ?? cur.enabled,
       notes: dto.notes !== undefined ? dto.notes.slice(0, 30000) : cur.notes,
+      accounts,
       updatedAt: new Date().toISOString(),
       updatedByName: actor?.fullName ?? null,
     };
@@ -168,6 +194,11 @@ export class ChatAiService implements OnModuleInit {
     const changes: string[] = [];
     if (next.enabled !== cur.enabled) changes.push(next.enabled ? 'ИИ-помощник включён' : 'ИИ-помощник выключен');
     if (next.notes !== cur.notes) changes.push('изменена памятка для ИИ');
+    if (JSON.stringify(next.accounts) !== JSON.stringify(cur.accounts)) {
+      const names = this.meta.instagramAccountsInfo();
+      const label = (id: string) => (names.find((a) => a.id === id)?.username ? `@${names.find((a) => a.id === id)!.username}` : id);
+      changes.push(next.accounts === null ? 'ИИ отвечает во всех аккаунтах' : `ИИ отвечает в аккаунтах: ${next.accounts.map(label).join(', ') || 'ни в одном'}`);
+    }
     if (changes.length) {
       this.activity
         .log({ actorId: user.id, actorRole: user.role, action: 'AI_CHAT_SETTINGS', details: `Instagram: ${changes.join(', ')}` })
@@ -223,6 +254,7 @@ export class ChatAiService implements OnModuleInit {
         id: true,
         channel: true,
         externalId: true,
+        accountId: true,
         title: true,
         username: true,
         assignedToId: true,
@@ -236,6 +268,9 @@ export class ChatAiService implements OnModuleInit {
       },
     });
     if (!conv || conv.channel !== 'INSTAGRAM' || conv.assignedToId || conv.aiOff) return;
+    // 25.11.2026 — аккаунт, в котором ИИ отвечать не должен (галочки в настройках).
+    const accId = conv.accountId ?? instagramAccount(null)?.accountId ?? null;
+    if (settings.accounts && (!accId || !settings.accounts.includes(accId))) return;
     if (!conv.lastIncomingAt || Date.now() - conv.lastIncomingAt.getTime() > REPLY_WINDOW_MS) return;
 
     const recent = await this.prisma.channelMessage.findMany({
@@ -271,7 +306,7 @@ export class ChatAiService implements OnModuleInit {
     this.mediaWaits.delete(conversationId);
 
     const turns = await this.buildTurns(chrono, firstUnanswered);
-    this.meta.sendTyping(conv.id, conv.externalId);
+    this.meta.sendTyping(conv.id, conv.externalId, conv.accountId);
     this.meta.emitTyping(conv.id, true);
     let result: AiReply;
     try {
@@ -279,6 +314,7 @@ export class ChatAiService implements OnModuleInit {
         notes: settings.notes,
         turns,
         client: { name: conv.title, username: conv.username },
+        accountId: conv.accountId,
         existingCard: conv.application
           ? { fullName: conv.application.fullName, phone: conv.application.phone }
           : conv.student
@@ -407,6 +443,7 @@ export class ChatAiService implements OnModuleInit {
     turns: GeminiTurn[];
     client: { name: string | null; username: string | null } | null;
     existingCard: { fullName: string; phone: string | null } | null;
+    accountId?: string | null;
   }): Promise<AiReply> {
     if (!this.apiKey) throw new ServiceUnavailableException('ИИ недоступен: на сервере не задан ключ GEMINI_API_KEY.');
     const cat = await this.catalog();
@@ -414,7 +451,11 @@ export class ChatAiService implements OnModuleInit {
       notes: input.notes,
       catalog: cat.text,
       catalogCount: cat.count,
-      account: null,
+      account: (() => {
+        const id = instagramAccount(input.accountId)?.accountId;
+        const name = this.meta.instagramAccountsInfo().find((a) => a.id === id)?.username;
+        return name ? `@${name}` : null;
+      })(),
       client: input.client,
       existingCard: input.existingCard,
       now: new Date(),
@@ -491,7 +532,7 @@ export class ChatAiService implements OnModuleInit {
     const direction: Direction = known ? (lead.direction as Direction) : 'BACHELOR';
     const repeatOfId = await findRepeatOfId(this.prisma, phoneNormalized, null);
     const created = await this.prisma.$transaction(async (tx) => {
-      const conv = await tx.conversation.findUnique({ where: { id: conversationId }, select: { applicationId: true, studentId: true, username: true, title: true } });
+      const conv = await tx.conversation.findUnique({ where: { id: conversationId }, select: { applicationId: true, studentId: true, username: true, title: true, accountId: true } });
       if (!conv || conv.applicationId || conv.studentId) return null;
       const comment = [
         lead.age ? `Возраст / класс: ${lead.age}` : null,
@@ -509,7 +550,7 @@ export class ChatAiService implements OnModuleInit {
           direction,
           comment,
           source: 'INSTAGRAM',
-          sourceDetail: conv.username ? `@${conv.username}` : null,
+          sourceDetail: this.meta.sourceDetailFor(conv.username, conv.accountId),
           repeatOfId,
         },
         select: { id: true, fullName: true, phone: true },
@@ -540,14 +581,14 @@ export class ChatAiService implements OnModuleInit {
   }
 
   /** ИИ просит менеджера: отметка в чате и уведомление всем (один раз, пока не снимут). */
-  private async handoff(conv: { id: string; title: string | null; username: string | null }, reason: string) {
+  private async handoff(conv: { id: string; title: string | null; username: string | null; accountId?: string | null }, reason: string) {
     const res = await this.prisma.conversation.updateMany({
       where: { id: conv.id, aiHandoffAt: null },
       data: { aiHandoffAt: new Date(), aiHandoffReason: reason.slice(0, 300) },
     });
     if (res.count) {
       const who = conv.title ?? (conv.username ? `@${conv.username}` : 'Клиент');
-      void this.meta.notifyAllStaff({ type: 'MESSAGE_INBOUND', title: 'Клиенту в Instagram нужен менеджер', message: `${who}: ${reason}`, payload: { conversationId: conv.id } });
+      void this.meta.notifyAllStaff({ type: 'MESSAGE_INBOUND', title: `Клиенту в ${this.meta.igLabel(conv.accountId)} нужен менеджер`, message: `${who}: ${reason}`, payload: { conversationId: conv.id } });
     }
     this.meta.touch(conv.id);
   }
